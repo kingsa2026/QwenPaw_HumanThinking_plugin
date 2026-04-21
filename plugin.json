@@ -1,0 +1,20 @@
+{
+  "id": "humanthinking-memory",
+  "name": "HumanThinking Memory Manager",
+  "version": "1.0.0-beta0.1",
+  "description": "解决 QwenPaw Agent 跨Session认知与情感连续性问题",
+  "author": "HumanThinking Team",
+  "entry_point": "plugin.py",
+  "dependencies": [],
+  "min_version": "1.1.2",
+  "meta": {
+    "memory_backend": "human_thinking",
+    "features": [
+      "跨Session记忆连续性",
+      "会话隔离（AgentID + UserID + SessionID）",
+      "AgentCachePool 多Session并发",
+      "情感连续性引擎",
+      "新Session自动继承历史记忆"
+    ]
+  }
+}
