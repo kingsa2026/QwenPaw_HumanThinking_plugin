@@ -142,7 +142,23 @@ class SleepManager:
             await self._log_dream_action(agent_id, "ENTER_SLEEP", f"进入睡眠模式，空闲时间 {current_time - state.last_active_time:.0f} 秒")
     
     async def _maybe_consolidate(self, agent_id: str, state: AgentSleepState, current_time: float):
-        """检查是否需要整理记忆"""
+        """检查是否需要整理记忆和应用遗忘曲线"""
+        # 1. 应用遗忘曲线（每次睡眠都执行）
+        db = None
+        try:
+            from .database import HumanThinkingDB
+            db = HumanThinkingDB(agent_id)
+            await db.initialize()
+            
+            forgetting_result = await db.apply_forgetting_curve(agent_id)
+            logger.info(f"Agent {agent_id} forgetting curve applied: {forgetting_result}")
+        except Exception as e:
+            logger.error(f"Error applying forgetting curve: {e}")
+        finally:
+            if db:
+                await db.close()
+        
+        # 2. 检查是否需要整理记忆（按间隔）
         if not self.config.auto_consolidate:
             return
         
