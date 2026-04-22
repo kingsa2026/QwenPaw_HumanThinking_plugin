@@ -155,6 +155,42 @@ class HumanThinkingDB:
                 tags TEXT DEFAULT '[]'
             );
             
+            -- 归档记忆表（冷存储）
+            CREATE TABLE IF NOT EXISTS qwenpaw_memory_archive (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                
+                -- 核心隔离字段（原始数据保留）
+                agent_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                user_id TEXT,
+                target_id TEXT,
+                role TEXT DEFAULT 'assistant',
+                
+                -- 内容字段
+                content TEXT NOT NULL,
+                content_summary TEXT,
+                
+                -- 原始元数据
+                memory_tier TEXT,
+                memory_category TEXT,
+                memory_type TEXT,
+                importance INTEGER DEFAULT 3,
+                access_count INTEGER DEFAULT 0,
+                
+                -- 归档信息
+                archived_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                original_created_at DATETIME,
+                last_accessed_at DATETIME,
+                archive_reason TEXT DEFAULT 'frozen_expired',
+                recall_count INTEGER DEFAULT 0,
+                last_recalled_at DATETIME,
+                
+                -- 索引（加速检索）
+                INDEX idx_archive_agent (agent_id),
+                INDEX idx_archive_created (original_created_at),
+                INDEX idx_archive_recalled (last_recalled_at)
+            );
+            
             -- 3. 记忆关联表
             CREATE TABLE IF NOT EXISTS qwenpaw_memory_relations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1012,7 +1048,54 @@ class HumanThinkingDB:
         self.conn.commit()
     
     async def apply_forgetting_curve(self, agent_id: str) -> int:
-        """应用遗忘曲线，返回归档的记忆数量"""
+        """应用遗忘曲线，处理完整生命周期
+        
+        流程：
+        1. 冷藏：7天无访问 → 标记为冷藏
+        2. 归档：冷藏30天无访问 → 移动到归档表
+        3. 删除：归档90天无访问 → 彻底删除
+        4. 衰减：活跃记忆 → 正常衰减
+        """
+        import datetime
+        frozen_count = 0
+        archived_count = 0
+        deleted_count = 0
+        
+        # 1. 冷藏：7天无访问的记忆
+        self.cursor.execute("""
+            UPDATE qwenpaw_memory 
+            SET memory_tier = 'frozen',
+                access_frozen = 1,
+                frozen_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE agent_id = ? 
+            AND deleted_at IS NULL 
+            AND access_frozen = 0
+            AND memory_tier NOT IN ('frozen', 'archived')
+            AND (
+                last_accessed_at IS NULL 
+                OR last_accessed_at < datetime('now', '-7 days')
+            )
+        """, (agent_id,))
+        frozen_count = self.cursor.rowcount
+        
+        # 2. 归档：冷藏30天无访问的记忆
+        self.cursor.execute("""
+            SELECT id FROM qwenpaw_memory
+            WHERE agent_id = ?
+            AND memory_tier = 'frozen'
+            AND frozen_at < datetime('now', '-30 days')
+        """, (agent_id,))
+        to_archive = [row[0] for row in self.cursor.fetchall()]
+        
+        for memory_id in to_archive:
+            await self.archive_to_table(memory_id, 'frozen_expired')
+            archived_count += 1
+        
+        # 3. 删除：归档90天无访问的记忆
+        deleted_count = await self.delete_old_archives(agent_id, days=90)
+        
+        # 4. 衰减：活跃记忆正常衰减
         self.cursor.execute("""
             UPDATE qwenpaw_memory 
             SET decay_score = decay_score * 0.95,
@@ -1021,11 +1104,14 @@ class HumanThinkingDB:
             WHERE agent_id = ? 
             AND deleted_at IS NULL 
             AND access_frozen = 0
-            AND memory_tier NOT IN ('archived')
-            AND access_count < 3
+            AND memory_tier = 'active'
+            AND access_count < 10
         """, (agent_id,))
+        
         self.conn.commit()
-        return self.cursor.rowcount
+        
+        logger.info(f"Forgetting curve: frozen={frozen_count}, archived={archived_count}, deleted={deleted_count}")
+        return frozen_count + archived_count
     
     async def get_low_value_memories(self, agent_id: str, threshold: float = 0.3, limit: int = 100) -> List[Dict]:
         """获取低价值记忆（用于归档）"""
@@ -1094,3 +1180,120 @@ class HumanThinkingDB:
             self.cursor.execute("DELETE FROM memory_working_cache WHERE expires_at < CURRENT_TIMESTAMP")
         self.conn.commit()
         return self.cursor.rowcount
+    
+    # ========== 归档相关方法 ==========
+    
+    async def archive_to_table(self, memory_id: int, reason: str = 'frozen_expired') -> bool:
+        """将记忆归档到归档表"""
+        # 获取原始记忆
+        self.cursor.execute("SELECT * FROM qwenpaw_memory WHERE id = ?", (memory_id,))
+        row = self.cursor.fetchone()
+        if not row:
+            return False
+        
+        memory = dict(row)
+        
+        # 插入归档表
+        self.cursor.execute("""
+            INSERT INTO qwenpaw_memory_archive (
+                agent_id, session_id, user_id, target_id, role,
+                content, content_summary,
+                memory_tier, memory_category, memory_type, importance, access_count,
+                original_created_at, last_accessed_at, archive_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            memory.get('agent_id'), memory.get('session_id'), memory.get('user_id'),
+            memory.get('target_id'), memory.get('role'),
+            memory.get('content'), memory.get('content_summary'),
+            memory.get('memory_tier'), memory.get('memory_category'), memory.get('memory_type'),
+            memory.get('importance'), memory.get('access_count'),
+            memory.get('created_at'), memory.get('last_accessed_at'), reason
+        ))
+        
+        # 删除主表记录
+        self.cursor.execute("DELETE FROM qwenpaw_memory WHERE id = ?", (memory_id,))
+        self.conn.commit()
+        return True
+    
+    async def recall_from_archive(self, archive_id: int) -> bool:
+        """从归档表恢复记忆到主表"""
+        self.cursor.execute("SELECT * FROM qwenpaw_memory_archive WHERE id = ?", (archive_id,))
+        row = self.cursor.fetchone()
+        if not row:
+            return False
+        
+        archive = dict(row)
+        
+        # 插入主表
+        self.cursor.execute("""
+            INSERT INTO qwenpaw_memory (
+                agent_id, session_id, user_id, target_id, role,
+                content, content_summary,
+                memory_tier, memory_category, memory_type, importance, access_count,
+                created_at, last_accessed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            archive.get('agent_id'), archive.get('session_id'), archive.get('user_id'),
+            archive.get('target_id'), archive.get('role'),
+            archive.get('content'), archive.get('content_summary'),
+            'active', archive.get('memory_category'), archive.get('memory_type'),
+            archive.get('importance'), 0,  # 重置访问计数
+            archive.get('original_created_at'), datetime.now()
+        ))
+        
+        # 更新归档表的召回次数
+        self.cursor.execute("""
+            UPDATE qwenpaw_memory_archive 
+            SET recall_count = recall_count + 1, last_recalled_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (archive_id,))
+        
+        self.conn.commit()
+        return True
+    
+    async def get_archive_memories(self, agent_id: str, limit: int = 100) -> List[Dict]:
+        """获取归档记忆列表"""
+        self.cursor.execute("""
+            SELECT * FROM qwenpaw_memory_archive
+            WHERE agent_id = ?
+            ORDER BY archived_at DESC
+            LIMIT ?
+        """, (agent_id, limit))
+        return [dict(row) for row in self.cursor.fetchall()]
+    
+    async def delete_old_archives(self, agent_id: str = None, days: int = 90) -> int:
+        """删除超期归档（默认90天）"""
+        if agent_id:
+            self.cursor.execute("""
+                DELETE FROM qwenpaw_memory_archive 
+                WHERE agent_id = ? AND archived_at < datetime('now', '-' || ? || ' days')
+            """, (agent_id, days))
+        else:
+            self.cursor.execute("""
+                DELETE FROM qwenpaw_memory_archive 
+                WHERE archived_at < datetime('now', '-' || ? || ' days')
+            """, (days,))
+        self.conn.commit()
+        return self.cursor.rowcount
+    
+    async def get_archive_stats(self, agent_id: str = None) -> Dict:
+        """获取归档统计"""
+        if agent_id:
+            self.cursor.execute("""
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN recall_count > 0 THEN 1 ELSE 0 END) as recalled,
+                    SUM(CASE WHEN archived_at > datetime('now', '-30 days') THEN 1 ELSE 0 END) as last_30_days
+                FROM qwenpaw_memory_archive
+                WHERE agent_id = ?
+            """, (agent_id,))
+        else:
+            self.cursor.execute("""
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN recall_count > 0 THEN 1 ELSE 0 END) as recalled,
+                    SUM(CASE WHEN archived_at > datetime('now', '-30 days') THEN 1 ELSE 0 END) as last_30_days
+                FROM qwenpaw_memory_archive
+            """)
+        row = self.cursor.fetchone()
+        return dict(row) if row else {}
