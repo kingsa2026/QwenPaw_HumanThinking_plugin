@@ -1,9 +1,8 @@
 /** HumanThinking Memory Manager - Frontend Plugin Entry. */
 
 const { React, antd } = (window as any).QwenPaw.host;
-const { Typography, Card, Table, Statistic, Row, Col, Tag, Button, Space, Descriptions, Switch, Divider, Alert, message, Modal, InputNumber, Select, DatePicker, Progress } = antd;
+const { Typography, Card, Table, Statistic, Row, Col, Tag, Button, Space, Descriptions, Switch, Divider, Alert, message, Modal, InputNumber, Select, Progress } = antd;
 const { Title, Paragraph, Text } = Typography;
-const dayjs = require('dayjs');
 
 const CONFIG_KEY = 'humanthinking_config';
 const BACKUP_CONFIG_KEY = 'humanthinking_backup_config';
