@@ -1,4 +1,4 @@
-# HumanThinking Memory Manager
+# HumanThinking Memory Manager(AI电商团队必备)
 
 > QwenPaw Agent 跨Session认知与情感连续性记忆管理器
 
@@ -37,26 +37,14 @@ HumanThinking 的记忆检索机制（基于实际代码实现）：
                  │
                  ├── 2. 检索流程 (_load_context_from_cache)
                  │      │
-                 │      ├── 【短期记忆】写缓存搜索
-                 │      │      ├── SessionBuffer - 当前session消息缓冲
-                 │      │      └── _write_queue - 待持久化数据
-                 │      │      组件: AgentCachePool.search()
+                 │      ├── 从当前对话提取查询关键词
                  │      │
-                 │      ├── 【工作记忆】读缓存搜索
-                 │      │      ├── ReadCache - 已持久化的快速检索缓存
-                 │      │      ├── LRU淘汰策略
-                 │      │      └── 会话冷却(600秒)后清理
-                 │      │      组件: ReadCache.search()
-                 │      │
-                 │      ├── 缓存未命中 → 【长期记忆】数据库搜索
-                 │      │      ├── HumanThinkingDB.search_memories()
-                 │      │      ├── LIKE子字符串匹配
-                 │      │      ├── 复合索引加速(idx_agent_session_target)
-                 │      │      └── 回填读缓存
-                 │      │
-                 │      └── 【关联记忆】跨Session/跨渠道检索
-                 │             ├── cross_session=True
-                 │             └── TF-IDF语义搜索
+                 │      └── 直接查询数据库
+                 │             ├── HumanThinkingDB.search_memories()
+                 │             ├── 关键词 LIKE 匹配
+                 │             ├── 排除最近3轮（防止与原生压缩重复）
+                 │             ├── 重要性 + 就近时间排序
+                 │             └── 最多返回5条
                  │
                  └── 3. 上下文构建
                        ├── 最多5条(max_results=5)
@@ -64,40 +52,30 @@ HumanThinking 的记忆检索机制（基于实际代码实现）：
                        └── 包含渠道来源标识
                  
                  ↓
-        LLM基于完整上下文思考和回复
+        原生压缩机制处理当前会话消息
+                 ↓
+        返回完整上下文给 LLM
 ```
 
-**三种记忆检索路径**：
+**简化后的检索流程**：
 
-| 记忆类型     | 存储位置                           | 检索组件                                | 特点                           |
-| -------- | ------------------------------ | ----------------------------------- | ---------------------------- |
-| **短期记忆** | 内存(SessionBuffer + WriteQueue) | `AgentCachePool.search()`           | 当前session未持久化消息，最快           |
-| **工作记忆** | 内存(ReadCache)                  | `ReadCache.search()`                | 已持久化，LRU淘汰，会话冷却600s          |
-| **长期记忆** | SQLite数据库                      | `HumanThinkingDB.search_memories()` | **关键词+就近时间排序**，复合索引，跨Session |
+| 步骤 | 操作     | 说明                                |
+| -- | ------ | --------------------------------- |
+| 1  | 提取查询词  | 从当前对话内容提取                         |
+| 2  | 直接查 DB | 使用 `exclude_recent_rounds=3` 防止重复 |
+| 3  | 构建上下文  | 最多5条，每条150字符                      |
 
-**关联记忆检索**（基于实际代码）：
+**注意**：不使用读缓存，直接查 DB 更简洁可靠。
 
-```sql
--- database.py search_memories()
-ORDER BY importance DESC, created_at DESC
-```
-
-| 检索策略     | 实现                      |
-| -------- | ----------------------- |
-| 关键词匹配    | LIKE 子字符串匹配             |
-| 重要性排序    | importance DESC         |
-| 就近时间     | created\_at DESC（最新的在前） |
-| 跨Session | cross\_session=True     |
-| 语义搜索     | TF-IDF（可选）              |
+***
 
 ### ✅ 技术特性
 
-- TF-IDF语义搜索 — 优于简单关键词匹配
-- 上下文压缩机制 — 对齐 ReMeLight 标准（96K触发/12.8K保留）
+- 直接查 DB 检索 — 简洁可靠，无缓存同步问题
+- 原生压缩机制 — 使用 QwenPaw 自带的上下文压缩
 - 多渠道支持 — Web/Discord/飞书/微信等
 - Agent隔离 — 每个Agent独立缓存和数据库
-- 智能索引优化 — 复合索引加速查询(agent\_id+session\_id+target\_id等)
-- 读写分离缓存 — 写缓存(session缓冲) + 读缓存(历史检索)
+- 智能索引优化 — 复合索引加速查询
 
 ***
 
@@ -140,6 +118,7 @@ qwenpaw app
 注意：不同的Agent需要左上角切换后分别开启
 
 ### 第八步：重要！把Agent.md中的内容复制进你的agent工作目录中的agent.md顶部
+
 ***
 
 ## 核心功能
@@ -150,27 +129,12 @@ qwenpaw app
 - **Idle检测**：对话结束后180秒自动刷新到数据库
 - **完整性保证**：确保一轮对话完整后才写入
 
-```python
-await manager.store_memory(
-    content="用户提到他喜欢摇滚乐",
-    role="user",
-    importance=3,
-    memory_type="preference"
-)
-```
+### 2. 上下文加载
 
-### 2. 上下文加载（读缓存）
-
-- **缓存优先**：先在读缓存中搜索，命中则直接返回
-- **缓存回填**：未命中则查询数据库 → 写入缓存 → 形成上下文
-- **向量检索**：使用TF-IDF语义搜索，非简单LIKE匹配
+- **直接查DB**：每次从数据库检索相关历史记忆
+- **排除最近3轮**：防止与原生压缩机制重复
+- **重要性+时间排序**：优先返回重要的近期记忆
 - **按序加载**：每5轮对话刷新一次上下文
-
-```python
-# 自动从读缓存加载历史相关记忆
-context = await in_memory.get_memory()
-# 返回: 当前对话 + 相关历史记忆
-```
 
 ### 3. 跨Session记忆
 
@@ -192,31 +156,22 @@ context = await in_memory.get_memory()
 
 ## 搜索机制
 
-### TF-IDF 语义搜索
-
-优于简单的LIKE子字符串匹配，支持语义相关：
-
-| 对比     | LIKE  | TF-IDF          |
-| ------ | ----- | --------------- |
-| "编程语言" | 1条    | 3条(含JavaScript) |
-| "机器学习" | 依赖精确词 | 返回语义相关          |
-
-### 缓存策略
+### 关键词 + 重要性 + 就近时间
 
 ```
-搜索流程：
-1. 缓存搜索(当前session)
-   ↓ 无结果
-2. 缓存搜索(跨session)
-   ↓ 无结果  
-3. 数据库搜索
-   ↓ 有结果
-4. 回填读缓存
+ORDER BY importance DESC, created_at DESC
 ```
+
+| 策略       | 说明                      |
+| -------- | ----------------------- |
+| 关键词匹配    | LIKE 子字符串匹配             |
+| 重要性排序    | importance DESC         |
+| 就近时间     | created\_at DESC（最新的在前） |
+| 跨Session | cross\_session=True     |
 
 ***
 
-## 上下文压缩（对齐ReMeLight）
+## 上下文压缩
 
 触发条件：总token > 96K (128K × 75%)
 
@@ -237,7 +192,7 @@ context = await in_memory.get_memory()
 ### 文件位置
 
 ```
-~/.qwenpaw/workspaces/{agent_id}/memory/human_thinking.db
+~/.qwenpaw/workspaces/{agent_id}/memory/human_thinking_{agent_id}.db
 ```
 
 ### 表结构
@@ -311,11 +266,11 @@ B：检查session是否Idle（180秒无活动），或手动调用 `await cache_
 
 ## 版本
 
-**v1.0.0** - 初始版本
+**v1.1.0** - 架构版本
 
-- 读写分离缓存
-- TF-IDF语义搜索
-- 上下文压缩
+- 直接查 DB 检索 — 简洁可靠
+- 原生压缩机制 — 复用 QwenPaw
+- 排除最近3轮 — 防止重复
 - 跨Session记忆
 - 情感连续性
 - 多渠道支持

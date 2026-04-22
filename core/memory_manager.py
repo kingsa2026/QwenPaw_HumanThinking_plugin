@@ -53,6 +53,11 @@ class ContextLoadingInMemory(InMemoryMemory):
     MAX_RESULTS_FINAL = 5      # 最终注入上下文的最大记忆数
     MAX_MEMORY_CHARS = 150     # 单条记忆最大字符数（对齐 ReMeLight 摘要压缩机制）
     
+    # 排除最近N轮对话的记忆，防止与QwenPaw压缩摘要重复
+    # QwenPaw压缩后保留最近3轮，所以排除最近3轮
+    EXCLUDE_RECENT_ROUNDS = 3
+    ROUND_DURATION_SECONDS = 300  # 每轮约5分钟
+    
     def __init__(self):
         super().__init__()
         self._memory_manager_ref: Optional["HumanThinkingMemoryManager"] = None
@@ -84,17 +89,17 @@ class ContextLoadingInMemory(InMemoryMemory):
         return await super().get_memory(prepend_summary=prepend_summary, **kwargs)
     
     async def _load_context_from_cache(self):
-        """从读缓存和向量检索加载相关历史记忆到长期记忆
+        """从数据库加载相关历史记忆到长期记忆
         
         流程：
         1. 从当前对话提取查询词
-        2. 先在读缓存中搜索
-        3. 缓存未命中 → 查询数据库（最多 5 条，对齐 ReMeLight）→ 回填读缓存
-        4. 缓存命中 → DB 补充 3 条
-        5. 合并结果，构建长期记忆（包含渠道来源标识）
+        2. 直接查询数据库（排除最近N轮，防止与原生压缩重复）
+        3. 构建长期记忆（包含渠道来源标识）
+        
+        注：不使用读缓存，直接查DB更简洁
         """
         manager = self._memory_manager_ref
-        if not manager or not manager.cache_pool or not manager.db:
+        if not manager or not manager.db:
             return
         
         # 1. 从当前对话内容提取查询词
@@ -102,87 +107,44 @@ class ContextLoadingInMemory(InMemoryMemory):
         if not query:
             return
         
-        # 2. 先在读缓存中检索
-        cached = await manager.cache_pool.search(query)
+        # 2. 直接查询数据库（排除最近N轮，防止与原生压缩重复）
+        db_results = await manager.db.search_memories(
+            query=query,
+            agent_id=manager.agent_id,
+            session_id=None,
+            user_id=manager.user_id,
+            role=None,
+            cross_session=True,
+            max_results=self.MAX_RESULTS_FINAL,  # 5
+            exclude_recent_rounds=self.EXCLUDE_RECENT_ROUNDS,
+            round_duration_seconds=self.ROUND_DURATION_SECONDS
+        )
         
-        # 3. 缓存未命中 → 查询数据库 → 回填读缓存
-        if not cached:
-            logger.debug(f"Cache miss for query: '{query[:50]}...', querying DB...")
-            
-            db_results = await manager.db.search_memories(
-                query=query,
-                agent_id=manager.agent_id,
-                session_id=None,
-                user_id=manager.user_id,
-                role=None,
-                cross_session=True,
-                max_results=self.MAX_RESULTS_DB_MISS  # 5
-            )
-            
-            if db_results:
-                # 回填读缓存
-                from .session_buffer import MemoryItem
-                cache_items = [
-                    MemoryItem(
-                        content=m.content,
-                        agent_id=manager.agent_id,
-                        session_id=m.session_id,
-                        user_id=m.user_id,
-                        role=m.role,
-                        importance=m.importance,
-                        memory_type=m.memory_type,
-                        metadata=m.metadata
-                    )
-                    for m in db_results
-                ]
-                await manager.cache_pool._read_cache.add_batch(cache_items)
-                logger.debug(f"DB query returned {len(db_results)} results, cached them")
-            
-            relevant_memories = db_results
-        else:
-            # 缓存命中 → DB 补充少量结果
-            db_results = await manager.db.search_memories(
-                query=query,
-                agent_id=manager.agent_id,
-                session_id=None,
-                user_id=manager.user_id,
-                role=None,
-                cross_session=True,
-                max_results=self.MAX_RESULTS_DB_HIT  # 3
-            )
-            relevant_memories = list(cached) + list(db_results)
-        
-        if not relevant_memories:
+        if not db_results:
             return
         
-        # 4. 去重 + 按相关性排序
-        seen = set()
-        unique_memories = []
-        for m in relevant_memories:
-            if m.content not in seen:
-                seen.add(m.content)
-                unique_memories.append(m)
+        # 3. 构建长期记忆
+        self._build_long_term_memory(db_results)
+    
+    def _build_long_term_memory(self, memories: list):
+        """构建长期记忆字符串"""
+        # 按重要性排序
+        memories.sort(key=lambda m: m.importance, reverse=True)
+        top_memories = memories[:self.MAX_RESULTS_FINAL]
         
-        # 按重要性排序，取最相关的（对齐 ReMeLight 的 max_results=5）
-        unique_memories.sort(key=lambda m: m.importance, reverse=True)
-        top_memories = unique_memories[:self.MAX_RESULTS_FINAL]
-        
-        # 5. 构建长期记忆字符串（包含渠道来源标识）
+        # 构建格式化的记忆字符串
         memory_parts = []
         for m in top_memories:
             role_prefix = "用户" if m.role == "user" else "助手"
             channel_name = self._extract_channel_name(m.session_id)
             channel_tag = f" ({channel_name})" if channel_name else ""
             
-            # 格式: [角色 (渠道)]: 内容（截断到 MAX_MEMORY_CHARS 字符）
+            # 格式: [角色 (渠道)]: 内容
             memory_parts.append(f"[{role_prefix}{channel_tag}]: {m.content[:self.MAX_MEMORY_CHARS]}")
         
         if memory_parts:
             self._long_term_memory = "## 相关历史记忆\n\n" + "\n\n".join(memory_parts)
-            logger.debug(
-                f"Loaded {len(memory_parts)} relevant memories into context "
-                f"(query: '{query[:50]}...')"
-            )
+            logger.debug(f"Loaded {len(memory_parts)} relevant memories into context")
     
     def _extract_channel_name(self, session_id: str) -> str:
         """从 session_id 中提取渠道名称

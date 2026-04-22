@@ -318,7 +318,9 @@ class HumanThinkingDB:
         role: Optional[str] = None,
         cross_session: bool = True,
         max_results: int = 5,
-        min_score: float = 0.1
+        min_score: float = 0.1,
+        exclude_recent_rounds: int = 0,
+        round_duration_seconds: int = 300
     ) -> List[MemoryRecord]:
         """
         搜索记忆（会话隔离 + 对话对象隔离）
@@ -333,6 +335,8 @@ class HumanThinkingDB:
             cross_session: 是否跨Session
             max_results: 最大结果数
             min_score: 最小分数
+            exclude_recent_rounds: 排除最近N轮对话的记忆（防止与压缩摘要重复）
+            round_duration_seconds: 每次对话轮次的时长（秒），默认300秒
         
         Returns:
             MemoryRecord 列表
@@ -367,6 +371,11 @@ class HumanThinkingDB:
         # 内容搜索（LIKE）
         sql += " AND content LIKE ?"
         params.append(f"%{query}%")
+        
+        # 排除最近N轮对话的记忆（防止与QwenPaw压缩摘要重复）
+        if exclude_recent_rounds > 0:
+            exclude_seconds = exclude_recent_rounds * round_duration_seconds
+            sql += f" AND created_at < datetime('now', '-{exclude_seconds} seconds')"
         
         # 排序
         sql += " ORDER BY importance DESC, created_at DESC"

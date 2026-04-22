@@ -437,13 +437,14 @@ class AgentCachePool:
     
     async def search(self, query: str, session_id: Optional[str] = None) -> List[MemoryItem]:
         """
-        搜索记忆 - 读写分离
+        搜索记忆 - 简化版
         
         优先级：
-        1. 先搜索当前 session
-        2. 如果当前 session 无结果，跨 session 搜索
-        3. 写缓存（当前轮次新增，尚未持久化）
-        4. 读缓存（最近已持久化，快速检索）
+        1. 写缓存（SessionBuffer）- 当前 session 未持久化
+        2. 写队列（WriteQueue）- 待持久化
+        3. DB - 已持久化历史
+        
+        注：不使用读缓存，直接查 DB 更简洁
         """
         results = []
         seen_ids = set()
@@ -467,40 +468,46 @@ class AgentCachePool:
                     results.append(memory)
                     seen_ids.add(memory.temp_id)
         
-        # 3. 搜索当前 session 的读缓存
-        if session_id:
-            read_results = await self._read_cache.search(query, session_id)
-            for memory in read_results:
-                if memory.temp_id not in seen_ids:
-                    results.append(memory)
-                    seen_ids.add(memory.temp_id)
-        
-        # 4. 如果当前 session 无结果，跨 session 搜索
-        if not results and session_id:
-            # 跨 session 搜索写缓存
-            for sid, session in self._sessions.items():
-                if sid == session_id:
-                    continue
-                for memory in session.get_memories():
-                    if memory.temp_id not in seen_ids and query.lower() in memory.content.lower():
-                        results.append(memory)
-                        seen_ids.add(memory.temp_id)
-            
-            # 跨 session 搜索写队列
-            for memory in self._write_queue._queue:
-                if memory.temp_id not in seen_ids and memory.session_id != session_id:
-                    if query.lower() in memory.content.lower():
-                        results.append(memory)
-                        seen_ids.add(memory.temp_id)
-            
-            # 跨 session 搜索读缓存
-            cross_session_read = await self._read_cache.search(query, None)
-            for memory in cross_session_read:
-                if memory.temp_id not in seen_ids:
-                    results.append(memory)
-                    seen_ids.add(memory.temp_id)
-        
         return results
+    
+    async def search_db(self, query: str, session_id: Optional[str] = None, max_results: int = 5) -> List[MemoryItem]:
+        """
+        从数据库搜索记忆
+        
+        Args:
+            query: 搜索关键词
+            session_id: session ID（可选）
+            max_results: 最大结果数
+        
+        Returns:
+            MemoryItem 列表
+        """
+        if not self.db:
+            return []
+        
+        # 调用数据库搜索
+        records = await self.db.search_memories(
+            query=query,
+            agent_id=self.agent_id,
+            session_id=session_id,
+            cross_session=True,
+            max_results=max_results
+        )
+        
+        # 转换为 MemoryItem
+        return [
+            MemoryItem(
+                content=r.content,
+                agent_id=r.agent_id,
+                session_id=r.session_id,
+                user_id=r.user_id,
+                role=r.role,
+                importance=r.importance,
+                memory_type=r.memory_type,
+                metadata=r.metadata or {}
+            )
+            for r in records
+        ]
     
     # ====== Session 管理 ======
     
