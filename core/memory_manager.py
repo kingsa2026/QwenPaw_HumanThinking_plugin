@@ -421,8 +421,15 @@ class HumanThinkingMemoryManager(BaseMemoryManager):
         
         # 记录 Agent 活动，唤醒睡眠中的 Agent
         try:
-            from .sleep_manager import record_agent_activity
+            from .sleep_manager import record_agent_activity, pulse_agent, is_agent_sleeping
+            
+            # 心跳唤醒 + 记录活动
+            pulse_agent(self.agent_id)
             record_agent_activity(self.agent_id)
+            
+            # 检查是否在睡眠
+            if is_agent_sleeping(self.agent_id):
+                logger.info(f"Agent {self.agent_id} woke up from sleep")
         except ImportError:
             pass
         

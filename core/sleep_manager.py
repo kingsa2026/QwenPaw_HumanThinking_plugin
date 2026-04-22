@@ -358,6 +358,13 @@ def init_sleep_manager(config: SleepConfig = None) -> SleepManager:
 
 
 def record_agent_activity(agent_id: str):
+    """记录活动并唤醒"""
+    if _global_sleep_manager:
+        _global_sleep_manager.record_activity(agent_id)
+
+
+def pulse_agent(agent_id: str):
+    """心跳 - 唤醒睡眠中的Agent"""
     if _global_sleep_manager:
         _global_sleep_manager.record_activity(agent_id)
 
