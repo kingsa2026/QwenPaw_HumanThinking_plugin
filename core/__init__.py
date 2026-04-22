@@ -7,6 +7,7 @@ from .session_buffer import SessionBuffer, MemoryItem
 from .session_bridge import SessionBridgeEngine
 from .emotional_engine import EmotionalContinuityEngine
 from .memory_temperature import MemoryTemperature, MemoryTemperatureLevel
+from .sleep_manager import SleepManager, get_sleep_manager, init_sleep_manager, record_agent_activity
 from .channel_adapter import (
     ChannelAdapter,
     ChannelContext,
