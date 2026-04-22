@@ -26,6 +26,33 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class HumanThinkingConfig:
+    """HumanThinking 配置"""
+    enable_cross_session: bool = True
+    enable_emotion: bool = True
+    enable_session_isolation: bool = True
+    enable_memory_freeze: bool = True
+    session_idle_timeout: int = 180
+    refresh_interval: int = 5
+    max_results: int = 5
+    max_memory_chars: int = 150
+
+
+_global_config = HumanThinkingConfig()
+
+
+def get_config() -> HumanThinkingConfig:
+    """获取全局配置"""
+    return _global_config
+
+
+def update_config(config: HumanThinkingConfig):
+    """更新全局配置"""
+    global _global_config
+    _global_config = config
+
+
+@dataclass
 class MemoryResponse:
     """记忆搜索响应结果"""
     memories: List[Dict[str, Any]] = field(default_factory=list)

@@ -1,8 +1,21 @@
 /** HumanThinking Memory Manager - Frontend Plugin Entry. */
 
 const { React, antd } = (window as any).QwenPaw.host;
-const { Typography, Card, Table, Statistic, Row, Col, Tag, Button, Space, Descriptions } = antd;
+const { Typography, Card, Table, Statistic, Row, Col, Tag, Button, Space, Descriptions, Switch, Divider, Alert, message } = antd;
 const { Title, Paragraph, Text } = Typography;
+
+const CONFIG_KEY = 'humanthinking_config';
+
+const defaultConfig = {
+  enable_cross_session: true,
+  enable_emotion: true,
+  enable_session_isolation: true,
+  enable_memory_freeze: true,
+  session_idle_timeout: 180,
+  refresh_interval: 5,
+  max_results: 5,
+  max_memory_chars: 150,
+};
 
 interface MemoryStats {
   total_memories: number;
@@ -19,6 +32,28 @@ interface MemoryRecord {
   importance: number;
   memory_type: string;
   created_at: string;
+}
+
+function getConfig() {
+  try {
+    const stored = localStorage.getItem(CONFIG_KEY);
+    if (stored) {
+      return { ...defaultConfig, ...JSON.parse(stored) };
+    }
+  } catch (e) {
+    console.error('Failed to load config:', e);
+  }
+  return defaultConfig;
+}
+
+function saveConfig(config: any) {
+  try {
+    localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+    return true;
+  } catch (e) {
+    console.error('Failed to save config:', e);
+    return false;
+  }
 }
 
 function HumanThinkingDashboard() {
@@ -121,24 +156,117 @@ function HumanThinkingDashboard() {
 }
 
 function MemorySettings() {
+  const [config, setConfig] = React.useState(getConfig());
+  const [saving, setSaving] = React.useState(false);
+
+  const handleChange = (key: string, value: any) => {
+    const newConfig = { ...config, [key]: value };
+    setSaving(true);
+    
+    if (saveConfig(newConfig)) {
+      setConfig(newConfig);
+      message.success('设置已保存');
+    } else {
+      message.error('保存失败');
+    }
+    
+    setSaving(false);
+  };
+
   return (
     <div style={{ padding: 24 }}>
       <Title level={3}>⚙️ 记忆设置</Title>
-      <Card style={{ marginTop: 16 }}>
-        <Descriptions column={1}>
-          <Descriptions.Item label="记忆类型">
-            <Tag color="blue">HumanThinking</Tag>
+      
+      <Card title="功能开关" style={{ marginTop: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <Text strong>跨Session记忆</Text>
+              <Paragraph type="secondary" style={{ marginBottom: 0, fontSize: 12 }}>
+                新Session自动继承相关历史记忆
+              </Paragraph>
+            </div>
+            <Switch 
+              checked={config.enable_cross_session}
+              onChange={(checked) => handleChange('enable_cross_session', checked)}
+              loading={saving}
+            />
+          </div>
+          
+          <Divider style={{ margin: '8px 0' }} />
+          
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <Text strong>情感连续性</Text>
+              <Paragraph type="secondary" style={{ marginBottom: 0, fontSize: 12 }}>
+                跟踪对话情感变化，在上下文中注入情感状态
+              </Paragraph>
+            </div>
+            <Switch 
+              checked={config.enable_emotion}
+              onChange={(checked) => handleChange('enable_emotion', checked)}
+              loading={saving}
+            />
+          </div>
+          
+          <Divider style={{ margin: '8px 0' }} />
+          
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <Text strong>会话隔离</Text>
+              <Paragraph type="secondary" style={{ marginBottom: 0, fontSize: 12 }}>
+                按AgentID + UserID + SessionID隔离记忆
+              </Paragraph>
+            </div>
+            <Switch 
+              checked={config.enable_session_isolation}
+              onChange={(checked) => handleChange('enable_session_isolation', checked)}
+              loading={saving}
+            />
+          </div>
+          
+          <Divider style={{ margin: '8px 0' }} />
+          
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <Text strong>记忆冷藏</Text>
+              <Paragraph type="secondary" style={{ marginBottom: 0, fontSize: 12 }}>
+                7天无访问自动冷藏，释放缓存空间
+              </Paragraph>
+            </div>
+            <Switch 
+              checked={config.enable_memory_freeze}
+              onChange={(checked) => handleChange('enable_memory_freeze', checked)}
+              loading={saving}
+            />
+          </div>
+        </div>
+      </Card>
+
+      <Card title="高级设置" style={{ marginTop: 16 }}>
+        <Descriptions column={1} size="small">
+          <Descriptions.Item label="会话空闲超时">
+            {config.session_idle_timeout} 秒
           </Descriptions.Item>
-          <Descriptions.Item label="版本">1.1.0</Descriptions.Item>
-          <Descriptions.Item label="特性">
-            <Space>
-              <Tag>跨Session</Tag>
-              <Tag>情感连续</Tag>
-              <Tag>会话隔离</Tag>
-            </Space>
+          <Descriptions.Item label="刷新间隔">
+            {config.refresh_interval} 轮
+          </Descriptions.Item>
+          <Descriptions.Item label="最大返回数">
+            {config.max_results} 条
+          </Descriptions.Item>
+          <Descriptions.Item label="单条记忆最大字符">
+            {config.max_memory_chars} 字符
           </Descriptions.Item>
         </Descriptions>
       </Card>
+
+      <Alert 
+        message="提示" 
+        description="修改设置后，部分功能需要刷新页面或新会话才能完全生效" 
+        type="info" 
+        showIcon 
+        style={{ marginTop: 16 }}
+      />
     </div>
   );
 }
