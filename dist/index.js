@@ -43,6 +43,9 @@ var defaultSleepConfig = {
   sleep_idle_hours: 2,
   auto_consolidate: true,
   consolidate_interval_hours: 6,
+  consolidate_days: 7,
+  enable_insight: true,
+  enable_dream_log: true,
 };
 
 function loadConfig(key, defaults) {
@@ -144,45 +147,96 @@ function SleepSettings() {
     message.success('睡眠设置已保存');
   }
 
+  var itemStyle = { display: 'flex', alignItems: 'center', padding: '12px 0', justifyContent: 'space-between' };
+
   return React.createElement('div', { style: { padding: 24 } },
-    React.createElement(Title, { level: 3 }, '😴 Agent 睡眠设置'),
-    React.createElement(Paragraph, null, 'Agent 睡眠功能：2小时无会话自动进入睡眠，有新会话自动唤醒'),
+    React.createElement(Title, { level: 3 }, '😴 Agent 睡眠模式'),
+    React.createElement(Paragraph, null, 'Agent 进入睡眠时自动整理记忆，优化 Token 使用'),
     
     React.createElement(Card, { title: '睡眠开关', style: { marginTop: 16 } },
-      React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
-        React.createElement('div', null, React.createElement(Text, { strong: true }, '启用 Agent 睡眠'), React.createElement(Paragraph, { type: 'secondary', style: { marginBottom: 0, fontSize: 12 } }, '2小时无会话/无新任务自动进入睡眠状态')),
+      React.createElement('div', { style: itemStyle },
+        React.createElement('div', null, 
+          React.createElement(Text, { strong: true }, '启用睡眠模式'), 
+          React.createElement(Paragraph, { type: 'secondary', style: { marginBottom: 0, fontSize: 12 } }, '空闲N小时后自动进入睡眠，执行记忆整理')
+        ),
         React.createElement(Switch, { checked: sleepConfig.enable_agent_sleep, onChange: function(checked) { handleChange('enable_agent_sleep', checked); } })
       )
     ),
 
     sleepConfig.enable_agent_sleep && React.createElement('div', null,
       React.createElement(Card, { title: '睡眠条件', style: { marginTop: 16 } },
-        React.createElement('div', null,
-          React.createElement(Text, null, '空闲多少小时后进入睡眠：'),
-          React.createElement(InputNumber, { min: 1, max: 24, value: sleepConfig.sleep_idle_hours, onChange: function(val) { val && handleChange('sleep_idle_hours', val); }, style: { marginLeft: 16, width: 80 } }),
-          React.createElement(Text, { style: { marginLeft: 8 } }, '小时')
+        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 16 } },
+          React.createElement(Text, null, '空闲'),
+          React.createElement(InputNumber, { min: 1, max: 24, value: sleepConfig.sleep_idle_hours, onChange: function(val) { val && handleChange('sleep_idle_hours', val); }, style: { width: 70 } }),
+          React.createElement(Text, null, '小时后进入睡眠')
         )
       ),
 
-      React.createElement(Card, { title: '睡眠时自动整理记忆', style: { marginTop: 16 } },
-        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 } },
-          React.createElement('div', null, React.createElement(Text, { strong: true }, '自动总结经验'), React.createElement(Paragraph, { type: 'secondary', style: { marginBottom: 0, fontSize: 12 } }, '睡眠时自动整理对话经验，生成为持久化固定记忆')),
-          React.createElement(Switch, { checked: sleepConfig.auto_consolidate, onChange: function(checked) { handleChange('auto_consolidate', checked); } })
-        ),
-        sleepConfig.auto_consolidate && React.createElement('div', null,
-          React.createElement(Text, null, '整理间隔：'),
-          React.createElement(InputNumber, { min: 1, max: 72, value: sleepConfig.consolidate_interval_hours, onChange: function(val) { val && handleChange('consolidate_interval_hours', val); }, style: { marginLeft: 16, width: 80 } }),
-          React.createElement(Text, { style: { marginLeft: 8 } }, '小时')
+      React.createElement(Card, { title: '🧹 自动整理记忆', style: { marginTop: 16 } },
+        React.createElement('div', null,
+          React.createElement('div', { style: itemStyle },
+            React.createElement('div', null, 
+              React.createElement(Text, { strong: true }, '自动整理'), 
+              React.createElement(Paragraph, { type: 'secondary', style: { marginBottom: 0, fontSize: 12 } }, '扫描近期日志，提取重要信息')
+            ),
+            React.createElement(Switch, { checked: sleepConfig.auto_consolidate, onChange: function(checked) { handleChange('auto_consolidate', checked); } })
+          ),
+          
+          sleepConfig.auto_consolidate && React.createElement('div', null,
+            React.createElement(Divider, { style: { margin: '12px 0' } }),
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12 } },
+              React.createElement(Text, null, '扫描过去'),
+              React.createElement(InputNumber, { min: 1, max: 30, value: sleepConfig.consolidate_days, onChange: function(val) { val && handleChange('consolidate_days', val); }, style: { width: 60 } }),
+              React.createElement(Text, null, '天的工作日志')
+            ),
+            React.createElement('div', { style: { fontSize: 12, color: 'var(--ant-text-color-secondary)' } },
+              React.createElement('div', null, '• 提炼长期记忆：按四种类型(fact/preference/emotion/general)分类存储'),
+              React.createElement('div', null, '• 清理冗余：应用遗忘曲线，归档过期信息'),
+              React.createElement('div', null, '• 生成洞察：发现隐藏模式，输出1-3个建议')
+            )
+          )
+        )
+      ),
+
+      React.createElement(Card, { title: '💡 洞察与日志', style: { marginTop: 16 } },
+        React.createElement('div', null,
+          React.createElement('div', { style: itemStyle },
+            React.createElement('div', null, 
+              React.createElement(Text, { strong: true }, '生成洞察'), 
+              React.createElement(Paragraph, { type: 'secondary', style: { marginBottom: 0, fontSize: 12 } }, '基于记忆重组，输出非显而易见的建议')
+            ),
+            React.createElement(Switch, { checked: sleepConfig.enable_insight, onChange: function(checked) { handleChange('enable_insight', checked); } })
+          ),
+          React.createElement(Divider, { style: { margin: '12px 0' } }),
+          React.createElement('div', { style: itemStyle },
+            React.createElement('div', null, 
+              React.createElement(Text, { strong: true }, '梦境日记'), 
+              React.createElement(Paragraph, { type: 'secondary', style: { marginBottom: 0, fontSize: 12 } }, '记录整理过程与结果，便于用户查看')
+            ),
+            React.createElement(Switch, { checked: sleepConfig.enable_dream_log, onChange: function(checked) { handleChange('enable_dream_log', checked); } })
+          )
+        )
+      ),
+
+      React.createElement(Card, { title: '⚡ Token 优化', style: { marginTop: 16 } },
+        React.createElement('div', { style: { fontSize: 12, color: 'var(--ant-text-color-secondary)' } },
+          React.createElement('div', null, '• Prompt 缓存复用'),
+          React.createElement('div', null, '• 工具清单去重'),
+          React.createElement('div', null, '• 记忆压缩存储'),
+          React.createElement('div', null, '• 智能上下文裁剪')
         )
       )
     ),
 
     React.createElement(Alert, {
-      message: '工作原理',
-      description: React.createElement('div', null, 
-        React.createElement('div', null, '• 睡眠：Agent 停止活动，释放资源'),
-        React.createElement('div', null, '• 唤醒：新会话/新任务立即唤醒'),
-        React.createElement('div', null, '• 自动整理：根据四种记忆类型(fact/preference/emotion/general)自动分类存储')
+      message: '💤 睡眠模式工作流程',
+      description: React.createElement('div', { style: { fontSize: 12 } }, 
+        React.createElement('div', null, '1. 检测空闲时间达到阈值 → 进入睡眠'),
+        React.createElement('div', null, '2. 扫描近期日志 → 提取重要信息'),
+        React.createElement('div', null, '3. 按四种类型分类 → 存储为长期记忆'),
+        React.createElement('div', null, '4. 应用遗忘曲线 → 清理过期信息'),
+        React.createElement('div', null, '5. 生成洞察与日志 → 供用户查看'),
+        React.createElement('div', null, '6. 新会话到达 → 立即唤醒')
       ),
       type: 'info',
       showIcon: true,
@@ -243,7 +297,7 @@ var HumanThinkingPlugin = {
     if (window.QwenPaw && window.QwenPaw.registerRoutes) {
       window.QwenPaw.registerRoutes(this.id, [
         { path: '/plugin/humanthinking/dashboard', component: Dashboard, label: '记忆管理', icon: '🧠', priority: 10 },
-        { path: '/plugin/humanthinking/sleep', component: SleepSettings, label: '睡眠设置', icon: '😴', priority: 12 },
+        { path: '/plugin/humanthinking/sleep', component: SleepSettings, label: '睡眠模式', icon: '💤', priority: 12 },
         { path: '/plugin/humanthinking/settings', component: Settings, label: '记忆设置', icon: '⚙️', priority: 11 },
       ]);
       console.info('[HumanThinking] Plugin loaded successfully');
