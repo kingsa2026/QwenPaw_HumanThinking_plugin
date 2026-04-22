@@ -85,7 +85,23 @@ qwenpaw shutdown
 qwenpaw app
 ```
 
-### 方式三：构建前端（如需自定义）
+### 方式三：Docker 安装
+
+如果使用 Docker 部署 QwenPaw：
+
+```dockerfile
+# 在 Dockerfile 中添加插件
+COPY HumanThinking/ ~/.qwenpaw/plugins/HumanThinking
+```
+
+或挂载插件目录：
+
+```bash
+# 启动 QwenPaw 时挂载插件
+docker run -v ~/.qwenpaw/plugins:/root/.qwenpaw/plugins ...
+```
+
+### 方式四：构建前端（如需自定义）
 
 ```bash
 cd HumanThinking
