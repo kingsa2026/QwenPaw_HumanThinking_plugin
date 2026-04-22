@@ -30,10 +30,6 @@ var defaultConfig = {
   enable_emotion: true,
   enable_session_isolation: true,
   enable_memory_freeze: true,
-  session_idle_timeout: 180,
-  refresh_interval: 5,
-  max_results: 5,
-  max_memory_chars: 150,
 };
 
 var defaultBackupConfig = {
@@ -133,6 +129,15 @@ function Dashboard() {
             React.createElement(Button, { type: 'primary', danger: true, onClick: function() { message.info('批量备份'); } }, '批量备份选中 (0)')
           )
         ),
+        React.createElement('div', { style: { marginBottom: 16, padding: 12, background: 'var(--ant background-light)', borderRadius: 8 } },
+          React.createElement(Space, null,
+            React.createElement(Text, { strong: true }, '自动备份：'),
+            React.createElement(Switch, { size: 'small', checked: getBackupConfig().auto_backup_enabled, onChange: function(checked) { var c = getBackupConfig(); c.auto_backup_enabled = checked; saveBackupConfig(c); message.success(checked ? '自动备份已开启' : '自动备份已关闭'); } }),
+            React.createElement(Text, { style: { marginLeft: 16 } }, '间隔'),
+            React.createElement(InputNumber, { size: 'small', min: 1, max: 168, value: getBackupConfig().auto_backup_interval_hours, onChange: function(val) { if (val) { var c = getBackupConfig(); c.auto_backup_interval_hours = val; saveBackupConfig(c); message.success('间隔已更新为 ' + val + ' 小时'); } }, style: { width: 60 } }),
+            React.createElement(Text, null, '小时')
+          )
+        ),
         React.createElement(Table, { columns: agentColumns, dataSource: mockAgents, rowKey: 'agent_id', pagination: { pageSize: 10, showTotal: function(total) { return '共 ' + total + ' 个 Agent'; }, showSizeChanger: true }, rowSelection: { onChange: function(keys) { console.log('Selected:', keys); } }, size: 'small' })
       )
     }
@@ -145,59 +150,11 @@ function Dashboard() {
   );
 }
 
-function BackupPanel() {
-  var backupConfig = getBackupConfig();
-  var [backingUp, setBackingUp] = React.useState(false);
-
-  function handleAutoBackupChange(checked) {
-    var newConfig = Object.assign({}, backupConfig, { auto_backup_enabled: checked });
-    saveBackupConfig(newConfig);
-    message.success(checked ? '自动备份已开启' : '自动备份已关闭');
-  }
-
-  function handleIntervalChange(hours) {
-    var newConfig = Object.assign({}, backupConfig, { auto_backup_interval_hours: hours });
-    saveBackupConfig(newConfig);
-    message.success('备份间隔已更新');
-  }
-
-  function handleManualBackup() {
-    setBackingUp(true);
-    message.info('开始备份...');
-    setTimeout(function() {
-      setBackingUp(false);
-      message.success('备份完成！');
-    }, 2000);
-  }
-
-  return React.createElement('div', { style: { padding: 24 } },
-    React.createElement(Title, { level: 3 }, '💾 记忆备份'),
-    React.createElement(Paragraph, null, '自动备份和手动备份功能'),
-    
-    React.createElement(Card, { title: '自动备份设置', style: { marginTop: 16 } },
-      React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 } },
-        React.createElement('div', null, React.createElement(Text, { strong: true }, '自动备份'), React.createElement(Paragraph, { type: 'secondary', style: { marginBottom: 0, fontSize: 12 } }, '按设定时间间隔自动备份所有记忆')),
-        React.createElement(Switch, { checked: backupConfig.auto_backup_enabled, onChange: handleAutoBackupChange })
-      ),
-      backupConfig.auto_backup_enabled && React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-        React.createElement(Text, null, '备份间隔：'),
-        React.createElement(InputNumber, { min: 1, max: 168, value: backupConfig.auto_backup_interval_hours, onChange: function(val) { val && handleIntervalChange(val); }, style: { width: 80 } }),
-        React.createElement(Text, null, '小时')
-      )
-    ),
-
-    React.createElement(Card, { title: '手动备份', style: { marginTop: 16 } },
-      React.createElement(Paragraph, null, '立即备份所有 Agent 的记忆数据'),
-      React.createElement(Button, { type: 'primary', loading: backingUp, onClick: handleManualBackup }, backingUp ? '备份中...' : '立即备份')
-    )
-  );
-}
-
 function SleepSettings() {
   var sleepConfig = getSleepConfig();
 
   function handleChange(key, value) {
-    var newConfig = Object.assign({}, sleepConfig, key === 'sleep_idle_hours' || key === 'consolidate_interval_hours' ? { [key]: value } : { [key]: value });
+    var newConfig = Object.assign({}, sleepConfig, { [key]: value });
     saveSleepConfig(newConfig);
     message.success('睡眠设置已保存');
   }
@@ -299,8 +256,7 @@ var HumanThinkingPlugin = {
     if (window.QwenPaw && window.QwenPaw.registerRoutes) {
       window.QwenPaw.registerRoutes(this.id, [
         { path: '/plugin/humanthinking/dashboard', component: Dashboard, label: '记忆管理', icon: '🧠', priority: 10 },
-        { path: '/plugin/humanthinking/backup', component: BackupPanel, label: '记忆备份', icon: '💾', priority: 12 },
-        { path: '/plugin/humanthinking/sleep', component: SleepSettings, label: '睡眠设置', icon: '😴', priority: 13 },
+        { path: '/plugin/humanthinking/sleep', component: SleepSettings, label: '睡眠设置', icon: '😴', priority: 12 },
         { path: '/plugin/humanthinking/settings', component: Settings, label: '记忆设置', icon: '⚙️', priority: 11 },
       ]);
       console.info('[HumanThinking] Plugin loaded successfully');
