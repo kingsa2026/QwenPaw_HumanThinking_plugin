@@ -87,7 +87,7 @@ qwenpaw app
 
 ### 方式三：Docker 安装
 
-如果使用 Docker 部署 QwenPaw：
+如果 QwenPaw 使用的是 Docker：
 
 ```dockerfile
 # 在 Dockerfile 中添加插件
@@ -101,7 +101,18 @@ COPY HumanThinking/ ~/.qwenpaw/plugins/HumanThinking
 docker run -v ~/.qwenpaw/plugins:/root/.qwenpaw/plugins ...
 ```
 
-### 方式四：构建前端（如需自定义）
+### 方式四：Windows 桌面端
+
+```powershell
+# 复制插件到 QwenPaw 插件目录
+Copy-Item -Recurse HumanThinking "$env:USERPROFILE\.qwenpaw\plugins\HumanThinking"
+
+# 重启 QwenPaw
+qwenpaw shutdown
+qwenpaw app
+```
+
+### 方式五：构建前端（如需自定义）
 
 ```bash
 cd HumanThinking
