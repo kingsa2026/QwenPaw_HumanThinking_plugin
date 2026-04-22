@@ -178,6 +178,35 @@ class HumanThinkingDB:
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
         """)
+        
+        # 洞察表 - 存储睡眠时生成的洞察
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS humanthinking_insights (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT NOT NULL,
+                insight_title TEXT NOT NULL,
+                insight_content TEXT NOT NULL,
+                memory_count INTEGER DEFAULT 0,
+                insight_type TEXT DEFAULT 'pattern',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        
+        # 梦境日记表 - 记录睡眠整理过程
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS humanthinking_dream_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                details TEXT,
+                memories_scanned INTEGER DEFAULT 0,
+                memories_consolidated INTEGER DEFAULT 0,
+                memories_archived INTEGER DEFAULT 0,
+                tokens_saved INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        
         self.conn.commit()
     
     async def _create_indexes(self) -> None:
@@ -762,3 +791,96 @@ class HumanThinkingDB:
         stats["total_sessions"] = self.cursor.fetchone()[0]
         
         return stats
+    
+    async def add_insight(
+        self,
+        agent_id: str,
+        title: str,
+        content: str,
+        memory_count: int = 0,
+        insight_type: str = "pattern"
+    ) -> int:
+        """添加洞察"""
+        self.cursor.execute("""
+            INSERT INTO humanthinking_insights 
+            (agent_id, insight_title, insight_content, memory_count, insight_type)
+            VALUES (?, ?, ?, ?, ?)
+        """, (agent_id, title, content, memory_count, insight_type))
+        self.conn.commit()
+        return self.cursor.lastrowid
+    
+    async def get_insights(self, agent_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """获取洞察列表"""
+        self.cursor.execute("""
+            SELECT * FROM humanthinking_insights 
+            WHERE agent_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (agent_id, limit))
+        return [dict(row) for row in self.cursor.fetchall()]
+    
+    async def add_dream_log(
+        self,
+        agent_id: str,
+        action: str,
+        details: str = None,
+        memories_scanned: int = 0,
+        memories_consolidated: int = 0,
+        memories_archived: int = 0,
+        tokens_saved: int = 0
+    ) -> int:
+        """添加梦境日记"""
+        self.cursor.execute("""
+            INSERT INTO humanthinking_dream_logs 
+            (agent_id, action, details, memories_scanned, memories_consolidated, memories_archived, tokens_saved)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (agent_id, action, details, memories_scanned, memories_consolidated, memories_archived, tokens_saved))
+        self.conn.commit()
+        return self.cursor.lastrowid
+    
+    async def get_dream_logs(self, agent_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """获取梦境日记列表"""
+        self.cursor.execute("""
+            SELECT * FROM humanthinking_dream_logs 
+            WHERE agent_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (agent_id, limit))
+        return [dict(row) for row in self.cursor.fetchall()]
+    
+    async def get_memories_for_consolidation(
+        self, 
+        agent_id: str, 
+        days: int = 7
+    ) -> List[Dict[str, Any]]:
+        """获取需要整理的记忆（过去N天）"""
+        self.cursor.execute("""
+            SELECT * FROM qwenpaw_memory 
+            WHERE agent_id = ? 
+            AND deleted_at IS NULL
+            AND created_at >= datetime('now', '-' || ? || ' days')
+            ORDER BY created_at DESC
+        """, (agent_id, days))
+        return [self._row_to_record(row) for row in self.cursor.fetchall()]
+    
+    async def update_memory_type(
+        self, 
+        memory_id: int, 
+        memory_type: str
+    ) -> None:
+        """更新记忆类型"""
+        self.cursor.execute("""
+            UPDATE qwenpaw_memory 
+            SET memory_type = ?
+            WHERE id = ?
+        """, (memory_type, memory_id))
+        self.conn.commit()
+    
+    async def archive_memory(self, memory_id: int) -> None:
+        """归档记忆（标记为低优先级）"""
+        self.cursor.execute("""
+            UPDATE qwenpaw_memory 
+            SET importance = 1, access_frozen = 1
+            WHERE id = ?
+        """, (memory_id,))
+        self.conn.commit()
