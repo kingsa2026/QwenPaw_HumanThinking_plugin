@@ -118,9 +118,21 @@ class HumanThinkingDB:
                 content_embedding TEXT,
                 content_summary TEXT,
                 
+                -- ========== 新增：记忆层级 ==========
+                memory_tier TEXT DEFAULT 'short_term',  -- sensory|working|short_term|long_term|archived
+                
+                -- ========== 新增：记忆分类 ==========
+                memory_category TEXT DEFAULT 'episodic',  -- episodic|semantic|procedural
+                memory_type TEXT DEFAULT 'general',  -- fact|preference|emotion|general
+                
                 -- 重要性
                 importance INTEGER DEFAULT 3,
                 importance_score REAL DEFAULT 0.0,
+                
+                -- ========== 新增：遗忘曲线 ==========
+                decay_score REAL DEFAULT 1.0,  -- 衰减分数
+                decay_curve TEXT DEFAULT 'standard',  -- standard|logarithmic|step
+                last_decay_at DATETIME,
                 
                 -- 访问统计
                 access_count INTEGER DEFAULT 0,
@@ -139,7 +151,6 @@ class HumanThinkingDB:
                 deleted_at DATETIME,
                 
                 -- 关联字段
-                memory_type TEXT DEFAULT 'general',
                 metadata TEXT DEFAULT '{}',
                 tags TEXT DEFAULT '[]'
             );
@@ -204,6 +215,38 @@ class HumanThinkingDB:
                 memories_archived INTEGER DEFAULT 0,
                 tokens_saved INTEGER DEFAULT 0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        
+        # 记忆访问日志表 - 用于遗忘曲线计算和分析
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS memory_access_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                memory_id INTEGER NOT NULL,
+                agent_id TEXT NOT NULL,
+                session_id TEXT,
+                access_type TEXT NOT NULL,  -- recall|reference|consolidate|search
+                access_latency_ms INTEGER,
+                result_relevant INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        
+        # 工作记忆缓存表 - 快速读写的临时缓存
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS memory_working_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                cache_key TEXT NOT NULL,
+                content TEXT NOT NULL,
+                content_summary TEXT,
+                memory_ids TEXT,  -- JSON数组，关联的记忆ID
+                hit_count INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_accessed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                expires_at DATETIME,
+                UNIQUE(agent_id, session_id, cache_key)
             );
         """)
         
@@ -880,7 +923,174 @@ class HumanThinkingDB:
         """归档记忆（标记为低优先级）"""
         self.cursor.execute("""
             UPDATE qwenpaw_memory 
-            SET importance = 1, access_frozen = 1
+            SET memory_tier = 'archived', importance = 1, access_frozen = 1
             WHERE id = ?
         """, (memory_id,))
         self.conn.commit()
+    
+    async def log_memory_access(
+        self,
+        memory_id: int,
+        agent_id: str,
+        session_id: str,
+        access_type: str,
+        access_latency_ms: int = None,
+        result_relevant: int = None
+    ) -> int:
+        """记录记忆访问日志"""
+        self.cursor.execute("""
+            INSERT INTO memory_access_log 
+            (memory_id, agent_id, session_id, access_type, access_latency_ms, result_relevant)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (memory_id, agent_id, session_id, access_type, access_latency_ms, result_relevant))
+        self.conn.commit()
+        return self.cursor.lastrowid
+    
+    async def get_access_stats(self, memory_id: int, days: int = 7) -> Dict[str, Any]:
+        """获取记忆访问统计"""
+        self.cursor.execute("""
+            SELECT 
+                COUNT(*) as total_access,
+                SUM(CASE WHEN access_type = 'recall' THEN 1 ELSE 0 END) as recall_count,
+                SUM(CASE WHEN access_type = 'search' THEN 1 ELSE 0 END) as search_count,
+                AVG(access_latency_ms) as avg_latency,
+                SUM(CASE WHEN result_relevant = 1 THEN 1 ELSE 0 END) as relevant_count
+            FROM memory_access_log
+            WHERE memory_id = ? 
+            AND created_at >= datetime('now', '-' || ? || ' days')
+        """, (memory_id, days))
+        row = self.cursor.fetchone()
+        return dict(row) if row else {}
+    
+    async def get_tier_stats(self, agent_id: str) -> Dict[str, int]:
+        """获取各层级记忆统计"""
+        self.cursor.execute("""
+            SELECT memory_tier, COUNT(*) as count 
+            FROM qwenpaw_memory 
+            WHERE agent_id = ? AND deleted_at IS NULL
+            GROUP BY memory_tier
+        """, (agent_id,))
+        result = {}
+        for row in self.cursor.fetchall():
+            result[row[0]] = row[1]
+        return result
+    
+    async def get_category_stats(self, agent_id: str) -> Dict[str, int]:
+        """获取各分类记忆统计"""
+        self.cursor.execute("""
+            SELECT memory_category, COUNT(*) as count 
+            FROM qwenpaw_memory 
+            WHERE agent_id = ? AND deleted_at IS NULL
+            GROUP BY memory_category
+        """, (agent_id,))
+        result = {}
+        for row in self.cursor.fetchall():
+            result[row[0]] = row[1]
+        return result
+    
+    async def set_memory_tier(self, memory_id: int, tier: str) -> None:
+        """设置记忆层级"""
+        self.cursor.execute("""
+            UPDATE qwenpaw_memory SET memory_tier = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+        """, (tier, memory_id))
+        self.conn.commit()
+    
+    async def set_memory_category(self, memory_id: int, category: str) -> None:
+        """设置记忆分类"""
+        self.cursor.execute("""
+            UPDATE qwenpaw_memory SET memory_category = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+        """, (category, memory_id))
+        self.conn.commit()
+    
+    async def update_decay(self, memory_id: int, decay_score: float) -> None:
+        """更新遗忘分数"""
+        self.cursor.execute("""
+            UPDATE qwenpaw_memory 
+            SET decay_score = ?, last_decay_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+        """, (decay_score, memory_id))
+        self.conn.commit()
+    
+    async def apply_forgetting_curve(self, agent_id: str) -> int:
+        """应用遗忘曲线，返回归档的记忆数量"""
+        self.cursor.execute("""
+            UPDATE qwenpaw_memory 
+            SET decay_score = decay_score * 0.95,
+                last_decay_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE agent_id = ? 
+            AND deleted_at IS NULL 
+            AND access_frozen = 0
+            AND memory_tier NOT IN ('archived')
+            AND access_count < 3
+        """, (agent_id,))
+        self.conn.commit()
+        return self.cursor.rowcount
+    
+    async def get_low_value_memories(self, agent_id: str, threshold: float = 0.3, limit: int = 100) -> List[Dict]:
+        """获取低价值记忆（用于归档）"""
+        self.cursor.execute("""
+            SELECT id, content, decay_score, importance, access_count
+            FROM qwenpaw_memory
+            WHERE agent_id = ?
+            AND deleted_at IS NULL
+            AND memory_tier NOT IN ('archived')
+            AND (decay_score * importance / 5.0) < ?
+            ORDER BY decay_score * importance ASC
+            LIMIT ?
+        """, (agent_id, threshold, limit))
+        return [dict(row) for row in self.cursor.fetchall()]
+    
+    # ========== 工作缓存方法 ==========
+    
+    async def set_working_cache(
+        self,
+        agent_id: str,
+        session_id: str,
+        cache_key: str,
+        content: str,
+        content_summary: str = None,
+        memory_ids: List[int] = None,
+        ttl_seconds: int = 3600
+    ) -> None:
+        """设置工作缓存"""
+        import json
+        self.cursor.execute("""
+            INSERT OR REPLACE INTO memory_working_cache 
+            (agent_id, session_id, cache_key, content, content_summary, memory_ids, hit_count, last_accessed_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, datetime('now', '+' || ? || ' seconds'))
+        """, (agent_id, session_id, cache_key, content, content_summary, json.dumps(memory_ids) if memory_ids else None, ttl_seconds))
+        self.conn.commit()
+    
+    async def get_working_cache(
+        self,
+        agent_id: str,
+        session_id: str,
+        cache_key: str
+    ) -> Optional[Dict]:
+        """获取工作缓存"""
+        self.cursor.execute("""
+            SELECT * FROM memory_working_cache
+            WHERE agent_id = ? AND session_id = ? AND cache_key = ?
+            AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+        """, (agent_id, session_id, cache_key))
+        row = self.cursor.fetchone()
+        if row:
+            self.cursor.execute("""
+                UPDATE memory_working_cache SET hit_count = hit_count + 1, last_accessed_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (row[0],))
+            self.conn.commit()
+            return dict(row)
+        return None
+    
+    async def clear_working_cache(self, agent_id: str = None, session_id: str = None) -> int:
+        """清理工作缓存"""
+        if agent_id and session_id:
+            self.cursor.execute("DELETE FROM memory_working_cache WHERE agent_id = ? AND session_id = ?", (agent_id, session_id))
+        elif agent_id:
+            self.cursor.execute("DELETE FROM memory_working_cache WHERE agent_id = ?", (agent_id,))
+        else:
+            self.cursor.execute("DELETE FROM memory_working_cache WHERE expires_at < CURRENT_TIMESTAMP")
+        self.conn.commit()
+        return self.cursor.rowcount

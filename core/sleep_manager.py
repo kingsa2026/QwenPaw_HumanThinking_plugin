@@ -163,10 +163,12 @@ class SleepManager:
         
         睡眠时执行：
         1. 扫描近期记忆
-        2. 按四种类型分类存储
-        3. 归档过期/低优先级记忆
-        4. 生成洞察
-        5. 记录梦境日记
+        2. 分类记忆到层级和类别 (sensory/working/short_term/long_term, episodic/semantic/procedural)
+        3. 按四种类型分类 (fact/preference/emotion/general)
+        4. 应用遗忘曲线
+        5. 归档低优先级记忆
+        6. 生成洞察
+        7. 记录梦境日记
         """
         from .database import HumanThinkingDB
         
@@ -177,6 +179,7 @@ class SleepManager:
             memories_scanned = 0
             memories_consolidated = 0
             memories_archived = 0
+            tier_changed = 0
             
             if self.config.enable_dream_log:
                 await db.add_dream_log(agent_id, "CONSOLIDATE_START", "开始整理记忆", 0, 0, 0, 0)
@@ -192,25 +195,42 @@ class SleepManager:
                 memory_id = memory.get("id")
                 content = memory.get("content", "")
                 current_type = memory.get("memory_type", "general")
+                current_category = memory.get("memory_category", "episodic")
+                access_count = memory.get("access_count", 0)
                 
-                # 简单的记忆分类逻辑（实际可用 LLM 分析）
+                # 2a. 分类到四种类型 (fact/preference/emotion/general)
                 new_type = self._classify_memory(content, current_type)
-                
                 if new_type != current_type:
                     await db.update_memory_type(memory_id, new_type)
                     memories_consolidated += 1
                 
-                # 3. 遗忘曲线 - 归档低优先级记忆
-                importance = memory.get("importance", 3)
-                created_at = memory.get("created_at", "")
+                # 2b. 分类到层级 (sensory/working/short_term/long_term/archived)
+                new_tier = self._classify_tier(access_count, memory)
+                if new_tier != memory.get("memory_tier", "short_term"):
+                    await db.set_memory_tier(memory_id, new_tier)
+                    tier_changed += 1
                 
-                if importance <= 1 and created_at:
-                    await db.archive_memory(memory_id)
-                    memories_archived += 1
+                # 2c. 分类到类别 (episodic/semantic/procedural)
+                new_category = self._classify_category(content, current_category)
+                if new_category != current_category:
+                    await db.set_memory_category(memory_id, new_category)
+                
+                # 3. 遗忘曲线 - 更新衰减分数
+                await db.update_decay(memory_id, self._calculate_decay(memory))
             
-            # 4. 生成洞察
+            # 4. 应用遗忘曲线，查找低价值记忆
+            low_value_memories = await db.get_low_value_memories(agent_id, threshold=0.3, limit=50)
+            for low_mem in low_value_memories:
+                await db.archive_memory(low_mem["id"])
+                memories_archived += 1
+            
+            # 5. 统计各层级和分类
+            tier_stats = await db.get_tier_stats(agent_id)
+            category_stats = await db.get_category_stats(agent_id)
+            
+            # 6. 生成洞察
             if self.config.enable_insight and memories_scanned > 0:
-                insights = self._generate_insights(memories)
+                insights = self._generate_insights(memories, tier_stats, category_stats)
                 for insight in insights:
                     await db.add_insight(
                         agent_id=agent_id,
@@ -220,22 +240,87 @@ class SleepManager:
                         insight_type=insight.get("type", "pattern")
                     )
             
-            # 5. 记录梦境日记
+            # 7. 记录梦境日记
             if self.config.enable_dream_log:
                 await db.add_dream_log(
                     agent_id=agent_id,
                     action="CONSOLIDATE_COMPLETE",
-                    details=f"扫描{memories_scanned}条记忆，分类{memories_consolidated}条，归档{memories_archived}条",
+                    details=f"扫描{memories_scanned}条，分类{memories_consolidated}条，层级调整{tier_changed}条，归档{memories_archived}条",
                     memories_scanned=memories_scanned,
                     memories_consolidated=memories_consolidated,
                     memories_archived=memories_archived,
                     tokens_saved=memories_archived * 100
                 )
             
-            logger.info(f"Consolidation complete: scanned={memories_scanned}, consolidated={memories_consolidated}, archived={memories_archived}")
+            logger.info(f"Consolidation complete: scanned={memories_scanned}, consolidated={memories_consolidated}, tier_changed={tier_changed}, archived={memories_archived}")
+            logger.info(f"Tier stats: {tier_stats}, Category stats: {category_stats}")
             
         finally:
             await db.close()
+    
+    def _classify_tier(self, access_count: int, memory: Dict) -> str:
+        """根据访问次数和记忆特征分类到层级
+        
+        层级：
+        - sensory: 毫秒级，仅缓存
+        - working: 会话级，短期
+        - short_term: 最近N轮，快速检索
+        - long_term: 长期持久化
+        - archived: 已归档
+        """
+        created_at = memory.get("created_at", "")
+        importance = memory.get("importance", 3)
+        
+        # 高重要性 + 高访问 = 长时记忆
+        if access_count >= 10 and importance >= 4:
+            return "long_term"
+        
+        # 低访问 + 低重要性 = 可能归档
+        if access_count <= 1 and importance <= 2:
+            return "archived"
+        
+        # 中等访问 = 短时记忆
+        return "short_term"
+    
+    def _classify_category(self, content: str, current: str) -> str:
+        """根据内容分类到类别
+        
+        类别：
+        - episodic: 情景记忆（会话历史）
+        - semantic: 语义记忆（事实/偏好/规则）
+        - procedural: 程序性记忆（技能/习惯）
+        """
+        content_lower = content.lower()
+        
+        # 程序性记忆关键词
+        procedural_keywords = ["步骤", "流程", "方法", "技巧", "skill", "procedure", "method", "how to"]
+        if any(kw in content_lower for kw in procedural_keywords):
+            return "procedural"
+        
+        # 语义记忆关键词
+        semantic_keywords = ["事实", "规则", "偏好", "喜欢", "知道", "fact", "rule", "prefer", "always"]
+        if any(kw in content_lower for kw in semantic_keywords):
+            return "semantic"
+        
+        return "episodic"
+    
+    def _calculate_decay(self, memory: Dict) -> float:
+        """计算遗忘分数
+        
+        公式：decay = base_decay * importance_factor * access_factor
+        """
+        base_decay = 0.95
+        importance = memory.get("importance", 3)
+        access_count = memory.get("access_count", 0)
+        
+        # 重要性越高，衰减越慢
+        importance_factor = 1.0 + (importance - 3) * 0.1
+        
+        # 访问次数越多，衰减越慢
+        access_factor = 1.0 + min(access_count * 0.05, 0.5)
+        
+        decay = base_decay * importance_factor * access_factor
+        return min(decay, 1.0)
     
     def _classify_memory(self, content: str, current_type: str) -> str:
         """根据内容分类记忆
@@ -265,7 +350,7 @@ class SleepManager:
         
         return "general"
     
-    def _generate_insights(self, memories: List[Dict]) -> List[Dict]:
+    def _generate_insights(self, memories: List[Dict], tier_stats: Dict = None, category_stats: Dict = None) -> List[Dict]:
         """生成洞察
         
         基于记忆分析，发现隐藏模式，输出1-3个建议
@@ -275,7 +360,7 @@ class SleepManager:
         if not memories:
             return insights
         
-        # 简单的模式分析
+        # 统计
         memory_types = {}
         importance_sum = 0
         
@@ -284,7 +369,32 @@ class SleepManager:
             memory_types[mtype] = memory_types.get(mtype, 0) + 1
             importance_sum += m.get("importance", 3)
         
-        # 洞察1：主要记忆类型
+        # 洞察1：记忆层级分布
+        if tier_stats:
+            long_term = tier_stats.get("long_term", 0)
+            short_term = tier_stats.get("short_term", 0)
+            archived = tier_stats.get("archived", 0)
+            total = long_term + short_term + archived
+            if total > 0 and long_term / total < 0.2:
+                insights.append({
+                    "title": "记忆转化建议",
+                    "content": f"长期记忆占比{long_term/total*100:.0f}%偏低，建议增加重要信息的访问频率，促进短时记忆向长时记忆转化。",
+                    "type": "suggestion"
+                })
+        
+        # 洞察2：记忆类别分布
+        if category_stats:
+            semantic = category_stats.get("semantic", 0)
+            episodic = category_stats.get("episodic", 0)
+            procedural = category_stats.get("procedural", 0)
+            if procedural < episodic * 0.1:
+                insights.append({
+                    "title": "程序性记忆建议",
+                    "content": f"程序性记忆(技能)偏少，建议多记录操作流程和技巧类信息。",
+                    "type": "suggestion"
+                })
+        
+        # 洞察3：主要记忆类型
         if memory_types:
             dominant_type = max(memory_types.items(), key=lambda x: x[1])
             type_names = {"fact": "事实", "preference": "偏好", "emotion": "情感", "general": "一般"}
@@ -294,7 +404,7 @@ class SleepManager:
                 "type": "pattern"
             })
         
-        # 洞察2：平均重要性
+        # 洞察4：平均重要性
         avg_importance = importance_sum / len(memories) if memories else 0
         if avg_importance < 2.5:
             insights.append({
