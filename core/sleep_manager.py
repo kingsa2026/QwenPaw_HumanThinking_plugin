@@ -22,7 +22,7 @@ class SleepConfig:
     def __init__(
         self,
         enable_agent_sleep: bool = True,
-        sleep_idle_hours: int = 2,
+        sleep_idle_hours: float = 2,
         auto_consolidate: bool = True,
         consolidate_days: int = 7,
         frozen_days: int = 7,
@@ -31,10 +31,10 @@ class SleepConfig:
         enable_dream_log: bool = True,
     ):
         self.enable_agent_sleep = enable_agent_sleep
-        self.sleep_idle_seconds = sleep_idle_hours * 3600
+        self.sleep_idle_seconds = int(sleep_idle_hours * 3600)
         self.auto_consolidate = auto_consolidate
         self.consolidate_days = consolidate_days
-        self.frozen_days = min(frozen_days, 90)
+        self.frozen_days = min(max(frozen_days, 1), 90)
         self.archive_days = min(max(archive_days, frozen_days + 1), 180)
         self.enable_insight = enable_insight
         self.enable_dream_log = enable_dream_log

@@ -42,7 +42,6 @@ var defaultSleepConfig = {
   enable_agent_sleep: true,
   sleep_idle_hours: 2,
   auto_consolidate: true,
-  consolidate_interval_hours: 6,
   consolidate_days: 7,
   frozen_days: 7,
   archive_days: 30,
@@ -168,9 +167,9 @@ function SleepSettings() {
     sleepConfig.enable_agent_sleep && React.createElement('div', null,
       React.createElement(Card, { title: '睡眠条件', style: { marginTop: 16 } },
         React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 16 } },
-          React.createElement(Text, null, '空闲'),
-          React.createElement(InputNumber, { min: 1, max: 24, value: sleepConfig.sleep_idle_hours, onChange: function(val) { val && handleChange('sleep_idle_hours', val); }, style: { width: 70 } }),
-          React.createElement(Text, null, '小时后进入睡眠')
+          React.createElement(Text, null, '会话空闲'),
+          React.createElement(InputNumber, { min: 0.5, max: 4, step: 0.5, value: sleepConfig.sleep_idle_hours, onChange: function(val) { val && handleChange('sleep_idle_hours', val); }, style: { width: 70 } }),
+          React.createElement(Text, null, '小时后进入睡眠（30分钟-4小时）')
         )
       ),
 
