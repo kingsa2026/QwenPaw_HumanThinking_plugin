@@ -1,6 +1,6 @@
 /** HumanThinking Memory Manager - Frontend Plugin Entry. */
 
-const { React, antd } = (window as any).QwenPaw.host;
+const { React, antd } = window.QwenPaw.host;
 const { Typography, Card, Table, Statistic, Row, Col, Tag, Button, Space, Descriptions, Switch, Divider, Alert, message } = antd;
 const { Title, Paragraph, Text } = Typography;
 
@@ -76,7 +76,7 @@ function MemorySettings() {
   const [config, setConfig] = React.useState(getConfig());
   const [saving, setSaving] = React.useState(false);
 
-  const handleChange = (key: string, value: any) => {
+  const handleChange = (key, value) => {
     const newConfig = { ...config, [key]: value };
     setSaving(true);
     if (saveConfig(newConfig)) {
@@ -99,7 +99,7 @@ function MemorySettings() {
           ),
           React.createElement(Switch, {
             checked: config.enable_cross_session,
-            onChange: (checked: boolean) => handleChange('enable_cross_session', checked),
+            onChange: (checked) => handleChange('enable_cross_session', checked),
             loading: saving
           })
         ),
@@ -111,7 +111,7 @@ function MemorySettings() {
           ),
           React.createElement(Switch, {
             checked: config.enable_emotion,
-            onChange: (checked: boolean) => handleChange('enable_emotion', checked),
+            onChange: (checked) => handleChange('enable_emotion', checked),
             loading: saving
           })
         ),
@@ -123,7 +123,7 @@ function MemorySettings() {
           ),
           React.createElement(Switch, {
             checked: config.enable_session_isolation,
-            onChange: (checked: boolean) => handleChange('enable_session_isolation', checked),
+            onChange: (checked) => handleChange('enable_session_isolation', checked),
             loading: saving
           })
         ),
@@ -135,7 +135,7 @@ function MemorySettings() {
           ),
           React.createElement(Switch, {
             checked: config.enable_memory_freeze,
-            onChange: (checked: boolean) => handleChange('enable_memory_freeze', checked),
+            onChange: (checked) => handleChange('enable_memory_freeze', checked),
             loading: saving
           })
         )
@@ -154,10 +154,10 @@ function MemorySettings() {
 }
 
 class HumanThinkingPlugin {
-  readonly id = "humanthinking-memory";
+  id = "humanthinking-memory";
 
-  setup(): void {
-    (window as any).QwenPaw.registerRoutes?.(this.id, [
+  setup() {
+    window.QwenPaw.registerRoutes?.(this.id, [
       {
         path: '/plugin/humanthinking/dashboard',
         component: HumanThinkingDashboard,
