@@ -13,7 +13,6 @@ var Button = antd.Button;
 var Divider = antd.Divider;
 var Alert = antd.Alert;
 var Space = antd.Space;
-var Tabs = antd.Tabs;
 var Table = antd.Table;
 var Tag = antd.Tag;
 var InputNumber = antd.InputNumber;
@@ -59,8 +58,28 @@ function saveConfigFn(key, config) {
   catch (e) { console.error('Save error:', e); return false; }
 }
 
+function getStyles() {
+  var isDark = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  var bg = isDark ? '#1f1f1f' : '#ffffff';
+  var bgLight = isDark ? '#262626' : '#f5f5f5';
+  var border = isDark ? '#424242' : '#d9d9d9';
+  var text = isDark ? '#ffffff' : '#000000';
+  var textSecondary = isDark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.45)';
+  var primary = '#1677ff';
+  
+  return {
+    statCard: { padding: 16, textAlign: 'center', background: bg, borderRadius: 8, border: '1px solid ' + border },
+    statNum: { fontSize: 24, fontWeight: 'bold', color: primary },
+    statLabel: { fontSize: 12, color: textSecondary, marginTop: 4 },
+    backupBox: { marginBottom: 16, padding: 12, background: bgLight, borderRadius: 8, border: '1px solid ' + border },
+    backupText: { color: text },
+    backupTextSecondary: { color: textSecondary, fontSize: 12 }
+  };
+}
+
 function Dashboard() {
   var _a = useState(loadConfig(BACKUP_CONFIG_KEY, defaultBackupConfig)), backupConfig = _a[0], setBackupConfig = _a[1];
+  var styles = getStyles();
   
   var mockAgents = [
     { agent_id: 'agent_001', agent_name: '客服助手', db_path: '/path/to/agent_001.db', db_size_mb: 2.35, memory_count: 89, last_updated: '2025-04-22 14:30', stats: { fact: 23, preference: 45, emotion: 12, general: 9 } },
@@ -78,10 +97,6 @@ function Dashboard() {
     { title: '更新时间', dataIndex: 'last_updated', key: 'last_updated', width: 150 },
   ];
 
-  var statCardStyle = { padding: 16, textAlign: 'center', background: 'var(--ant-component-background, #fff)', borderRadius: 8, border: '1px solid var(--ant-border-color-split, #d9d9d9)' };
-  var statNumStyle = { fontSize: 24, fontWeight: 'bold', color: '#1677ff' };
-  var statLabelStyle = { fontSize: 12, color: 'var(--ant-text-color-secondary, #666)', marginTop: 4 };
-
   function handleAutoBackupChange(checked) {
     var newConfig = Object.assign({}, backupConfig, { auto_backup_enabled: checked });
     saveConfigFn(BACKUP_CONFIG_KEY, newConfig);
@@ -96,55 +111,16 @@ function Dashboard() {
     setBackupConfig(newConfig);
     message.success('间隔已更新为 ' + val + ' 小时');
   }
-
-  var tabItems = [
-    {
-      key: 'overview',
-      label: '📊 总览',
-      children: React.createElement('div', null,
-        React.createElement(Row, { gutter: 16, style: { marginTop: 24 } },
-          React.createElement(Col, { span: 6 }, React.createElement('div', { style: statCardStyle }, React.createElement('div', { style: statNumStyle }, '2'), React.createElement('div', { style: statLabelStyle }, 'Agent数'))),
-          React.createElement(Col, { span: 6 }, React.createElement('div', { style: statCardStyle }, React.createElement('div', { style: statNumStyle }, '323'), React.createElement('div', { style: statLabelStyle }, '总记忆数'))),
-          React.createElement(Col, { span: 6 }, React.createElement('div', { style: statCardStyle }, React.createElement('div', { style: statNumStyle }, '156'), React.createElement('div', { style: statLabelStyle }, '跨Session记忆'))),
-          React.createElement(Col, { span: 6 }, React.createElement('div', { style: statCardStyle }, React.createElement('div', { style: statNumStyle }, '3'), React.createElement('div', { style: statLabelStyle }, '活跃会话')))
-        ),
-        React.createElement(Space, { style: { marginTop: 24 } }, React.createElement(Button, { icon: '🔄', onClick: function() { message.success('刷新成功'); } }, '刷新数据'))
-      )
-    },
-    {
-      key: 'agents',
-      label: '🤖 Agent列表',
-      children: React.createElement('div', { style: { marginTop: 16 } },
-        React.createElement('div', { style: { marginBottom: 16 } },
-          React.createElement(Space, null,
-            React.createElement(Button, { onClick: function() { message.info('全选功能'); } }, '全选'),
-            React.createElement(Button, { onClick: function() { message.info('取消选择'); } }, '取消'),
-            React.createElement(Button, { type: 'primary', danger: true, onClick: function() { message.info('批量备份'); } }, '批量备份选中 (0)')
-          )
-        ),
-        React.createElement('div', { style: { marginBottom: 16, padding: 12, background: 'var(--ant-background-color-light, #fafafa)', borderRadius: 8 } },
-          React.createElement(Space, null,
-            React.createElement(Text, { strong: true }, '自动备份：'),
-            React.createElement(Switch, { size: 'small', checked: backupConfig.auto_backup_enabled, onChange: handleAutoBackupChange }),
-            React.createElement(Text, { style: { marginLeft: 16 } }, '间隔'),
-            React.createElement(InputNumber, { size: 'small', min: 1, max: 168, value: backupConfig.auto_backup_interval_hours, onChange: handleIntervalChange, style: { width: 60 } }),
-            React.createElement(Text, null, '小时')
-          )
-        ),
-        React.createElement(Table, { columns: agentColumns, dataSource: mockAgents, rowKey: 'agent_id', pagination: { pageSize: 10, showTotal: function(total) { return '共 ' + total + ' 个 Agent'; }, showSizeChanger: true }, rowSelection: { onChange: function(keys) { console.log('Selected:', keys); } }, size: 'small' })
-      )
-    }
-  ];
   
   return React.createElement('div', { style: { padding: 24 } },
     React.createElement(Title, { level: 3 }, '🧠 HumanThinking 记忆管理'),
     React.createElement(Paragraph, null, '跨 Session 认知与情感连续性记忆管理系统'),
     
     React.createElement(Row, { gutter: 16, style: { marginTop: 24 } },
-      React.createElement(Col, { span: 6 }, React.createElement('div', { style: statCardStyle }, React.createElement('div', { style: statNumStyle }, '2'), React.createElement('div', { style: statLabelStyle }, 'Agent数'))),
-      React.createElement(Col, { span: 6 }, React.createElement('div', { style: statCardStyle }, React.createElement('div', { style: statNumStyle }, '323'), React.createElement('div', { style: statLabelStyle }, '总记忆数'))),
-      React.createElement(Col, { span: 6 }, React.createElement('div', { style: statCardStyle }, React.createElement('div', { style: statNumStyle }, '156'), React.createElement('div', { style: statLabelStyle }, '跨Session记忆'))),
-      React.createElement(Col, { span: 6 }, React.createElement('div', { style: statCardStyle }, React.createElement('div', { style: statNumStyle }, '3'), React.createElement('div', { style: statLabelStyle }, '活跃会话')))
+      React.createElement(Col, { span: 6 }, React.createElement('div', { style: styles.statCard }, React.createElement('div', { style: styles.statNum }, '2'), React.createElement('div', { style: styles.statLabel }, 'Agent数'))),
+      React.createElement(Col, { span: 6 }, React.createElement('div', { style: styles.statCard }, React.createElement('div', { style: styles.statNum }, '323'), React.createElement('div', { style: styles.statLabel }, '总记忆数'))),
+      React.createElement(Col, { span: 6 }, React.createElement('div', { style: styles.statCard }, React.createElement('div', { style: styles.statNum }, '156'), React.createElement('div', { style: styles.statLabel }, '跨Session记忆'))),
+      React.createElement(Col, { span: 6 }, React.createElement('div', { style: styles.statCard }, React.createElement('div', { style: styles.statNum }, '3'), React.createElement('div', { style: styles.statLabel }, '活跃会话')))
     ),
     
     React.createElement('div', { style: { marginTop: 24 } },
@@ -159,14 +135,12 @@ function Dashboard() {
       )
     ),
     
-    React.createElement('div', { style: { marginBottom: 16, padding: 12, background: 'var(--ant-background-color-light, #fafafa)', borderRadius: 8 } },
-      React.createElement(Space, null,
-        React.createElement(Text, { strong: true }, '自动备份：'),
-        React.createElement(Switch, { size: 'small', checked: backupConfig.auto_backup_enabled, onChange: handleAutoBackupChange }),
-        React.createElement(Text, { style: { marginLeft: 16 } }, '间隔'),
-        React.createElement(InputNumber, { size: 'small', min: 1, max: 168, value: backupConfig.auto_backup_interval_hours, onChange: handleIntervalChange, style: { width: 60 } }),
-        React.createElement(Text, null, '小时')
-      )
+    React.createElement('div', { style: styles.backupBox },
+      React.createElement(Text, { strong: true, style: styles.backupText }, '自动备份：'),
+      React.createElement(Switch, { size: 'small', checked: backupConfig.auto_backup_enabled, onChange: handleAutoBackupChange, style: { marginLeft: 8 } }),
+      React.createElement(Text, { style: { marginLeft: 16, color: styles.backupText.color } }, '间隔'),
+      React.createElement(InputNumber, { size: 'small', min: 1, max: 168, value: backupConfig.auto_backup_interval_hours, onChange: handleIntervalChange, style: { width: 60, marginLeft: 8 } }),
+      React.createElement(Text, { style: styles.backupTextSecondary }, '小时')
     ),
     
     React.createElement(Table, { columns: agentColumns, dataSource: mockAgents, rowKey: 'agent_id', pagination: { pageSize: 10, showTotal: function(total) { return '共 ' + total + ' 个 Agent'; }, showSizeChanger: true }, rowSelection: { onChange: function(keys) { console.log('Selected:', keys); } }, size: 'small' })
@@ -175,6 +149,7 @@ function Dashboard() {
 
 function SleepSettings() {
   var _a = useState(loadConfig(SLEEP_CONFIG_KEY, defaultSleepConfig)), sleepConfig = _a[0], setSleepConfig = _a[1];
+  var styles = getStyles();
 
   function handleChange(key, value) {
     var newConfig = Object.assign({}, sleepConfig, { [key]: value });
