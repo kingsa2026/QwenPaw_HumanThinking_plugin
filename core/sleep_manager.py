@@ -369,6 +369,13 @@ def pulse_agent(agent_id: str):
         _global_sleep_manager.record_activity(agent_id)
 
 
+def notify_task_start(agent_id: str):
+    """定时任务开始 - 唤醒睡眠中的Agent"""
+    if _global_sleep_manager:
+        _global_sleep_manager.record_activity(agent_id)
+        logger.info(f"Agent {agent_id} woken up by scheduled task")
+
+
 def is_agent_sleeping(agent_id: str) -> bool:
     if _global_sleep_manager:
         return _global_sleep_manager.is_sleeping(agent_id)
