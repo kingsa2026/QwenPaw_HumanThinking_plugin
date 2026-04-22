@@ -1127,22 +1127,27 @@ class HumanThinkingDB:
         """, (decay_score, memory_id))
         self.conn.commit()
     
-    async def apply_forgetting_curve(self, agent_id: str) -> int:
+    async def apply_forgetting_curve(self, agent_id: str, frozen_days: int = 7, archive_days: int = 30) -> int:
         """应用遗忘曲线，处理完整生命周期
         
         流程：
-        1. 冷藏：7天无访问 → 标记为冷藏
-        2. 归档：冷藏30天无访问 → 移动到归档表
+        1. 冷藏：N天无访问 → 标记为冷藏
+        2. 归档：冷藏M天无访问 → 移动到归档表
         3. 删除：归档90天无访问 → 彻底删除
         4. 衰减：活跃记忆 → 正常衰减
+        
+        Args:
+            agent_id: Agent ID
+            frozen_days: 冷藏天数（默认7天）
+            archive_days: 归档天数（默认30天）
         """
         import datetime
         frozen_count = 0
         archived_count = 0
         deleted_count = 0
         
-        # 1. 冷藏：7天无访问的记忆
-        self.cursor.execute("""
+        # 1. 冷藏：frozen_days 无访问的记忆
+        self.cursor.execute(f"""
             UPDATE qwenpaw_memory 
             SET memory_tier = 'frozen',
                 access_frozen = 1,
@@ -1154,17 +1159,17 @@ class HumanThinkingDB:
             AND memory_tier NOT IN ('frozen', 'archived')
             AND (
                 last_accessed_at IS NULL 
-                OR last_accessed_at < datetime('now', '-7 days')
+                OR last_accessed_at < datetime('now', '-{frozen_days} days')
             )
         """, (agent_id,))
         frozen_count = self.cursor.rowcount
         
-        # 2. 归档：冷藏30天无访问的记忆
-        self.cursor.execute("""
+        # 2. 归档：冷藏 archive_days 天无访问的记忆
+        self.cursor.execute(f"""
             SELECT id FROM qwenpaw_memory
             WHERE agent_id = ?
             AND memory_tier = 'frozen'
-            AND frozen_at < datetime('now', '-30 days')
+            AND frozen_at < datetime('now', '-{archive_days} days')
         """, (agent_id,))
         to_archive = [row[0] for row in self.cursor.fetchall()]
         

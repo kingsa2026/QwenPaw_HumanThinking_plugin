@@ -236,10 +236,14 @@ class HumanThinkingMemoryPlugin:
             # 初始化睡眠管理器
             from .core.sleep_manager import init_sleep_manager
             init_sleep_manager(
-                enable_sleep=True,
+                enable_agent_sleep=True,
                 sleep_idle_hours=2,
                 auto_consolidate=True,
-                consolidate_interval_hours=6
+                consolidate_days=7,
+                frozen_days=7,
+                archive_days=30,
+                enable_insight=True,
+                enable_dream_log=True
             )
             logger.info("✓ SleepManager initialized")
 

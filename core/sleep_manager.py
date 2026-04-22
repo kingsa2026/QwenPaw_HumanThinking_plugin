@@ -29,6 +29,8 @@ class SleepConfig:
         sleep_idle_hours: int = 2,
         auto_consolidate: bool = True,
         consolidate_days: int = 7,
+        frozen_days: int = 7,
+        archive_days: int = 30,
         enable_insight: bool = True,
         enable_dream_log: bool = True,
     ):
@@ -36,6 +38,8 @@ class SleepConfig:
         self.sleep_idle_seconds = sleep_idle_hours * 3600
         self.auto_consolidate = auto_consolidate
         self.consolidate_days = consolidate_days
+        self.frozen_days = min(frozen_days, 90)  # 最高90天
+        self.archive_days = min(max(archive_days, frozen_days + 1), 180)  # 最高180天，至少比冷藏多1天
         self.enable_insight = enable_insight
         self.enable_dream_log = enable_dream_log
 
@@ -150,7 +154,11 @@ class SleepManager:
             db = HumanThinkingDB(agent_id)
             await db.initialize()
             
-            forgetting_result = await db.apply_forgetting_curve(agent_id)
+            forgetting_result = await db.apply_forgetting_curve(
+                agent_id,
+                frozen_days=self.config.frozen_days,
+                archive_days=self.config.archive_days
+            )
             logger.info(f"Agent {agent_id} forgetting curve applied: {forgetting_result}")
         except Exception as e:
             logger.error(f"Error applying forgetting curve: {e}")

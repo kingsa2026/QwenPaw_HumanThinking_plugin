@@ -44,6 +44,8 @@ var defaultSleepConfig = {
   auto_consolidate: true,
   consolidate_interval_hours: 6,
   consolidate_days: 7,
+  frozen_days: 7,
+  archive_days: 30,
   enable_insight: true,
   enable_dream_log: true,
 };
@@ -194,6 +196,25 @@ function SleepSettings() {
               React.createElement('div', null, '• 清理冗余：应用遗忘曲线，归档过期信息'),
               React.createElement('div', null, '• 生成洞察：发现隐藏模式，输出1-3个建议')
             )
+          )
+        )
+      ),
+
+      React.createElement(Card, { title: '❄️ 遗忘曲线', style: { marginTop: 16 } },
+        React.createElement('div', null,
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12 } },
+            React.createElement(Text, null, '冷藏时间：'),
+            React.createElement(InputNumber, { min: 1, max: 90, value: sleepConfig.frozen_days, onChange: function(val) { val && handleChange('frozen_days', val); }, style: { width: 70 } }),
+            React.createElement(Text, null, '天（无访问后自动冷藏，最高90天）')
+          ),
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 16 } },
+            React.createElement(Text, null, '归档时间：'),
+            React.createElement(InputNumber, { min: 1, max: 180, value: sleepConfig.archive_days, onChange: function(val) { val && handleChange('archive_days', val); }, style: { width: 70 } }),
+            React.createElement(Text, null, '天（冷藏后自动归档，最高180天）')
+          ),
+          React.createElement('div', { style: { marginTop: 12, fontSize: 12, color: 'var(--ant-text-color-secondary)' } },
+            React.createElement('div', null, '• 活跃 → 冷藏 → 归档 → 删除'),
+            React.createElement('div', null, '• 访问冷藏记忆会自动唤醒')
           )
         )
       ),
