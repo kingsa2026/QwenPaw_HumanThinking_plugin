@@ -1,21 +1,6 @@
 /** HumanThinking Memory Manager - Frontend Plugin Entry. */
 
 var React = window.QwenPaw.host.React;
-var antd = window.QwenPaw.host.antd;
-var Switch = antd.Switch;
-var Card = antd.Card;
-var Typography = antd.Typography;
-var Row = antd.Row;
-var Col = antd.Col;
-var Statistic = antd.Stat;
-var Button = antd.Button;
-var Divider = antd.Divider;
-var Alert = antd.Alert;
-var Space = antd.Space;
-
-var Title = Typography.Title;
-var Paragraph = Typography.Paragraph;
-var Text = Typography.Text;
 
 var CONFIG_KEY = 'humanthinking_config';
 var defaultConfig = {
@@ -23,10 +8,6 @@ var defaultConfig = {
   enable_emotion: true,
   enable_session_isolation: true,
   enable_memory_freeze: true,
-  session_idle_timeout: 180,
-  refresh_interval: 5,
-  max_results: 5,
-  max_memory_chars: 150,
 };
 
 function getConfig() {
@@ -57,36 +38,39 @@ function saveConfig(config) {
 }
 
 function Dashboard() {
-  return React.createElement('div', { style: { padding: 24 } },
-    React.createElement(Title, { level: 3 }, '🧠 HumanThinking 记忆管理'),
-    React.createElement(Paragraph, null, '跨 Session 认知与情感连续性记忆管理系统'),
+  var containerStyle = { padding: 24 };
+  var titleStyle = { fontSize: 20, fontWeight: 'bold', marginBottom: 8 };
+  var descStyle = { color: '#666', marginBottom: 24 };
+  var statRowStyle = { display: 'flex', gap: 16, marginBottom: 24 };
+  var statStyle = { flex: 1, padding: 16, background: 'var(--antd-token, #f5f5f5)', borderRadius: 8, textAlign: 'center' };
+  var statNumStyle = { fontSize: 28, fontWeight: 'bold', color: '#1677ff' };
+  var statLabelStyle = { fontSize: 12, color: '#666', marginTop: 4 };
+  var btnStyle = { padding: '8px 16px', background: '#1677ff', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' };
+
+  return React.createElement('div', { style: containerStyle },
+    React.createElement('h2', { style: titleStyle }, '🧠 HumanThinking 记忆管理'),
+    React.createElement('p', { style: descStyle }, '跨 Session 认知与情感连续性记忆管理系统'),
     
-    React.createElement(Row, { gutter: 16, style: { marginTop: 24 } },
-      React.createElement(Col, { span: 6 },
-        React.createElement(Card, null,
-          React.createElement(Statistic, { title: '总记忆数', value: 0 })
-        )
+    React.createElement('div', { style: statRowStyle },
+      React.createElement('div', { style: statStyle },
+        React.createElement('div', { style: statNumStyle }, '0'),
+        React.createElement('div', { style: statLabelStyle }, '总记忆数')
       ),
-      React.createElement(Col, { span: 6 },
-        React.createElement(Card, null,
-          React.createElement(Statistic, { title: '跨Session记忆', value: 0 })
-        )
+      React.createElement('div', { style: statStyle },
+        React.createElement('div', { style: statNumStyle }, '0'),
+        React.createElement('div', { style: statLabelStyle }, '跨Session记忆')
       ),
-      React.createElement(Col, { span: 6 },
-        React.createElement(Card, null,
-          React.createElement(Statistic, { title: '冷藏记忆', value: 0 })
-        )
+      React.createElement('div', { style: statStyle },
+        React.createElement('div', { style: statNumStyle }, '0'),
+        React.createElement('div', { style: statLabelStyle }, '冷藏记忆')
       ),
-      React.createElement(Col, { span: 6 },
-        React.createElement(Card, null,
-          React.createElement(Statistic, { title: '活跃会话', value: 0 })
-        )
+      React.createElement('div', { style: statStyle },
+        React.createElement('div', { style: statNumStyle }, '0'),
+        React.createElement('div', { style: statLabelStyle }, '活跃会话')
       )
     ),
     
-    React.createElement(Space, { style: { marginTop: 24 } },
-      React.createElement(Button, { icon: '🔄', onClick: function() { console.log('Refresh'); } }, '刷新数据')
-    )
+    React.createElement('button', { style: btnStyle, onClick: function() { console.log('Refresh'); } }, '🔄 刷新数据')
   );
 }
 
@@ -104,78 +88,85 @@ function Settings() {
     }
   }
 
-  var switchStyle = { marginLeft: 'auto' };
-  var itemStyle = { display: 'flex', alignItems: 'center', padding: '12px 0', justifyContent: 'space-between' };
+  var containerStyle = { padding: 24 };
+  var titleStyle = { fontSize: 20, fontWeight: 'bold', marginBottom: 8 };
+  var descStyle = { color: '#666', marginBottom: 24 };
+  var cardStyle = { border: '1px solid #d9d9d9', borderRadius: 8, overflow: 'hidden' };
+  var cardTitleStyle = { fontSize: 14, fontWeight: 'bold', padding: '12px 16px', borderBottom: '1px solid #d9d9d9', margin: 0 };
+  var itemStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px' };
+  var labelStyle = { fontWeight: 'bold', fontSize: 14 };
+  var desc2Style = { fontSize: 12, color: '#666', marginTop: 2 };
+  var hrStyle = { margin: 0, border: 'none', borderTop: '1px solid #d9d9d9' };
+  var checkboxStyle = { width: 18, height: 18, cursor: 'pointer' };
+  var alertStyle = { marginTop: 16, padding: 12, background: '#e6f4ff', border: '1px solid #91d5ff', borderRadius: 8 };
 
-  return React.createElement('div', { style: { padding: 24 } },
-    React.createElement(Title, { level: 3 }, '⚙️ 记忆设置'),
-    React.createElement(Paragraph, null, '配置 HumanThinking 记忆管理功能'),
+  return React.createElement('div', { style: containerStyle },
+    React.createElement('h2', { style: titleStyle }, '⚙️ 记忆设置'),
+    React.createElement('p', { style: descStyle }, '配置 HumanThinking 记忆管理功能'),
     
-    React.createElement(Card, { title: '功能开关', style: { marginTop: 16 } },
-      React.createElement('div', null,
-        React.createElement('div', { style: itemStyle },
-          React.createElement('div', null,
-            React.createElement(Text, { strong: true }, '跨Session记忆'),
-            React.createElement(Paragraph, { type: 'secondary', style: { marginBottom: 0, fontSize: 12 } }, '新Session自动继承相关历史记忆')
-          ),
-          React.createElement(Switch, {
-            style: switchStyle,
-            checked: config.enable_cross_session,
-            onChange: function(checked) { handleChange('enable_cross_session', checked); }
-          })
+    React.createElement('div', { style: cardStyle },
+      React.createElement('div', { style: cardTitleStyle }, '功能开关'),
+      
+      React.createElement('div', { style: itemStyle },
+        React.createElement('div', null,
+          React.createElement('div', { style: labelStyle }, '跨Session记忆'),
+          React.createElement('div', { style: desc2Style }, '新Session自动继承相关历史记忆')
         ),
-        
-        React.createElement(Divider, { style: { margin: '12px 0' } }),
-        
-        React.createElement('div', { style: itemStyle },
-          React.createElement('div', null,
-            React.createElement(Text, { strong: true }, '情感连续性'),
-            React.createElement(Paragraph, { type: 'secondary', style: { marginBottom: 0, fontSize: 12 } }, '跟踪对话情感变化，注入上下文')
-          ),
-          React.createElement(Switch, {
-            style: switchStyle,
-            checked: config.enable_emotion,
-            onChange: function(checked) { handleChange('enable_emotion', checked); }
-          })
+        React.createElement('input', {
+          type: 'checkbox',
+          style: checkboxStyle,
+          checked: config.enable_cross_session,
+          onChange: function(e) { handleChange('enable_cross_session', e.target.checked); }
+        })
+      ),
+      React.createElement('hr', { style: hrStyle }),
+      
+      React.createElement('div', { style: itemStyle },
+        React.createElement('div', null,
+          React.createElement('div', { style: labelStyle }, '情感连续性'),
+          React.createElement('div', { style: desc2Style }, '跟踪对话情感变化，注入上下文')
         ),
-        
-        React.createElement(Divider, { style: { margin: '12px 0' } }),
-        
-        React.createElement('div', { style: itemStyle },
-          React.createElement('div', null,
-            React.createElement(Text, { strong: true }, '会话隔离'),
-            React.createElement(Paragraph, { type: 'secondary', style: { marginBottom: 0, fontSize: 12 } }, '按AgentID + UserID + SessionID隔离')
-          ),
-          React.createElement(Switch, {
-            style: switchStyle,
-            checked: config.enable_session_isolation,
-            onChange: function(checked) { handleChange('enable_session_isolation', checked); }
-          })
+        React.createElement('input', {
+          type: 'checkbox',
+          style: checkboxStyle,
+          checked: config.enable_emotion,
+          onChange: function(e) { handleChange('enable_emotion', e.target.checked); }
+        })
+      ),
+      React.createElement('hr', { style: hrStyle }),
+      
+      React.createElement('div', { style: itemStyle },
+        React.createElement('div', null,
+          React.createElement('div', { style: labelStyle }, '会话隔离'),
+          React.createElement('div', { style: desc2Style }, '按AgentID + UserID + SessionID隔离')
         ),
-        
-        React.createElement(Divider, { style: { margin: '12px 0' } }),
-        
-        React.createElement('div', { style: itemStyle },
-          React.createElement('div', null,
-            React.createElement(Text, { strong: true }, '记忆冷藏'),
-            React.createElement(Paragraph, { type: 'secondary', style: { marginBottom: 0, fontSize: 12 } }, '7天无访问自动冷藏，释放缓存空间')
-          ),
-          React.createElement(Switch, {
-            style: switchStyle,
-            checked: config.enable_memory_freeze,
-            onChange: function(checked) { handleChange('enable_memory_freeze', checked); }
-          })
-        )
+        React.createElement('input', {
+          type: 'checkbox',
+          style: checkboxStyle,
+          checked: config.enable_session_isolation,
+          onChange: function(e) { handleChange('enable_session_isolation', e.target.checked); }
+        })
+      ),
+      React.createElement('hr', { style: hrStyle }),
+      
+      React.createElement('div', { style: itemStyle },
+        React.createElement('div', null,
+          React.createElement('div', { style: labelStyle }, '记忆冷藏'),
+          React.createElement('div', { style: desc2Style }, '7天无访问自动冷藏，释放缓存空间')
+        ),
+        React.createElement('input', {
+          type: 'checkbox',
+          style: checkboxStyle,
+          checked: config.enable_memory_freeze,
+          onChange: function(e) { handleChange('enable_memory_freeze', e.target.checked); }
+        })
       )
     ),
     
-    React.createElement(Alert, {
-      message: '💡 提示',
-      description: '修改设置后，部分功能需要刷新页面或新会话才能完全生效',
-      type: 'info',
-      showIcon: true,
-      style: { marginTop: 16 }
-    })
+    React.createElement('div', { style: alertStyle },
+      React.createElement('div', { style: { fontWeight: 'bold', color: '#1677ff' } }, '💡 提示'),
+      React.createElement('div', { style: { fontSize: 12, color: '#666', marginTop: 4 } }, '修改设置后，部分功能需要刷新页面或新会话才能完全生效')
+    )
   );
 }
 
