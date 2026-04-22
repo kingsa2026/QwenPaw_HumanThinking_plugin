@@ -254,7 +254,11 @@ function HumanThinkingDashboard() {
               columns={agentColumns}
               rowKey="agent_id"
               loading={loading}
-              pagination={{ pageSize: 10 }}
+              pagination={{ 
+                pageSize: 10,
+                showSizeChanger: true,
+                showTotal: (total: number) => `共 ${total} 个 Agent`
+              }}
               size="small"
             />
           </Card>
