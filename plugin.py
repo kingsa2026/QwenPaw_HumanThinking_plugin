@@ -233,8 +233,15 @@ class HumanThinkingMemoryPlugin:
         try:
             logger.info("=== HumanThinking Memory Manager Initialization ===")
 
-            # 在这里可以初始化全局资源
-            # 记忆管理器会在每个 Agent 创建时实例化
+            # 初始化睡眠管理器
+            from .core.sleep_manager import init_sleep_manager
+            init_sleep_manager(
+                enable_sleep=True,
+                sleep_idle_hours=2,
+                auto_consolidate=True,
+                consolidate_interval_hours=6
+            )
+            logger.info("✓ SleepManager initialized")
 
             logger.info("✓ HumanThinking Memory Manager initialized successfully")
 
@@ -249,7 +256,12 @@ class HumanThinkingMemoryPlugin:
         try:
             logger.info("=== HumanThinking Memory Manager Cleanup ===")
 
-            # 在这里可以清理全局资源
+            # 停止睡眠管理器
+            from .core.sleep_manager import get_sleep_manager
+            sleep_mgr = get_sleep_manager()
+            if sleep_mgr:
+                sleep_mgr.stop()
+                logger.info("✓ SleepManager stopped")
 
             logger.info("✓ HumanThinking Memory Manager cleanup completed")
 

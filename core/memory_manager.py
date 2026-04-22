@@ -419,6 +419,13 @@ class HumanThinkingMemoryManager(BaseMemoryManager):
         
         temp_id = await self.cache_pool.store(memory, sid)
         
+        # 记录 Agent 活动，唤醒睡眠中的 Agent
+        try:
+            from .sleep_manager import record_agent_activity
+            record_agent_activity(self.agent_id)
+        except ImportError:
+            pass
+        
         logger.debug(f"Stored memory: temp_id={temp_id}, session={sid}")
         return hash(temp_id) % 1000000
     
