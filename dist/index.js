@@ -139,7 +139,37 @@ function Dashboard() {
   return React.createElement('div', { style: { padding: 24 } },
     React.createElement(Title, { level: 3 }, '🧠 HumanThinking 记忆管理'),
     React.createElement(Paragraph, null, '跨 Session 认知与情感连续性记忆管理系统'),
-    React.createElement(Tabs, { items: tabItems, defaultActiveKey: 'overview' })
+    
+    React.createElement(Row, { gutter: 16, style: { marginTop: 24 } },
+      React.createElement(Col, { span: 6 }, React.createElement('div', { style: statCardStyle }, React.createElement('div', { style: statNumStyle }, '2'), React.createElement('div', { style: statLabelStyle }, 'Agent数'))),
+      React.createElement(Col, { span: 6 }, React.createElement('div', { style: statCardStyle }, React.createElement('div', { style: statNumStyle }, '323'), React.createElement('div', { style: statLabelStyle }, '总记忆数'))),
+      React.createElement(Col, { span: 6 }, React.createElement('div', { style: statCardStyle }, React.createElement('div', { style: statNumStyle }, '156'), React.createElement('div', { style: statLabelStyle }, '跨Session记忆'))),
+      React.createElement(Col, { span: 6 }, React.createElement('div', { style: statCardStyle }, React.createElement('div', { style: statNumStyle }, '3'), React.createElement('div', { style: statLabelStyle }, '活跃会话')))
+    ),
+    
+    React.createElement('div', { style: { marginTop: 24 } },
+      React.createElement(Button, { icon: '🔄', onClick: function() { message.success('刷新成功'); }, style: { marginBottom: 16 } }, '刷新数据')
+    ),
+    
+    React.createElement('div', { style: { marginBottom: 16 } },
+      React.createElement(Space, null,
+        React.createElement(Button, { onClick: function() { message.info('全选功能'); } }, '全选'),
+        React.createElement(Button, { onClick: function() { message.info('取消选择'); } }, '取消'),
+        React.createElement(Button, { type: 'primary', danger: true, onClick: function() { message.info('批量备份'); } }, '批量备份选中 (0)')
+      )
+    ),
+    
+    React.createElement('div', { style: { marginBottom: 16, padding: 12, background: 'var(--ant-background-color-light, #fafafa)', borderRadius: 8 } },
+      React.createElement(Space, null,
+        React.createElement(Text, { strong: true }, '自动备份：'),
+        React.createElement(Switch, { size: 'small', checked: backupConfig.auto_backup_enabled, onChange: handleAutoBackupChange }),
+        React.createElement(Text, { style: { marginLeft: 16 } }, '间隔'),
+        React.createElement(InputNumber, { size: 'small', min: 1, max: 168, value: backupConfig.auto_backup_interval_hours, onChange: handleIntervalChange, style: { width: 60 } }),
+        React.createElement(Text, null, '小时')
+      )
+    ),
+    
+    React.createElement(Table, { columns: agentColumns, dataSource: mockAgents, rowKey: 'agent_id', pagination: { pageSize: 10, showTotal: function(total) { return '共 ' + total + ' 个 Agent'; }, showSizeChanger: true }, rowSelection: { onChange: function(keys) { console.log('Selected:', keys); } }, size: 'small' })
   );
 }
 
