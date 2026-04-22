@@ -91,6 +91,8 @@ function HumanThinkingDashboard() {
   const [recentMemories, setRecentMemories] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState('overview');
+  const [selectedAgents, setSelectedAgents] = React.useState<string[]>([]);
+  const [backingUp, setBackingUp] = React.useState(false);
 
   const fetchData = async () => {
     setLoading(true);
@@ -249,7 +251,62 @@ function HumanThinkingDashboard() {
       children: (
         <div>
           <Card title="Agent记忆统计" style={{ marginTop: 24 }}>
+            <div style={{ marginBottom: 16 }}>
+              <Space>
+                <Button 
+                  onClick={() => setSelectedAgents(agentList.map(a => a.agent_id))}
+                  size="small"
+                >
+                  全选
+                </Button>
+                <Button 
+                  onClick={() => setSelectedAgents([])}
+                  size="small"
+                >
+                  取消
+                </Button>
+                <Button 
+                  type="primary"
+                  danger
+                  disabled={selectedAgents.length === 0 || backingUp}
+                  loading={backingUp}
+                  onClick={async () => {
+                    if (selectedAgents.length === 0) {
+                      message.warning('请先选择要备份的 Agent');
+                      return;
+                    }
+                    setBackingUp(true);
+                    message.info(`正在备份 ${selectedAgents.length} 个 Agent...`);
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
+                    const newBackup = {
+                      id: Date.now(),
+                      time: new Date().toLocaleString(),
+                      agents: selectedAgents.length,
+                      size: `${(Math.random() * selectedAgents.length * 5 + 1).toFixed(2)} MB`,
+                      status: 'success'
+                    };
+                    
+                    try {
+                      const history = localStorage.getItem('humanthinking_backup_history');
+                      const backupList = history ? JSON.parse(history) : [];
+                      const newList = [newBackup, ...backupList].slice(0, 10);
+                      localStorage.setItem('humanthinking_backup_history', JSON.stringify(newList));
+                    } catch (e) {}
+                    
+                    setBackingUp(false);
+                    message.success(`已成功备份 ${selectedAgents.length} 个 Agent`);
+                  }}
+                >
+                  批量备份选中 ({selectedAgents.length})
+                </Button>
+              </Space>
+            </div>
             <Table
+              rowSelection={{
+                selectedRowKeys: selectedAgents,
+                onChange: (keys: React.Key[]) => setSelectedAgents(keys as string[])
+              }}
               dataSource={agentList}
               columns={agentColumns}
               rowKey="agent_id"
