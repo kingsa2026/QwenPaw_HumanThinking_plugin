@@ -428,7 +428,9 @@ class HumanThinkingDB:
         max_results: int = 5,
         min_score: float = 0.1,
         exclude_recent_rounds: int = 0,
-        round_duration_seconds: int = 300
+        round_duration_seconds: int = 300,
+        include_frozen: bool = True,
+        include_archived: bool = False
     ) -> List[MemoryRecord]:
         """
         搜索记忆（会话隔离 + 对话对象隔离）
@@ -445,55 +447,114 @@ class HumanThinkingDB:
             min_score: 最小分数
             exclude_recent_rounds: 排除最近N轮对话的记忆（防止与压缩摘要重复）
             round_duration_seconds: 每次对话轮次的时长（秒），默认300秒
+            include_frozen: 是否包含冷藏记忆（会唤醒）
+            include_archived: 是否包含归档记忆
         
         Returns:
             MemoryRecord 列表
         """
-        # 基础查询
+        results = []
+        
+        # 1. 搜索活跃记忆
         sql = "SELECT * FROM qwenpaw_memory WHERE agent_id = ? AND deleted_at IS NULL"
         params = [agent_id]
         
-        # Target 过滤（对话对象隔离）
         if target_id:
             sql += " AND target_id = ?"
             params.append(target_id)
         
-        # Session 过滤
         if cross_session:
-            # 跨 session 时，不添加 session_id 过滤
             pass
         elif session_id:
             sql += " AND session_id = ?"
             params.append(session_id)
         
-        # User 过滤
         if user_id:
             sql += " AND user_id = ?"
             params.append(user_id)
         
-        # Role 过滤
         if role:
             sql += " AND role = ?"
             params.append(role)
         
-        # 内容搜索（LIKE）
         sql += " AND content LIKE ?"
         params.append(f"%{query}%")
         
-        # 排除最近N轮对话的记忆（防止与QwenPaw压缩摘要重复）
         if exclude_recent_rounds > 0:
             exclude_seconds = exclude_recent_rounds * round_duration_seconds
             sql += f" AND created_at < datetime('now', '-{exclude_seconds} seconds')"
         
-        # 排序
         sql += " ORDER BY importance DESC, created_at DESC"
         sql += " LIMIT ?"
-        params.append(max_results)
+        params.append(max_results * 2)
         
         self.cursor.execute(sql, params)
-        rows = self.cursor.fetchall()
+        active_results = [self._row_to_record(row) for row in self.cursor.fetchall()]
+        results.extend(active_results)
         
-        return [self._row_to_record(row) for row in rows]
+        # 2. 如果活跃记忆不够，搜索冷藏记忆并唤醒
+        if include_frozen and len(results) < max_results:
+            frozen_sql = "SELECT * FROM qwenpaw_memory WHERE agent_id = ? AND deleted_at IS NULL AND memory_tier = 'frozen'"
+            frozen_params = [agent_id]
+            
+            if target_id:
+                frozen_sql += " AND target_id = ?"
+                frozen_params.append(target_id)
+            if user_id:
+                frozen_sql += " AND user_id = ?"
+                frozen_params.append(user_id)
+            frozen_sql += " AND content LIKE ?"
+            frozen_params.append(f"%{query}%")
+            frozen_sql += " ORDER BY importance DESC LIMIT ?"
+            frozen_params.append(max_results)
+            
+            self.cursor.execute(frozen_sql, frozen_params)
+            frozen_rows = self.cursor.fetchall()
+            
+            for row in frozen_rows:
+                memory = self._row_to_record(row)
+                # 唤醒冷藏记忆
+                await self.wakeup_memory(memory.id)
+                results.append(memory)
+        
+        # 3. 可选：搜索归档记忆
+        if include_archived and len(results) < max_results:
+            archived_sql = "SELECT * FROM qwenpaw_memory_archive WHERE agent_id = ?"
+            archived_params = [agent_id]
+            
+            if target_id:
+                archived_sql += " AND target_id = ?"
+                archived_params.append(target_id)
+            if user_id:
+                archived_sql += " AND user_id = ?"
+                archived_params.append(user_id)
+            archived_sql += " AND content LIKE ?"
+            archived_params.append(f"%{query}%")
+            archived_sql += " ORDER BY importance DESC LIMIT ?"
+            archived_params.append(max_results)
+            
+            self.cursor.execute(archived_sql, archived_params)
+            for row in self.cursor.fetchall():
+                results.append(dict(row))
+        
+        # 4. 排序并返回结果
+        results.sort(key=lambda x: (x.get('importance', 0), x.get('created_at', '')), reverse=True)
+        return results[:max_results]
+    
+    async def wakeup_memory(self, memory_id: int) -> bool:
+        """唤醒冷藏记忆"""
+        self.cursor.execute("""
+            UPDATE qwenpaw_memory 
+            SET memory_tier = 'active',
+                access_frozen = 0,
+                decay_score = 1.0,
+                frozen_at = NULL,
+                last_accessed_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (memory_id,))
+        self.conn.commit()
+        return self.cursor.rowcount > 0
     
     async def get_session_memories(
         self,
@@ -529,16 +590,35 @@ class HumanThinkingDB:
         return [dict(row) for row in self.cursor.fetchall()]
     
     async def update_memory_access(self, memory_id: int) -> None:
-        """更新记忆访问统计"""
+        """更新记忆访问统计，唤醒冷藏记忆"""
         import datetime
         
         now = datetime.datetime.now().isoformat()
         
-        self.cursor.execute("""
-            UPDATE qwenpaw_memory 
-            SET access_count = access_count + 1, last_accessed_at = ?
-            WHERE id = ?
-        """, (now, memory_id))
+        # 检查是否是冷藏记忆，如果是则唤醒
+        self.cursor.execute("SELECT memory_tier FROM qwenpaw_memory WHERE id = ?", (memory_id,))
+        row = self.cursor.fetchone()
+        
+        if row and row[0] == 'frozen':
+            # 唤醒冷藏记忆
+            self.cursor.execute("""
+                UPDATE qwenpaw_memory 
+                SET access_count = access_count + 1, 
+                    last_accessed_at = ?,
+                    memory_tier = 'active',
+                    access_frozen = 0,
+                    decay_score = 1.0,
+                    frozen_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (now, memory_id))
+        else:
+            self.cursor.execute("""
+                UPDATE qwenpaw_memory 
+                SET access_count = access_count + 1, last_accessed_at = ?
+                WHERE id = ?
+            """, (now, memory_id))
+        
         self.conn.commit()
     
     async def count_memories(
