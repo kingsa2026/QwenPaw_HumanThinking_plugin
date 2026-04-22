@@ -41,8 +41,8 @@ function Dashboard() {
   var containerStyle = { padding: 24 };
   var titleStyle = { fontSize: 20, fontWeight: 'bold', marginBottom: 8 };
   var descStyle = { color: '#666', marginBottom: 24 };
-  var statRowStyle = { display: 'flex', gap: 16, marginBottom: 24 };
-  var statStyle = { flex: 1, padding: 16, background: 'var(--antd-token, #f5f5f5)', borderRadius: 8, textAlign: 'center' };
+  var cardStyle = { border: '1px solid #d9d9d9', borderRadius: 8, padding: 16, marginBottom: 16 };
+  var statStyle = { display: 'inline-block', width: '23%', padding: 16, background: '#f5f5f5', borderRadius: 8, textAlign: 'center', marginRight: '1%' };
   var statNumStyle = { fontSize: 28, fontWeight: 'bold', color: '#1677ff' };
   var statLabelStyle = { fontSize: 12, color: '#666', marginTop: 4 };
   var btnStyle = { padding: '8px 16px', background: '#1677ff', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' };
@@ -51,14 +51,14 @@ function Dashboard() {
     React.createElement('h2', { style: titleStyle }, '🧠 HumanThinking 记忆管理'),
     React.createElement('p', { style: descStyle }, '跨 Session 认知与情感连续性记忆管理系统'),
     
-    React.createElement('div', { style: statRowStyle },
+    React.createElement('div', { style: cardStyle },
       React.createElement('div', { style: statStyle },
         React.createElement('div', { style: statNumStyle }, '0'),
         React.createElement('div', { style: statLabelStyle }, '总记忆数')
       ),
       React.createElement('div', { style: statStyle },
         React.createElement('div', { style: statNumStyle }, '0'),
-        React.createElement('div', { style: statLabelStyle }, '跨Session记忆')
+        React.createElement('div', { style: statLabelStyle }, '跨Session')
       ),
       React.createElement('div', { style: statStyle },
         React.createElement('div', { style: statNumStyle }, '0'),
