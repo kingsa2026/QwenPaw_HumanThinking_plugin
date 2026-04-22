@@ -16,6 +16,7 @@ var Space = antd.Space;
 var Table = antd.Table;
 var Tag = antd.Tag;
 var InputNumber = antd.InputNumber;
+var Tooltip = antd.Tooltip;
 var message = antd.message;
 
 var Title = Typography.Title;
@@ -166,10 +167,12 @@ function SleepSettings() {
 
     sleepConfig.enable_agent_sleep && React.createElement('div', null,
       React.createElement(Card, { title: '睡眠条件', style: { marginTop: 16 } },
-        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 16 } },
+        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
           React.createElement(Text, null, '会话空闲'),
-          React.createElement(InputNumber, { min: 0.5, max: 4, step: 0.5, value: sleepConfig.sleep_idle_hours, onChange: function(val) { val && handleChange('sleep_idle_hours', val); }, style: { width: 70 } }),
-          React.createElement(Text, null, '小时后进入睡眠（30分钟-4小时）')
+          React.createElement(Tooltip, { title: '会话空闲超过此时间后，Agent自动进入睡眠并执行记忆整理' },
+            React.createElement(InputNumber, { min: 0.5, max: 4, step: 0.5, value: sleepConfig.sleep_idle_hours, onChange: function(val) { val && handleChange('sleep_idle_hours', val); }, style: { width: 70 } })
+          ),
+          React.createElement(Text, null, '小时后进入睡眠')
         )
       ),
 
@@ -185,9 +188,11 @@ function SleepSettings() {
           
           sleepConfig.auto_consolidate && React.createElement('div', null,
             React.createElement(Divider, { style: { margin: '12px 0' } }),
-            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12 } },
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 } },
               React.createElement(Text, null, '扫描过去'),
-              React.createElement(InputNumber, { min: 1, max: 30, value: sleepConfig.consolidate_days, onChange: function(val) { val && handleChange('consolidate_days', val); }, style: { width: 60 } }),
+              React.createElement(Tooltip, { title: '每次睡眠时扫描此天数范围内的记忆进行整理和分类' },
+                React.createElement(InputNumber, { min: 1, max: 30, value: sleepConfig.consolidate_days, onChange: function(val) { val && handleChange('consolidate_days', val); }, style: { width: 60 } })
+              ),
               React.createElement(Text, null, '天的工作日志')
             ),
             React.createElement('div', { style: { fontSize: 12, color: 'var(--ant-text-color-secondary)' } },
@@ -201,15 +206,19 @@ function SleepSettings() {
 
       React.createElement(Card, { title: '❄️ 遗忘曲线', style: { marginTop: 16 } },
         React.createElement('div', null,
-          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12 } },
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 } },
             React.createElement(Text, null, '冷藏时间：'),
-            React.createElement(InputNumber, { min: 1, max: 90, value: sleepConfig.frozen_days, onChange: function(val) { val && handleChange('frozen_days', val); }, style: { width: 70 } }),
-            React.createElement(Text, null, '天（无访问后自动冷藏，最高90天）')
+            React.createElement(Tooltip, { title: '记忆无访问超过此时间后自动进入冷藏状态，冷藏期间暂停遗忘衰减，访问时自动唤醒' },
+              React.createElement(InputNumber, { min: 1, max: 90, value: sleepConfig.frozen_days, onChange: function(val) { val && handleChange('frozen_days', val); }, style: { width: 70 } })
+            ),
+            React.createElement(Text, null, '天')
           ),
-          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 16 } },
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
             React.createElement(Text, null, '归档时间：'),
-            React.createElement(InputNumber, { min: 1, max: 180, value: sleepConfig.archive_days, onChange: function(val) { val && handleChange('archive_days', val); }, style: { width: 70 } }),
-            React.createElement(Text, null, '天（冷藏后自动归档，最高180天）')
+            React.createElement(Tooltip, { title: '冷藏超过此时间后自动归档到独立存储，归档后可选择恢复，归档90天后彻底删除' },
+              React.createElement(InputNumber, { min: 1, max: 180, value: sleepConfig.archive_days, onChange: function(val) { val && handleChange('archive_days', val); }, style: { width: 70 } })
+            ),
+            React.createElement(Text, null, '天')
           ),
           React.createElement('div', { style: { marginTop: 12, fontSize: 12, color: 'var(--ant-text-color-secondary)' } },
             React.createElement('div', null, '• 活跃 → 冷藏 → 归档 → 删除'),
