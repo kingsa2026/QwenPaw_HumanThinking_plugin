@@ -26,6 +26,15 @@ const defaultBackupConfig = {
   backup_count: 5,
 };
 
+const defaultSleepConfig = {
+  enable_agent_sleep: true,
+  sleep_idle_hours: 2,
+  auto_consolidate: true,
+  consolidate_interval_hours: 6,
+};
+
+const SLEEP_CONFIG_KEY = 'humanthinking_sleep_config';
+
 interface AgentMemoryInfo {
   agent_id: string;
   agent_name: string;
@@ -81,6 +90,28 @@ function saveBackupConfig(config: any) {
     return true;
   } catch (e) {
     console.error('Failed to save backup config:', e);
+    return false;
+  }
+}
+
+function getSleepConfig() {
+  try {
+    const stored = localStorage.getItem(SLEEP_CONFIG_KEY);
+    if (stored) {
+      return { ...defaultSleepConfig, ...JSON.parse(stored) };
+    }
+  } catch (e) {
+    console.error('Failed to load sleep config:', e);
+  }
+  return defaultSleepConfig;
+}
+
+function saveSleepConfig(config: any) {
+  try {
+    localStorage.setItem(SLEEP_CONFIG_KEY, JSON.stringify(config));
+    return true;
+  } catch (e) {
+    console.error('Failed to save sleep config:', e);
     return false;
   }
 }
@@ -586,6 +617,111 @@ function MemorySettings() {
   );
 }
 
+function SleepSettings() {
+  const [sleepConfig, setSleepConfig] = React.useState(getSleepConfig());
+  const [saving, setSaving] = React.useState(false);
+
+  const handleChange = (key: string, value: any) => {
+    const newConfig = { ...sleepConfig, [key]: value };
+    setSaving(true);
+    
+    if (saveSleepConfig(newConfig)) {
+      setSleepConfig(newConfig);
+      message.success('睡眠设置已保存');
+    } else {
+      message.error('保存失败');
+    }
+    
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ padding: 24 }}>
+      <Title level={3}>😴 Agent 睡眠设置</Title>
+      <Paragraph>
+        Agent 睡眠功能：2小时无会话自动进入睡眠，有新会话自动唤醒
+      </Paragraph>
+      
+      <Card title="睡眠开关" style={{ marginTop: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <Text strong>启用 Agent 睡眠</Text>
+            <Paragraph type="secondary" style={{ marginBottom: 0, fontSize: 12 }}>
+              2小时无会话/无新任务自动进入睡眠状态
+            </Paragraph>
+          </div>
+          <Switch 
+            checked={sleepConfig.enable_agent_sleep}
+            onChange={(checked) => handleChange('enable_agent_sleep', checked)}
+            loading={saving}
+          />
+        </div>
+      </Card>
+
+      {sleepConfig.enable_agent_sleep && (
+        <>
+          <Card title="睡眠条件" style={{ marginTop: 16 }}>
+            <div style={{ marginBottom: 16 }}>
+              <Text>空闲多少小时后进入睡眠：</Text>
+              <InputNumber 
+                min={1} 
+                max={24}
+                value={sleepConfig.sleep_idle_hours}
+                onChange={(val) => val && handleChange('sleep_idle_hours', val)}
+                style={{ marginLeft: 16, width: 80 }}
+              />
+              <Text style={{ marginLeft: 8 }}>小时</Text>
+            </div>
+          </Card>
+
+          <Card title="睡眠时自动整理记忆" style={{ marginTop: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div>
+                <Text strong>自动总结经验</Text>
+                <Paragraph type="secondary" style={{ marginBottom: 0, fontSize: 12 }}>
+                  睡眠时自动整理对话经验，生成为持久化固定记忆
+                </Paragraph>
+              </div>
+              <Switch 
+                checked={sleepConfig.auto_consolidate}
+                onChange={(checked) => handleChange('auto_consolidate', checked)}
+              />
+            </div>
+            
+            {sleepConfig.auto_consolidate && (
+              <div>
+                <Text>整理间隔：</Text>
+                <InputNumber 
+                  min={1} 
+                  max={72}
+                  value={sleepConfig.consolidate_interval_hours}
+                  onChange={(val) => val && handleChange('consolidate_interval_hours', val)}
+                  style={{ marginLeft: 16, width: 80 }}
+                />
+                <Text style={{ marginLeft: 8 }}>小时</Text>
+              </div>
+            )}
+          </Card>
+        </>
+      )}
+
+      <Alert 
+        message="工作原理" 
+        description={
+          <div>
+            <div>• 睡眠：Agent 停止活动，释放资源</div>
+            <div>• 唤醒：新会话/新任务立即唤醒</div>
+            <div>• 自动整理：根据四种记忆类型(fact/preference/emotion/general)自动分类存储</div>
+          </div>
+        } 
+        type="info" 
+        showIcon 
+        style={{ marginTop: 16 }}
+      />
+    </div>
+  );
+}
+
 class HumanThinkingPlugin {
   readonly id = "humanthinking-memory";
 
@@ -604,6 +740,13 @@ class HumanThinkingPlugin {
         label: '记忆备份',
         icon: '💾',
         priority: 12,
+      },
+      {
+        path: '/plugin/humanthinking/sleep',
+        component: SleepSettings,
+        label: '睡眠设置',
+        icon: '😴',
+        priority: 13,
       },
       {
         path: '/plugin/humanthinking/settings',
