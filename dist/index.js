@@ -1,6 +1,8 @@
 /** HumanThinking Memory Manager - Frontend Plugin Entry. */
 
 var React = window.QwenPaw.host.React;
+var useState = React.useState;
+var useEffect = React.useEffect;
 var antd = window.QwenPaw.host.antd;
 var Switch = antd.Switch;
 var Card = antd.Card;
@@ -44,46 +46,22 @@ var defaultSleepConfig = {
   consolidate_interval_hours: 6,
 };
 
-function getConfig() {
+function loadConfig(key, defaults) {
   try {
-    var stored = localStorage.getItem(CONFIG_KEY);
-    if (stored) return Object.assign({}, defaultConfig, JSON.parse(stored));
-  } catch (e) { console.error('Load config error:', e); }
-  return defaultConfig;
+    var stored = localStorage.getItem(key);
+    if (stored) return Object.assign({}, defaults, JSON.parse(stored));
+  } catch (e) { console.error('Load error:', e); }
+  return defaults;
 }
 
-function saveConfig(config) {
-  try { localStorage.setItem(CONFIG_KEY, JSON.stringify(config)); return true; } 
-  catch (e) { console.error('Save config error:', e); return false; }
-}
-
-function getBackupConfig() {
-  try {
-    var stored = localStorage.getItem(BACKUP_CONFIG_KEY);
-    if (stored) return Object.assign({}, defaultBackupConfig, JSON.parse(stored));
-  } catch (e) { console.error('Load backup config error:', e); }
-  return defaultBackupConfig;
-}
-
-function saveBackupConfig(config) {
-  try { localStorage.setItem(BACKUP_CONFIG_KEY, JSON.stringify(config)); return true; } 
-  catch (e) { console.error('Save backup config error:', e); return false; }
-}
-
-function getSleepConfig() {
-  try {
-    var stored = localStorage.getItem(SLEEP_CONFIG_KEY);
-    if (stored) return Object.assign({}, defaultSleepConfig, JSON.parse(stored));
-  } catch (e) { console.error('Load sleep config error:', e); }
-  return defaultSleepConfig;
-}
-
-function saveSleepConfig(config) {
-  try { localStorage.setItem(SLEEP_CONFIG_KEY, JSON.stringify(config)); return true; } 
-  catch (e) { console.error('Save sleep config error:', e); return false; }
+function saveConfigFn(key, config) {
+  try { localStorage.setItem(key, JSON.stringify(config)); return true; } 
+  catch (e) { console.error('Save error:', e); return false; }
 }
 
 function Dashboard() {
+  var _a = useState(loadConfig(BACKUP_CONFIG_KEY, defaultBackupConfig)), backupConfig = _a[0], setBackupConfig = _a[1];
+  
   var mockAgents = [
     { agent_id: 'agent_001', agent_name: '客服助手', db_path: '/path/to/agent_001.db', db_size_mb: 2.35, memory_count: 89, last_updated: '2025-04-22 14:30', stats: { fact: 23, preference: 45, emotion: 12, general: 9 } },
     { agent_id: 'agent_002', agent_name: '电商客服', db_path: '/path/to/agent_002.db', db_size_mb: 5.67, memory_count: 234, last_updated: '2025-04-22 16:45', stats: { fact: 67, preference: 89, emotion: 34, general: 44 } },
@@ -100,10 +78,25 @@ function Dashboard() {
     { title: '更新时间', dataIndex: 'last_updated', key: 'last_updated', width: 150 },
   ];
 
-  var statCardStyle = { padding: 16, textAlign: 'center', background: 'var(--ant component-background)', borderRadius: 8, border: '1px solid var(--ant border-color-split)' };
+  var statCardStyle = { padding: 16, textAlign: 'center', background: 'var(--ant-component-background, #fff)', borderRadius: 8, border: '1px solid var(--ant-border-color-split, #d9d9d9)' };
   var statNumStyle = { fontSize: 24, fontWeight: 'bold', color: '#1677ff' };
-  var statLabelStyle = { fontSize: 12, color: 'var(--ant text-color-secondary)', marginTop: 4 };
-  
+  var statLabelStyle = { fontSize: 12, color: 'var(--ant-text-color-secondary, #666)', marginTop: 4 };
+
+  function handleAutoBackupChange(checked) {
+    var newConfig = Object.assign({}, backupConfig, { auto_backup_enabled: checked });
+    saveConfigFn(BACKUP_CONFIG_KEY, newConfig);
+    setBackupConfig(newConfig);
+    message.success(checked ? '自动备份已开启' : '自动备份已关闭');
+  }
+
+  function handleIntervalChange(val) {
+    if (!val) return;
+    var newConfig = Object.assign({}, backupConfig, { auto_backup_interval_hours: val });
+    saveConfigFn(BACKUP_CONFIG_KEY, newConfig);
+    setBackupConfig(newConfig);
+    message.success('间隔已更新为 ' + val + ' 小时');
+  }
+
   var tabItems = [
     {
       key: 'overview',
@@ -129,12 +122,12 @@ function Dashboard() {
             React.createElement(Button, { type: 'primary', danger: true, onClick: function() { message.info('批量备份'); } }, '批量备份选中 (0)')
           )
         ),
-        React.createElement('div', { style: { marginBottom: 16, padding: 12, background: 'var(--ant background-light)', borderRadius: 8 } },
+        React.createElement('div', { style: { marginBottom: 16, padding: 12, background: 'var(--ant-background-color-light, #fafafa)', borderRadius: 8 } },
           React.createElement(Space, null,
             React.createElement(Text, { strong: true }, '自动备份：'),
-            React.createElement(Switch, { size: 'small', checked: getBackupConfig().auto_backup_enabled, onChange: function(checked) { var c = getBackupConfig(); c.auto_backup_enabled = checked; saveBackupConfig(c); message.success(checked ? '自动备份已开启' : '自动备份已关闭'); } }),
+            React.createElement(Switch, { size: 'small', checked: backupConfig.auto_backup_enabled, onChange: handleAutoBackupChange }),
             React.createElement(Text, { style: { marginLeft: 16 } }, '间隔'),
-            React.createElement(InputNumber, { size: 'small', min: 1, max: 168, value: getBackupConfig().auto_backup_interval_hours, onChange: function(val) { if (val) { var c = getBackupConfig(); c.auto_backup_interval_hours = val; saveBackupConfig(c); message.success('间隔已更新为 ' + val + ' 小时'); } }, style: { width: 60 } }),
+            React.createElement(InputNumber, { size: 'small', min: 1, max: 168, value: backupConfig.auto_backup_interval_hours, onChange: handleIntervalChange, style: { width: 60 } }),
             React.createElement(Text, null, '小时')
           )
         ),
@@ -151,11 +144,12 @@ function Dashboard() {
 }
 
 function SleepSettings() {
-  var sleepConfig = getSleepConfig();
+  var _a = useState(loadConfig(SLEEP_CONFIG_KEY, defaultSleepConfig)), sleepConfig = _a[0], setSleepConfig = _a[1];
 
   function handleChange(key, value) {
     var newConfig = Object.assign({}, sleepConfig, { [key]: value });
-    saveSleepConfig(newConfig);
+    saveConfigFn(SLEEP_CONFIG_KEY, newConfig);
+    setSleepConfig(newConfig);
     message.success('睡眠设置已保存');
   }
 
@@ -207,11 +201,13 @@ function SleepSettings() {
 }
 
 function Settings() {
-  var config = getConfig();
+  var _a = useState(loadConfig(CONFIG_KEY, defaultConfig)), config = _a[0], setConfig = _a[1];
 
   function handleChange(key, value) {
     var newConfig = Object.assign({}, config, { [key]: value });
-    if (saveConfig(newConfig)) message.success('设置已保存');
+    saveConfigFn(CONFIG_KEY, newConfig);
+    setConfig(newConfig);
+    message.success('设置已保存');
   }
 
   var switchStyle = { marginLeft: 'auto' };
