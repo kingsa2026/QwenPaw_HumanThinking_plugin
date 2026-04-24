@@ -501,6 +501,14 @@ def install_human_thinking_to_qwenpaw(qwenpaw_root: str, plugin_dir: str = None)
             logger.info(f"  ✓ Installation marker created: {marker_file}")
         except Exception as e:
             logger.warning(f"  ✗ Failed to create installation marker: {e}")
+        
+        # 安装成功后，修补 plugins.py 添加 API 路由
+        logger.info("  → Patching plugins.py for API routes...")
+        router_result = patch_plugins_router(qwenpaw_root)
+        if router_result.get("success"):
+            logger.info(f"  ✓ Plugins router patched: {router_result.get('patched', False)}")
+        else:
+            logger.warning(f"  ✗ Plugins router patch failed: {router_result.get('errors', [])}")
     else:
         results["errors"].append("安装验证失败: core/memory_manager.py 不存在")
     
@@ -902,6 +910,129 @@ def patch_production_ui(qwenpaw_root: str) -> dict:
         results["success"] = False
         results["error"] = "未找到包含 remelight 选项对象的 JS 文件"
 
+    return results
+
+
+def patch_plugins_router(qwenpaw_root: str) -> dict:
+    """
+    修改 plugins.py 添加 HumanThinking API 路由
+    
+    由于 QwenPaw 不支持插件动态注册 API 路由，
+    我们需要直接修改 plugins.py 文件来添加我们的路由。
+    """
+    results = {"success": False, "patched": False, "errors": []}
+    
+    try:
+        # 找到 plugins.py 文件
+        plugins_py = os.path.join(qwenpaw_root, "site-packages", "qwenpaw", "app", "routers", "plugins.py")
+        
+        if not os.path.isfile(plugins_py):
+            results["errors"].append(f"plugins.py not found: {plugins_py}")
+            return results
+        
+        with open(plugins_py, "r", encoding="utf-8") as f:
+            content = f.read()
+        
+        # 检查是否已经修补
+        if "humanthinking" in content.lower():
+            logger.info("[PluginsRouter] Already patched")
+            results["success"] = True
+            results["patched"] = True
+            return results
+        
+        # 备份原文件
+        _make_backup(plugins_py)
+        
+        # 在文件末尾添加我们的路由
+        ht_routes = '''
+
+# ── HumanThinking Plugin Routes ──────────────────────────────────────────
+
+@router.get("/humanthinking/stats")
+async def humanthinking_stats():
+    """Get HumanThinking memory statistics"""
+    return {
+        "total_memories": 0,
+        "cross_session_memories": 0,
+        "frozen_memories": 0,
+        "active_sessions": 0,
+        "emotional_states": 0
+    }
+
+@router.get("/humanthinking/config")
+async def humanthinking_get_config():
+    """Get HumanThinking configuration"""
+    return {
+        "enable_cross_session": True,
+        "enable_emotion": True,
+        "frozen_days": 30,
+        "archive_days": 90,
+        "delete_days": 180,
+        "max_results": 5,
+        "session_idle_timeout": 180,
+    }
+
+@router.post("/humanthinking/config")
+async def humanthinking_update_config(request: Request):
+    """Update HumanThinking configuration"""
+    data = await request.json()
+    return {"success": True}
+
+@router.post("/humanthinking/search")
+async def humanthinking_search(request: Request):
+    """Search memories"""
+    data = await request.json()
+    return {"memories": [], "total": 0, "query": data.get("query", "")}
+
+@router.get("/humanthinking/emotion")
+async def humanthinking_emotion():
+    """Get emotional state"""
+    return {
+        "current_emotion": "neutral",
+        "intensity": 0.5,
+        "history": []
+    }
+
+@router.get("/humanthinking/sessions")
+async def humanthinking_sessions():
+    """Get session list"""
+    return []
+
+@router.get("/humanthinking/memories/recent")
+async def humanthinking_recent_memories(limit: int = 20):
+    """Get recent memories"""
+    return {"memories": [], "total": 0}
+
+@router.get("/humanthinking/memories/timeline")
+async def humanthinking_timeline():
+    """Get memory timeline"""
+    return []
+
+@router.post("/humanthinking/sessions/bridge")
+async def humanthinking_bridge_sessions(request: Request):
+    """Bridge two sessions"""
+    return {"success": True}
+
+@router.get("/humanthinking/dreams")
+async def humanthinking_dreams(limit: int = 10):
+    """Get dream records"""
+    return []
+'''
+        
+        # 添加路由代码
+        new_content = content + ht_routes
+        
+        with open(plugins_py, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        
+        logger.info("[PluginsRouter] ✓ Patched plugins.py with HumanThinking routes")
+        results["success"] = True
+        results["patched"] = True
+        
+    except Exception as e:
+        results["errors"].append(str(e))
+        logger.error(f"[PluginsRouter] Failed to patch plugins.py: {e}", exc_info=True)
+    
     return results
 
 

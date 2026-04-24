@@ -110,6 +110,15 @@ class HumanThinkingMemoryPlugin:
             )
             logger.info("✓ Shutdown hook registered")
 
+            # 注册 API 路由
+            logger.info("Registering API routes...")
+            try:
+                from .api.routes import router as ht_router
+                api.register_router(ht_router)
+                logger.info("✓ API routes registered")
+            except Exception as e:
+                logger.warning(f"Failed to register API routes: {e}")
+
             logger.info("=" * 60)
             logger.info("✓ HumanThinking Memory Manager registered")
             logger.info(f"  - UI Injection: {'✓ Yes' if qwenpaw_root else '✗ No (QwenPaw root not found)'}")
@@ -253,6 +262,17 @@ class HumanThinkingMemoryPlugin:
                     for err in refresh_result.get("errors", []):
                         logger.warning(f"  ✗ Agent refresh patch error: {err}")
 
+                # Step 6: 修补 plugins.py 添加 API 路由
+                logger.info("Step 6: Patching plugins.py (API routes)...")
+                router_result = patcher_module.patch_plugins_router(qwenpaw_root)
+                logger.info(f"Plugins router patch result: {router_result}")
+                
+                if router_result.get("success"):
+                    logger.info("✓ Plugins router patched successfully")
+                else:
+                    for err in router_result.get("errors", []):
+                        logger.warning(f"  ✗ Plugins router patch error: {err}")
+
                 logger.info("=" * 60)
                 return True
             else:
@@ -350,6 +370,13 @@ class HumanThinkingMemoryPlugin:
                 
                 logger.info("✓ BackupManager initialized")
 
+            # 注册 API 路由到 FastAPI app
+            try:
+                self._register_api_routes()
+                logger.info("✓ API routes registered")
+            except Exception as e:
+                logger.warning(f"Failed to register API routes: {e}")
+
             logger.info("✓ HumanThinking Memory Manager initialized successfully")
 
         except Exception as e:
@@ -357,6 +384,47 @@ class HumanThinkingMemoryPlugin:
                 f"Failed to initialize HumanThinking Memory Manager: {e}",
                 exc_info=True,
             )
+
+    def _register_api_routes(self):
+        """注册 API 路由到 FastAPI app
+        
+        注意：在 startup hook 中，FastAPI app 可能还没有完全初始化。
+        我们使用延迟注册策略，确保在 app 完全初始化后再注册路由。
+        """
+        import threading
+        
+        def delayed_register():
+            """延迟注册路由"""
+            import time
+            time.sleep(10)  # 等待10秒让app完全初始化
+            
+            try:
+                # 导入 FastAPI app
+                from qwenpaw.app._app import app
+                from .api.routes import router as ht_router
+                
+                # 检查路由是否已注册
+                existing_paths = [getattr(r, 'path', '') for r in app.routes]
+                if '/api/plugin/humanthinking/stats' in existing_paths:
+                    logger.info("✓ API routes already registered")
+                    return
+                
+                # 注册路由
+                app.include_router(ht_router)
+                
+                # 验证注册成功
+                new_paths = [getattr(r, 'path', '') for r in app.routes]
+                if '/api/plugin/humanthinking/stats' in new_paths:
+                    logger.info("✓ API routes successfully registered (delayed)")
+                else:
+                    logger.warning("✗ API routes registration may have failed")
+                    
+            except Exception as e:
+                logger.error(f"Failed to register API routes (delayed): {e}", exc_info=True)
+        
+        # 启动延迟注册线程
+        threading.Thread(target=delayed_register, daemon=True).start()
+        logger.info("→ API routes will be registered in 10 seconds (delayed)")
 
     def _shutdown_hook(self):
         """关闭钩子：清理记忆管理器"""
