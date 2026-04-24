@@ -8,9 +8,59 @@ from qwenpaw.plugins.api import PluginApi
 import logging
 import os
 import sys
+import json
+from pathlib import Path
 
 # Use "qwenpaw" namespace so logs are captured by QwenPaw's logging system
 logger = logging.getLogger("qwenpaw.humanthinking")
+
+CONFIG_KEY = 'humanthinking_config'
+BACKUP_CONFIG_KEY = 'humanthinking_backup_config'
+SLEEP_CONFIG_KEY = 'humanthinking_sleep_config'
+
+
+def load_backup_config() -> dict:
+    """加载备份配置"""
+    try:
+        config_path = Path.home() / ".qwenpaw" / "config" / f"{BACKUP_CONFIG_KEY}.json"
+        if config_path.exists():
+            with open(config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.warning(f"Failed to load backup config: {e}")
+    
+    return {"auto_backup_enabled": False, "auto_backup_interval_hours": 24}
+
+
+def load_humanthinking_config() -> dict:
+    """加载记忆设置配置"""
+    try:
+        config_path = Path.home() / ".qwenpaw" / "config" / f"{CONFIG_KEY}.json"
+        if config_path.exists():
+            with open(config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.warning(f"Failed to load humanthinking config: {e}")
+    
+    return {}
+
+
+def load_sleep_config() -> dict:
+    """加载睡眠配置"""
+    try:
+        config_path = Path.home() / ".qwenpaw" / "config" / f"{SLEEP_CONFIG_KEY}.json"
+        if config_path.exists():
+            with open(config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.warning(f"Failed to load sleep config: {e}")
+    
+    return {
+        "enable_agent_sleep": True,
+        "sleep_idle_hours": 2,
+        "auto_consolidate": True,
+        "consolidate_interval_hours": 6,
+    }
 
 
 class HumanThinkingMemoryPlugin:
@@ -180,17 +230,31 @@ class HumanThinkingMemoryPlugin:
                 logger.info("Step 4: Patching frontend JS (dropdown options)...")
                 result = patcher_module.patch_production_ui(qwenpaw_root)
                 logger.info(f"Production patcher result: {result}")
-                
+
                 if result.get("success"):
                     logger.info("✓ Production UI patched successfully")
                     patched = result.get("patched_files", [])
                     logger.info(f"Patched {len(patched)} file(s):")
                     for fname in patched:
                         logger.info(f"  ✓ {fname}")
-                    logger.info("=" * 60)
-                    return True
                 else:
                     logger.warning(f"Production patcher failed: {result.get('error', 'unknown')}")
+
+                # Step 5: 修补前端 JS（添加agent切换自动刷新配置功能）
+                logger.info("Step 5: Patching frontend JS (agent config refresh on switch)...")
+                refresh_result = patcher_module.patch_agent_config_refresh(qwenpaw_root)
+                logger.info(f"Agent refresh patch result: {refresh_result}")
+                
+                if refresh_result.get("success"):
+                    logger.info("✓ Agent config refresh patch applied successfully")
+                    for fname in refresh_result.get("patched", []):
+                        logger.info(f"  ✓ {fname}")
+                else:
+                    for err in refresh_result.get("errors", []):
+                        logger.warning(f"  ✗ Agent refresh patch error: {err}")
+
+                logger.info("=" * 60)
+                return True
             else:
                 logger.warning(f"Production patcher not found at: {patcher_path}")
 
@@ -233,19 +297,58 @@ class HumanThinkingMemoryPlugin:
         try:
             logger.info("=== HumanThinking Memory Manager Initialization ===")
 
-            # 初始化睡眠管理器
-            from .core.sleep_manager import init_sleep_manager
-            init_sleep_manager(
-                enable_agent_sleep=True,
-                sleep_idle_hours=2,
-                auto_consolidate=True,
-                consolidate_days=7,
-                frozen_days=7,
-                archive_days=30,
+            try:
+                from qwenpaw.agents.tools.HumanThinkingMemoryManager.core.memory_manager import HumanThinkingMemoryManager
+                logger.info("✓ HumanThinkingMemoryManager imported successfully")
+            except ImportError as e:
+                logger.warning(f"Could not import HumanThinkingMemoryManager (may not be installed yet): {e}")
+
+            from .core.memory_manager import get_config
+            ht_config = load_humanthinking_config()
+            global_config = get_config()
+
+            frozen_days = ht_config.get("frozen_days", global_config.frozen_days)
+            archive_days = ht_config.get("archive_days", global_config.archive_days)
+            delete_days = ht_config.get("delete_days", global_config.delete_days)
+
+            sleep_config = load_sleep_config()
+            enable_agent_sleep = sleep_config.get("enable_agent_sleep", True)
+            sleep_idle_hours = sleep_config.get("sleep_idle_hours", 2)
+            auto_consolidate = sleep_config.get("auto_consolidate", True)
+            consolidate_interval_hours = sleep_config.get("consolidate_interval_hours", 6)
+
+            from .core.sleep_manager import init_sleep_manager, SleepConfig
+            sleep_cfg = SleepConfig(
+                enable_agent_sleep=enable_agent_sleep,
+                light_sleep_minutes=30,
+                rem_minutes=60,
+                deep_sleep_minutes=sleep_idle_hours * 60,
+                auto_consolidate=auto_consolidate,
+                consolidate_days=consolidate_interval_hours // 4 if consolidate_interval_hours >= 4 else 1,
+                frozen_days=frozen_days,
+                archive_days=archive_days,
                 enable_insight=True,
                 enable_dream_log=True
             )
-            logger.info("✓ SleepManager initialized")
+            init_sleep_manager(sleep_cfg)
+            logger.info("✓ SleepManager initialized with config")
+
+            # 初始化备份管理器
+            qwenpaw_root = self._find_qwenpaw_root()
+            if qwenpaw_root:
+                from .core.backup_manager import init_backup_manager, get_backup_manager
+                backup_config = load_backup_config()
+                auto_backup_hours = 0
+                if backup_config.get("auto_backup_enabled", False):
+                    auto_backup_hours = backup_config.get("auto_backup_interval_hours", 24)
+                init_backup_manager(qwenpaw_root, auto_backup_hours)
+                
+                # 暴露 API 给前端
+                import sys
+                if 'window' in sys.modules or hasattr(__import__('sys'), 'modules'):
+                    pass
+                
+                logger.info("✓ BackupManager initialized")
 
             logger.info("✓ HumanThinking Memory Manager initialized successfully")
 

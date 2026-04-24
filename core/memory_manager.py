@@ -30,20 +30,118 @@ class HumanThinkingConfig:
     """HumanThinking 配置"""
     enable_cross_session: bool = True
     enable_emotion: bool = True
-    enable_session_isolation: bool = True
-    enable_memory_freeze: bool = True
     session_idle_timeout: int = 180
     refresh_interval: int = 5
     max_results: int = 5
     max_memory_chars: int = 150
+    disable_file_memory: bool = True
+    frozen_days: int = 30      # 冷藏天数
+    archive_days: int = 90   # 归档天数
+    delete_days: int = 180   # 删除天数
+    enable_distributed_db: bool = False  # 分布式数据库开关
+    db_size_threshold_mb: int = 800     # 分布式阈值（MB）
 
 
 _global_config = HumanThinkingConfig()
 
 
-def get_config() -> HumanThinkingConfig:
-    """获取全局配置"""
-    return _global_config
+def get_config(agent_id: str = None, working_dir: str = None) -> HumanThinkingConfig:
+    """获取配置（支持按 Agent 隔离）
+    
+    Args:
+        agent_id: Agent ID
+        working_dir: Agent 工作目录，用于定位配置文件
+    """
+    global _global_config
+    
+    # 先加载默认值
+    config = _global_config
+    
+    # 尝试从文件加载配置
+    try:
+        from pathlib import Path
+        import json
+        
+        # 优先从 Agent 工作目录读取
+        if working_dir:
+            config_path = Path(working_dir) / "memory" / "human_thinking_config.json"
+            if config_path.exists():
+                with open(config_path, "r", encoding="utf-8") as f:
+                    user_config = json.load(f)
+                for key, value in user_config.items():
+                    if hasattr(config, key):
+                        setattr(config, key, value)
+                return config
+        
+        # 如果有 agent_id，尝试从全局配置目录读取
+        if agent_id:
+            config_path = Path.home() / ".qwenpaw" / "workspaces" / agent_id / "memory" / "human_thinking_config.json"
+            if config_path.exists():
+                with open(config_path, "r", encoding="utf-8") as f:
+                    user_config = json.load(f)
+                for key, value in user_config.items():
+                    if hasattr(config, key):
+                        setattr(config, key, value)
+                return config
+        
+    except Exception:
+        pass
+    
+    return config
+
+
+def save_config(config: HumanThinkingConfig, agent_id: str = None, working_dir: str = None) -> bool:
+    """保存配置到 Agent 专属配置文件
+    
+    Args:
+        config: 配置对象
+        agent_id: Agent ID
+        working_dir: Agent 工作目录
+    
+    Returns:
+        是否保存成功
+    """
+    import json
+    
+    config_path = None
+    
+    if working_dir:
+        config_path = Path(working_dir) / "memory" / "human_thinking_config.json"
+    elif agent_id:
+        config_path = Path.home() / ".qwenpaw" / "workspaces" / agent_id / "memory" / "human_thinking_config.json"
+    
+    if not config_path:
+        logger.warning("No agent_id or working_dir provided, cannot save config")
+        return False
+    
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        config_dict = {
+            "enable_cross_session": config.enable_cross_session,
+            "enable_emotion": config.enable_emotion,
+            "enable_session_isolation": True,
+            "enable_memory_freeze": True,
+            "session_idle_timeout": config.session_idle_timeout,
+            "refresh_interval": config.refresh_interval,
+            "max_results": config.max_results,
+            "max_memory_chars": config.max_memory_chars,
+            "disable_file_memory": config.disable_file_memory,
+            "frozen_days": config.frozen_days,
+            "archive_days": config.archive_days,
+            "delete_days": config.delete_days,
+            "enable_distributed_db": config.enable_distributed_db,
+            "db_size_threshold_mb": config.db_size_threshold_mb,
+        }
+        
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config_dict, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"Config saved to: {config_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save config: {e}")
+        return False
 
 
 def update_config(config: HumanThinkingConfig):
@@ -68,11 +166,8 @@ class ContextLoadingInMemory(InMemoryMemory):
     
     刷新机制：
     - 首次加载：对话开始时从缓存/DB 检索相关记忆
-    - 定时刷新：每 5 轮对话重新检索（跟随话题变化）
+    - 一次性加载：会话开始时加载一次，之后由 Agent 自动标记重要记忆
     """
-    
-    # 每 N 轮对话重新加载上下文
-    REFRESH_INTERVAL = 5
     
     # 对齐 ReMeLight 标准的上下文加载参数
     MAX_RESULTS_DB_MISS = 5    # 缓存未命中时 DB 查询数量（同 ReMeLight max_results=5）
@@ -89,29 +184,21 @@ class ContextLoadingInMemory(InMemoryMemory):
         super().__init__()
         self._memory_manager_ref: Optional["HumanThinkingMemoryManager"] = None
         self._context_loaded = False
-        self._message_count_since_load = 0
         self._compressed_summary = ""
     
     async def get_memory(self, prepend_summary: bool = True, **kwargs) -> List[Msg]:
         """
         获取上下文记忆，注入向量检索的历史记忆
         
-        刷新机制：
-        - 首次调用时，从当前对话内容提取查询词，向量检索相关历史记忆
-        - 每 5 轮对话后自动重新检索，跟随话题变化
+        机制：
+        - 会话首次调用时，从当前对话内容提取查询词，向量检索相关历史记忆
+        - 之后由 Agent 自动识别并使用 store_memory() 标记重要信息
+        - 提示词只在 Agent 首次启用时注入一次，之后跳过（通过检测肌肉记忆判断）
         """
-        self._message_count_since_load += 1
-        
-        # 首次加载 或 达到刷新阈值
-        should_refresh = (
-            not self._context_loaded or
-            self._message_count_since_load >= self.REFRESH_INTERVAL
-        )
-        
-        if should_refresh and self._memory_manager_ref:
+        # 只在会话首次调用时加载一次
+        if not self._context_loaded and self._memory_manager_ref:
             await self._load_context_from_cache()
             self._context_loaded = True
-            self._message_count_since_load = 0
         
         return await super().get_memory(prepend_summary=prepend_summary, **kwargs)
     
@@ -134,14 +221,17 @@ class ContextLoadingInMemory(InMemoryMemory):
         if not query:
             return
         
+        # 获取配置
+        config = get_config(manager.agent_id, manager.working_dir)
+        
         # 2. 直接查询数据库（排除最近N轮，防止与原生压缩重复）
         db_results = await manager.db.search_memories(
             query=query,
             agent_id=manager.agent_id,
-            session_id=None,
+            session_id=None if config.enable_cross_session else manager._current_session_id,
             user_id=manager.user_id,
             role=None,
-            cross_session=True,
+            cross_session=config.enable_cross_session,
             max_results=self.MAX_RESULTS_FINAL,  # 5
             exclude_recent_rounds=self.EXCLUDE_RECENT_ROUNDS,
             round_duration_seconds=self.ROUND_DURATION_SECONDS
@@ -151,10 +241,139 @@ class ContextLoadingInMemory(InMemoryMemory):
             return
         
         # 3. 构建长期记忆
-        self._build_long_term_memory(db_results)
+        self._build_long_term_memory(db_results, manager.agent_id, manager)
     
-    def _build_long_term_memory(self, memories: list):
+    def _build_long_term_memory(self, memories: list, agent_id: str = None, manager = None):
         """构建长期记忆字符串"""
+        # 获取配置
+        config = get_config(agent_id, manager.working_dir if manager else None)
+        frozen_days = config.frozen_days
+        archive_days = config.archive_days
+        delete_days = config.delete_days
+        
+        # 详细的记忆使用指南
+        memory_guide = f"""## 💡 记忆系统使用指南
+
+【重要】请使用 store_memory() 存储重要信息，禁止写入外部文件！
+
+### store_memory() 参数说明
+
+**调用方式**：在思考过程中直接调用 store_memory() 函数，无需额外配置
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| content | string | ✅ | 要记忆的内容 |
+| importance | int | ✅ | 重要程度 1-5（4-5会自动提升为长期记忆）|
+| memory_type | string | ✅ | 记忆类型（见下方分类表） |
+| session_id | string | - | 会话ID（自动使用当前会话）|
+
+### memory_type（记忆类型）- 必填参数
+
+**正确分类示例**：
+
+| 场景 | memory_type | importance | 示例 |
+|------|-------------|------------|------|
+| 用户说"我喜欢..." | preference | 4-5 | store_memory("用户喜欢简洁风格", 4, "preference") |
+| 用户说"我的订单是..." | fact | 4-5 | store_memory("订单号12345", 5, "fact") |
+| 用户说"谢谢/不满意" | emotion | 3-4 | store_memory("用户表示满意", 4, "emotion") |
+| 普通对话内容 | general | 1-3 | store_memory("对话摘要...", 2, "general") |
+
+### importance（重要程度）
+
+| 分数 | 含义 | 使用场景 |
+|------|------|----------|
+| 5 | 关键信息 | 身份证、密码、重大决策 |
+| 4 | 重要信息 | 偏好、订单、承诺 |
+| 3 | 一般信息 | 普通对话内容 |
+| 2 | 临时信息 | 可遗忘的细节 |
+| 1 | 噪音 | 客套话、无意义内容 |
+
+### 存储示例
+
+```python
+# 记住用户偏好
+store_memory(
+    content="用户喜欢简洁专业的回答风格，不喜欢太长的解释",
+    importance=4,
+    memory_type="preference"
+)
+
+# 记住订单信息
+store_memory(
+    content="订单号 #12345，商品：iPhone 15 Pro Max，金额：9999元",
+    importance=5,
+    memory_type="fact"
+)
+
+# 记住情感反馈
+store_memory(
+    content="用户对服务很满意，感谢",
+    importance=4,
+    memory_type="emotion"
+)
+```
+
+### 自动处理
+
+- **会话首次**：系统自动检索相关历史记忆注入上下文
+- **对话过程中**：请主动识别重要信息并使用 store_memory() 存储
+- **长期记忆**：importance >= 4 或 六维评分 >= 0.5 → 自动进入 long_term 层
+- **遗忘流程**（可在设置中自定义）：
+  - {frozen_days}天无访问 → 进入冷藏（暂停衰减）
+  - 冷藏{archive_days}天 → 归档到独立存储
+  - 归档{delete_days}天 → 彻底删除
+- 访问冷藏记忆会自动唤醒
+
+### 记忆层级
+
+| 层级 | 说明 |
+|------|------|
+| working | 当前会话工作记忆 |
+| short_term | 短期记忆（{frozen_days}天内）|
+| long_term | 长期记忆（重要信息）|
+| frozen | 冷藏（{frozen_days}天无访问）|
+| archived | 归档（冷藏{archive_days}天）|
+
+### 🌙 睡眠机制
+
+Agent 会在空闲时自动进入睡眠模式进行记忆整理：
+
+#### 睡眠阶段
+
+| 阶段 | 触发条件 | 功能 |
+|------|----------|------|
+| 浅层睡眠 | 空闲30分钟 | 扫描7天日志，去重/过滤，标记重要信息 |
+| REM | 空闲60分钟 | 提取主题，发现跨对话模式，识别持久真理 |
+| 深层睡眠 | 空闲120分钟 | 六维评分，高分写入长期记忆 |
+
+#### 睡眠触发条件
+
+- **心跳活动不会唤醒**：日常心跳不会触发唤醒
+- **定时任务不会唤醒**：后台任务不会触发唤醒
+- **新会话唤醒**：只有新用户消息才会唤醒深层睡眠的 Agent
+
+#### 注意事项
+
+- Agent 在睡眠期间不会响应，但不会丢失任何记忆
+- 睡眠整理是后台自动进行，Agent 无需干预
+- 重要信息建议主动使用 store_memory() 存储，确保被保留
+
+"""
+        
+        # 检查是否已有肌肉记忆（importance=5 且包含关键词）
+        has_muscle_memory = False
+        if memories:
+            for m in memories:
+                content = m.get("content", "")
+                importance = m.get("importance", 0)
+                if importance >= 5 and ("记忆系统" in content or "store_memory" in content or "肌肉记忆" in content):
+                    has_muscle_memory = True
+                    break
+        
+        if not memories:
+            self._long_term_memory = memory_guide + "## 📋 历史记忆\n\n暂无历史记忆"
+            return
+        
         # 按重要性排序
         memories.sort(key=lambda m: m.importance, reverse=True)
         top_memories = memories[:self.MAX_RESULTS_FINAL]
@@ -165,12 +384,22 @@ class ContextLoadingInMemory(InMemoryMemory):
             role_prefix = "用户" if m.role == "user" else "助手"
             channel_name = self._extract_channel_name(m.session_id)
             channel_tag = f" ({channel_name})" if channel_name else ""
+            type_tag = f" [{m.memory_type}]" if m.memory_type else ""
             
-            # 格式: [角色 (渠道)]: 内容
-            memory_parts.append(f"[{role_prefix}{channel_tag}]: {m.content[:self.MAX_MEMORY_CHARS]}")
+            # 格式: [角色 (渠道)]: 内容 [类型]
+            memory_parts.append(f"[{role_prefix}{channel_tag}]: {m.content[:self.MAX_MEMORY_CHARS]}{type_tag}")
         
         if memory_parts:
-            self._long_term_memory = "## 相关历史记忆\n\n" + "\n\n".join(memory_parts)
+            # 有肌肉记忆后，只显示历史记忆，不显示提示词
+            if has_muscle_memory:
+                self._long_term_memory = "## 📋 相关历史记忆\n\n" + "\n\n".join(memory_parts)
+            else:
+                # 首次：显示完整提示词 + 任务
+                memory_guide += """
+
+**【任务】请将以上记忆系统的使用方法，用你自己的理解，写成 3-5 条最重要的规则，存储到数据库中（importance=5, memory_type="general"）。这是你的"肌肉记忆"，会让你永远记住如何使用记忆系统。**
+"""
+                self._long_term_memory = memory_guide + "## 📋 相关历史记忆\n\n" + "\n\n".join(memory_parts)
             logger.debug(f"Loaded {len(memory_parts)} relevant memories into context")
     
     def _extract_channel_name(self, session_id: str) -> str:
@@ -230,7 +459,6 @@ class ContextLoadingInMemory(InMemoryMemory):
         """清除已加载的上下文标记，允许重新加载"""
         self._context_loaded = False
         self._long_term_memory = ""
-        self._message_count_since_load = 0
     
     # ====== Memory Compaction Hook 兼容方法 ======
     
@@ -275,7 +503,8 @@ class HumanThinkingMemoryManager(BaseMemoryManager):
         
         self.user_id = user_id
         self._current_session_id = current_session_id
-        
+        self._current_target_id = None
+
         # 核心组件
         self.db: Optional[HumanThinkingDB] = None
         self.cache_pool: Optional[AgentCachePool] = None
@@ -297,35 +526,48 @@ class HumanThinkingMemoryManager(BaseMemoryManager):
         self,
         session_id: str,
         user_id: Optional[str] = None,
+        target_id: Optional[str] = None,
         role: str = "assistant"
     ):
         """
         设置会话上下文
-        
+
         Args:
             session_id: Session ID
             user_id: User ID
+            target_id: Target ID (对话对象ID，区分不同Agent/用户)
             role: Role
         """
         self._current_session_id = session_id
+        self._current_target_id = target_id
         if user_id:
             self.user_id = user_id
-        
+
         # 新 session 时重置上下文加载标记
         if self._in_memory_memory:
             self._in_memory_memory._context_loaded = False
             self._in_memory_memory._long_term_memory = ""
-        
+
         logger.debug(
-            f"Context set: session={session_id}, user={user_id}, role={role}"
+            f"Context set: session={session_id}, user={user_id}, target={target_id}, role={role}"
         )
     
     async def start(self) -> None:
         """启动记忆管理器"""
         logger.info(f"Starting HumanThinkingMemoryManager v1.0.0...")
         
-        # 1. 初始化数据库
-        self.db = HumanThinkingDB(str(self.db_path))
+        # 初始化 Agent 专属配置文件（如果不存在）
+        self._init_agent_config()
+        
+        # 获取配置
+        config = get_config(self.agent_id, self.working_dir)
+        
+        # 1. 初始化数据库（支持分布式）
+        self.db = HumanThinkingDB(
+            str(self.db_path),
+            enable_distributed=config.enable_distributed_db,
+            size_threshold_mb=config.db_size_threshold_mb
+        )
         await self.db.initialize()
         
         # 2. 初始化缓存池
@@ -341,15 +583,42 @@ class HumanThinkingMemoryManager(BaseMemoryManager):
             search_engine=None
         )
         
-        # 4. 初始化情感引擎
-        self.emotional_engine = EmotionalContinuityEngine(db=self.db)
+        # 获取配置
+        config = get_config(self.agent_id, self.working_dir)
+        
+        # 4. 初始化情感引擎（可选）
+        if config.enable_emotion:
+            self.emotional_engine = EmotionalContinuityEngine(db=self.db)
         
         logger.info("HumanThinkingMemoryManager v1.0.0 started successfully")
     
-    async def close(self) -> None:
+    def _init_agent_config(self):
+        """初始化 Agent 专属配置文件"""
+        try:
+            import json
+            
+            config_path = self.db_path.parent / "human_thinking_config.json"
+            
+            if not config_path.exists():
+                default_config = {
+                    "enable_cross_session": True,
+                    "enable_emotion": True,
+                    "enable_distributed_db": False,
+                    "db_size_threshold_mb": 800,
+                    "frozen_days": 30,
+                    "archive_days": 90,
+                    "delete_days": 180
+                }
+                with open(config_path, "w", encoding="utf-8") as f:
+                    json.dump(default_config, f, ensure_ascii=False, indent=2)
+                logger.info(f"Created agent config: {config_path}")
+        except Exception as e:
+            logger.warning(f"Failed to init agent config: {e}")
+    
+    async def close(self) -> bool:
         """关闭记忆管理器"""
         logger.info("Closing HumanThinkingMemoryManager v1.0.0...")
-        
+
         if self.cache_pool:
             await self.cache_pool.close()
         
@@ -357,7 +626,21 @@ class HumanThinkingMemoryManager(BaseMemoryManager):
             await self.db.close()
         
         logger.info("HumanThinkingMemoryManager v1.0.0 closed")
-    
+        return True
+
+    def get_memory_prompt(self, language: str = "zh") -> str:
+        """返回记忆指导 prompt"""
+        prompts = {
+            "zh": "【记忆系统】你可以使用 memory_search(query) 搜索相关记忆。",
+            "en": "[Memory] You can use memory_search(query) to search relevant memories.",
+        }
+        return prompts.get(language, prompts["zh"])
+
+    def list_memory_tools(self) -> list:
+        """返回记忆工具列表"""
+        from agentscope.tool import ToolResponse
+        return [self.memory_search]
+
     async def post_memory_operation(
         self,
         agent_id: str,
@@ -392,31 +675,47 @@ class HumanThinkingMemoryManager(BaseMemoryManager):
         content: str,
         session_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        target_id: Optional[str] = None,
         role: str = "assistant",
         importance: int = 3,
         memory_type: str = "general",
         metadata: Optional[Dict[str, Any]] = None
     ) -> int:
         """
-        存储记忆（会话隔离）
+        存储记忆（会话隔离 + 对话对象隔离）
+
+        Args:
+            content: 记忆内容
+            session_id: 会话ID
+            user_id: 用户ID
+            target_id: 对话对象ID（区分不同Agent/用户）
+            role: 角色
+            importance: 重要性
+            memory_type: 记忆类型
+            metadata: 元数据
+
+        Returns:
+            memory_id
         """
         sid = session_id or self._current_session_id
         uid = user_id or self.user_id
-        
+        tid = target_id or self._current_target_id
+
         if not sid:
             raise ValueError("session_id is required (call set_context() or pass explicitly)")
-        
+
         memory = MemoryItem(
             content=content,
             agent_id=self.agent_id,
             session_id=sid,
             user_id=uid,
+            target_id=tid,
             role=role,
             importance=importance,
             memory_type=memory_type,
             metadata=metadata or {}
         )
-        
+
         temp_id = await self.cache_pool.store(memory, sid)
         
         # 记录 Agent 活动，唤醒睡眠中的 Agent
@@ -443,26 +742,30 @@ class HumanThinkingMemoryManager(BaseMemoryManager):
         min_score: float = 0.1,
     ) -> ToolResponse:
         """
-        搜索记忆（TF-IDF 语义搜索）
-        
+        搜索记忆（会话隔离 + 对话对象隔离）
+
         对齐 ReMeLight 的 memory_search 实现：
         1. TF-IDF 语义检索（优于简单 LIKE）
         2. 按相关性排序
         3. 跨 Session 检索
+        4. 按 target_id 隔离（关键修复）
         """
         sid = self._current_session_id
         uid = self.user_id
-        
+        tid = self._current_target_id
+
         if not self.db:
             return ToolResponse(content="Database not initialized")
-        
+
         # 1. 使用 TF-IDF 语义搜索数据库
         tfidf_engine = TFIDFSearchEngine()
-        
+
         # 从数据库获取所有记忆用于 TF-IDF 索引
         # 注：实际使用中可预先构建索引，此处为简化实现
+        # 关键：添加 target_id 隔离
         memories = await self.db.get_active_memories(
             agent_id=self.agent_id,
+            target_id=tid,  # 添加 target_id 隔离
             limit=1000  # 限制搜索范围
         )
         

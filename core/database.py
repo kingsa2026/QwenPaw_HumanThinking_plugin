@@ -52,11 +52,198 @@ class MemoryRecord:
 class HumanThinkingDB:
     """HumanThinking 数据库操作层（会话隔离）"""
     
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, enable_distributed: bool = False, size_threshold_mb: int = 800):
         self.db_path = Path(db_path)
+        self.enable_distributed = enable_distributed
+        self.size_threshold_bytes = size_threshold_mb * 1024 * 1024
         self.conn: Optional[sqlite3.Connection] = None
         self.cursor: Optional[sqlite3.Cursor] = None
         self._lock = asyncio.Lock()
+        self._shard_index = 0  # 当前分片索引
+        self._shard_dbs: Dict[int, 'ShardDB'] = {}  # 分片数据库
+        
+    def _get_shard_path(self, shard_index: int) -> Path:
+        """获取分片数据库路径"""
+        if shard_index == 0:
+            return self.db_path
+        stem = self.db_path.stem
+        suffix = self.db_path.suffix
+        return self.db_path.parent / f"{stem}_shard_{shard_index}{suffix}"
+    
+    def _init_shard_manager(self):
+        """初始化分片管理器"""
+        if not self.enable_distributed:
+            return
+        
+        self._shard_index = 0
+        self._shard_conns: Dict[int, sqlite3.Connection] = {}
+        
+        # 扫描已存在的分片
+        stem = self.db_path.stem
+        suffix = self.db_path.suffix
+        shard_dir = self.db_path.parent
+        
+        for f in shard_dir.glob(f"{stem}_shard_*{suffix}"):
+            if f == self.db_path:
+                continue
+            try:
+                shard_num = int(f.stem.split("_shard_")[-1])
+                conn = sqlite3.connect(str(f), check_same_thread=False)
+                self._shard_conns[shard_num] = conn
+                self._shard_index = max(self._shard_index, shard_num)
+            except:
+                pass
+        
+        logger.info(f"Shard manager initialized: {len(self._shard_conns)} shards found")
+    
+    def _check_and_shard(self) -> int:
+        """检查是否需要分片，返回当前应使用的分片索引"""
+        if not self.enable_distributed:
+            return 0
+        
+        main_db = self.db_path
+        if not main_db.exists():
+            return 0
+        
+        size = main_db.stat().st_size
+        if size < self.size_threshold_bytes:
+            return 0
+        
+        # 超过阈值，执行分片
+        new_shard = self._shard_index + 1
+        shard_path = self._get_shard_path(new_shard)
+        
+        # 将旧数据迁移到分片数据库
+        conn = sqlite3.connect(str(self.db_path))
+        cursor = conn.cursor()
+        
+        # 获取要迁移的记忆（按时间排序，保留最近的数据）
+        cursor.execute("""
+            SELECT id FROM qwenpaw_memory 
+            WHERE memory_tier IN ('frozen', 'archived')
+            OR (memory_tier = 'short_term' AND last_accessed_at < datetime('now', '-30 days'))
+            ORDER BY created_at ASC
+            LIMIT 1000
+        """)
+        memory_ids = [row[0] for row in cursor.fetchall()]
+        
+        if not memory_ids:
+            conn.close()
+            return 0
+        
+        # 创建分片数据库
+        import shutil
+        shutil.copy2(main_db, shard_path)
+        
+        # 在分片数据库中只保留要迁移的数据
+        shard_conn = sqlite3.connect(str(shard_path))
+        shard_cursor = shard_conn.cursor()
+        
+        # 删除不需要的数据
+        shard_cursor.execute(f"DELETE FROM qwenpaw_memory WHERE id NOT IN ({','.join('?' * len(memory_ids))})", memory_ids)
+        
+        # 在主数据库中标记这些记忆已被分片
+        placeholders = ','.join('?' * len(memory_ids))
+        cursor.execute(f"""
+            INSERT OR REPLACE INTO qwenpaw_memory_shard_index (memory_id, shard_index, original_table)
+            SELECT id, {new_shard}, 'qwenpaw_memory' 
+            FROM qwenpaw_memory 
+            WHERE id IN ({placeholders})
+        """, memory_ids)
+        
+        # 从主数据库删除已分片的数据
+        cursor.execute(f"DELETE FROM qwenpaw_memory WHERE id IN ({placeholders})", memory_ids)
+        
+        conn.commit()
+        shard_conn.commit()
+        
+        conn.close()
+        shard_conn.close()
+        
+        # 打开分片连接
+        self._shard_conns[new_shard] = sqlite3.connect(str(shard_path), check_same_thread=False)
+        self._shard_index = new_shard
+        
+        logger.info(f"Database sharded: migrated {len(memory_ids)} memories to shard {new_shard}")
+        
+        return new_shard
+    
+    async def _search_shards(
+        self,
+        query: str,
+        agent_id: str,
+        target_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        max_results: int = 5
+    ) -> List[MemoryRecord]:
+        """跨分片搜索记忆"""
+        if not self._shard_conns:
+            return []
+        
+        results = []
+        
+        # 1. 先从索引表查找匹配的记忆ID
+        self.cursor.execute("""
+            SELECT memory_id, shard_index, indexed_content 
+            FROM qwenpaw_memory_shard_index 
+            WHERE indexed_content LIKE ?
+        """, (f"%{query}%",))
+        
+        index_matches = self.cursor.fetchall()
+        
+        # 按分片组织记忆ID
+        shard_memories: Dict[int, List[int]] = {}
+        for mem_id, shard_idx, indexed_content in index_matches:
+            if shard_idx not in shard_memories:
+                shard_memories[shard_idx] = []
+            shard_memories[shard_idx].append(mem_id)
+        
+        # 2. 从各分片获取完整记忆
+        for shard_idx, memory_ids in shard_memories.items():
+            if shard_idx not in self._shard_conns:
+                continue
+            
+            shard_conn = self._shard_conns[shard_idx]
+            shard_cursor = shard_conn.cursor()
+            
+            placeholders = ','.join('?' * len(memory_ids))
+            shard_cursor.execute(f"""
+                SELECT * FROM qwenpaw_memory 
+                WHERE id IN ({placeholders})
+                AND agent_id = ?
+            """, memory_ids + [agent_id])
+            
+            for row in shard_cursor.fetchall():
+                memory = self._row_to_record(row)
+                # 标记为从分片唤醒
+                memory['from_shard'] = shard_idx
+                results.append(memory)
+                
+                # 唤醒分片中的冷藏记忆
+                if memory.get('memory_tier') == 'frozen':
+                    shard_cursor.execute("""
+                        UPDATE qwenpaw_memory 
+                        SET memory_tier = 'active', access_frozen = 0, decay_score = 1.0
+                        WHERE id = ?
+                    """, (memory['id'],))
+                    shard_conn.commit()
+        
+        # 3. 如果索引没匹配，直接搜索各分片
+        if len(results) < max_results:
+            for shard_idx, shard_conn in self._shard_conns.items():
+                shard_cursor = shard_conn.cursor()
+                shard_cursor.execute("""
+                    SELECT * FROM qwenpaw_memory 
+                    WHERE agent_id = ? AND deleted_at IS NULL AND content LIKE ?
+                    ORDER BY importance DESC LIMIT ?
+                """, (agent_id, f"%{query}%", max_results))
+                
+                for row in shard_cursor.fetchall():
+                    memory = self._row_to_record(row)
+                    memory['from_shard'] = shard_idx
+                    results.append(memory)
+        
+        return results[:max_results]
     
     async def initialize(self) -> None:
         """初始化数据库"""
@@ -78,6 +265,10 @@ class HumanThinkingDB:
         await self._create_tables()
         await self._create_indexes()
         await self._init_version()
+        await self.migrate_if_needed()
+        
+        # 初始化分片管理器
+        self._init_shard_manager()
         
         logger.info(f"HumanThinkingDB initialized: {self.db_path}")
     
@@ -183,13 +374,13 @@ class HumanThinkingDB:
                 last_accessed_at DATETIME,
                 archive_reason TEXT DEFAULT 'frozen_expired',
                 recall_count INTEGER DEFAULT 0,
-                last_recalled_at DATETIME,
-                
-                -- 索引（加速检索）
-                INDEX idx_archive_agent (agent_id),
-                INDEX idx_archive_created (original_created_at),
-                INDEX idx_archive_recalled (last_recalled_at)
+                last_recalled_at DATETIME
             );
+
+            -- 索引（加速检索）
+            CREATE INDEX IF NOT EXISTS idx_archive_agent ON qwenpaw_memory_archive (agent_id);
+            CREATE INDEX IF NOT EXISTS idx_archive_created ON qwenpaw_memory_archive (original_created_at);
+            CREATE INDEX IF NOT EXISTS idx_archive_recalled ON qwenpaw_memory_archive (last_recalled_at);
             
             -- 3. 记忆关联表
             CREATE TABLE IF NOT EXISTS qwenpaw_memory_relations (
@@ -224,6 +415,20 @@ class HumanThinkingDB:
                 continuity_from_previous REAL DEFAULT 0.0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
+            
+            -- 6. 分布式分片索引表
+            CREATE TABLE IF NOT EXISTS qwenpaw_memory_shard_index (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                memory_id INTEGER NOT NULL,
+                shard_index INTEGER NOT NULL,
+                original_table TEXT NOT NULL,
+                indexed_content TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(memory_id, original_table)
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_shard_index_lookup ON qwenpaw_memory_shard_index (memory_id);
+            CREATE INDEX IF NOT EXISTS idx_shard_content_search ON qwenpaw_memory_shard_index (indexed_content);
         """)
         
         # 洞察表 - 存储睡眠时生成的洞察
@@ -316,6 +521,30 @@ class HumanThinkingDB:
                 VALUES ('1.0.0', '1.0.0', '1.0.0')
             """)
             self.conn.commit()
+        else:
+            self.cursor.execute("SELECT schema_version FROM qwenpaw_memory_version LIMIT 1")
+            row = self.cursor.fetchone()
+            if row:
+                current_version = row[0]
+                if current_version != "1.0.0":
+                    logger.warning(f"Database schema version: {current_version}, expected: 1.0.0")
+    
+    async def migrate_if_needed(self) -> None:
+        """数据库迁移"""
+        self.cursor.execute("SELECT schema_version FROM qwenpaw_memory_version LIMIT 1")
+        row = self.cursor.fetchone()
+        current_version = row[0] if row else "1.0.0"
+        
+        if current_version == "1.0.0":
+            try:
+                self.cursor.execute("ALTER TABLE qwenpaw_memory ADD COLUMN last_consolidated_at DATETIME")
+                self.conn.commit()
+                logger.info("Migration: added last_consolidated_at column")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" in str(e).lower():
+                    pass
+                else:
+                    raise
     
     async def add_memory(
         self,
@@ -367,6 +596,18 @@ class HumanThinkingDB:
         self.conn.commit()
         
         memory_id = self.cursor.lastrowid
+        
+        # 写入分片索引（如果启用分布式）
+        if self.enable_distributed and memory_id:
+            self.cursor.execute("""
+                INSERT INTO qwenpaw_memory_shard_index 
+                (memory_id, shard_index, original_table, indexed_content)
+                VALUES (?, 0, 'qwenpaw_memory', ?)
+            """, (memory_id, content[:200]))  # 索引前200字符
+        
+        # 检查是否需要分片
+        self._check_and_shard()
+        
         logger.debug(f"Added memory {memory_id}: agent={agent_id}, target={target_id}, session={session_id}")
         return memory_id
     
@@ -412,6 +653,33 @@ class HumanThinkingDB:
         
         if sync:
             self.conn.commit()
+        
+        # 批量写入分片索引（如果启用分布式）
+        if self.enable_distributed:
+            # 获取这批插入的 memory IDs
+            memory_ids = []
+            for m in memories:
+                self.cursor.execute("""
+                    SELECT id FROM qwenpaw_memory 
+                    WHERE agent_id = ? AND session_id = ? AND content = ? AND created_at >= datetime('now', '-1 second')
+                """, (m.get("agent_id"), m.get("session_id"), m.get("content")))
+                row = self.cursor.fetchone()
+                if row:
+                    memory_ids.append((row[0], m.get("content", "")))
+            
+            # 写入索引
+            for memory_id, content in memory_ids:
+                self.cursor.execute("""
+                    INSERT INTO qwenpaw_memory_shard_index 
+                    (memory_id, shard_index, original_table, indexed_content)
+                    VALUES (?, 0, 'qwenpaw_memory', ?)
+                """, (memory_id, content[:200]))
+            
+            if sync:
+                self.conn.commit()
+        
+        # 检查是否需要分片
+        self._check_and_shard()
         
         logger.info(f"Batch inserted {len(data)} memories")
         return len(data)
@@ -517,7 +785,12 @@ class HumanThinkingDB:
                 await self.wakeup_memory(memory.id)
                 results.append(memory)
         
-        # 3. 可选：搜索归档记忆
+        # 3. 如果启用了分布式，搜索分片索引
+        if self.enable_distributed and len(results) < max_results:
+            shard_results = await self._search_shards(query, agent_id, target_id, user_id, max_results)
+            results.extend(shard_results)
+        
+        # 4. 可选：搜索归档记忆
         if include_archived and len(results) < max_results:
             archived_sql = "SELECT * FROM qwenpaw_memory_archive WHERE agent_id = ?"
             archived_params = [agent_id]
@@ -1127,19 +1400,82 @@ class HumanThinkingDB:
         """, (decay_score, memory_id))
         self.conn.commit()
     
-    async def apply_forgetting_curve(self, agent_id: str, frozen_days: int = 7, archive_days: int = 30) -> int:
+    async def update_memory_score(self, memory_id: int, score: float) -> None:
+        """更新记忆评分（六维评分结果）"""
+        self.cursor.execute("""
+            UPDATE qwenpaw_memory 
+            SET importance_score = ?, updated_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+        """, (score, memory_id))
+        self.conn.commit()
+    
+    async def get_light_sleep_memories(self, agent_id: str, hours: int = 1) -> List[Dict]:
+        """获取浅层睡眠需要整理的记忆
+        
+        只获取最近的 short_term + episodic 类型的记忆
+        不归档、不删除、不改变层级
+        """
+        import datetime
+        cutoff_time = datetime.datetime.now() - datetime.timedelta(hours=hours)
+        
+        self.cursor.execute("""
+            SELECT * FROM qwenpaw_memory 
+            WHERE agent_id = ? 
+              AND deleted_at IS NULL 
+              AND memory_tier IN ('short_term', 'working')
+              AND memory_category = 'episodic'
+              AND created_at > ?
+            ORDER BY created_at DESC
+            LIMIT 100
+        """, (agent_id, cutoff_time.isoformat()))
+        
+        rows = self.cursor.fetchall()
+        return [dict(row) for row in rows]
+    
+    async def get_recent_memories(self, agent_id: str, days: int = 7) -> List[Dict]:
+        """获取最近N天的所有记忆"""
+        import datetime
+        cutoff_time = datetime.datetime.now() - datetime.timedelta(days=days)
+        
+        self.cursor.execute("""
+            SELECT * FROM qwenpaw_memory 
+            WHERE agent_id = ? 
+              AND deleted_at IS NULL 
+              AND created_at > ?
+            ORDER BY created_at DESC
+            LIMIT 500
+        """, (agent_id, cutoff_time.isoformat()))
+        
+        rows = self.cursor.fetchall()
+        return [dict(row) for row in rows]
+    
+    async def save_reflection_summary(self, agent_id: str, summary: str, patterns: List[Dict], truths: List[Dict]) -> None:
+        """保存反思摘要"""
+        import json
+        
+        theme_summary = f"主题：{', '.join([p.get('theme', '') for p in patterns[:3]])}"
+        
+        self.cursor.execute("""
+            INSERT INTO humanthinking_dream_logs 
+            (agent_id, action, details, memories_scanned, memories_consolidated)
+            VALUES (?, ?, ?, ?, ?)
+        """, (agent_id, "REFLECTION", theme_summary, len(patterns), len(truths)))
+        self.conn.commit()
+    
+    async def apply_forgetting_curve(self, agent_id: str, frozen_days: int = 30, archive_days: int = 90, delete_days: int = 180) -> int:
         """应用遗忘曲线，处理完整生命周期
         
         流程：
         1. 冷藏：N天无访问 → 标记为冷藏
         2. 归档：冷藏M天无访问 → 移动到归档表
-        3. 删除：归档90天无访问 → 彻底删除
+        3. 删除：归档D天无访问 → 彻底删除
         4. 衰减：活跃记忆 → 正常衰减
         
         Args:
             agent_id: Agent ID
-            frozen_days: 冷藏天数（默认7天）
-            archive_days: 归档天数（默认30天）
+            frozen_days: 冷藏天数（默认30天）
+            archive_days: 归档天数（默认90天）
+            delete_days: 删除天数（默认180天）
         """
         import datetime
         frozen_count = 0
@@ -1178,7 +1514,7 @@ class HumanThinkingDB:
             archived_count += 1
         
         # 3. 删除：归档90天无访问的记忆
-        deleted_count = await self.delete_old_archives(agent_id, days=90)
+        deleted_count = await self.delete_old_archives(agent_id, days=delete_days)
         
         # 4. 衰减：活跃记忆正常衰减
         self.cursor.execute("""

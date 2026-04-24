@@ -399,6 +399,7 @@ class AgentCachePool:
                         "agent_id": m.agent_id,
                         "session_id": m.session_id,
                         "user_id": m.user_id,
+                        "target_id": m.target_id,  # 添加 target_id 隔离
                         "role": m.role,
                         "content": m.content,
                         "importance": m.importance,

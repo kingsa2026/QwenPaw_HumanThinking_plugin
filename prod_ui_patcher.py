@@ -64,10 +64,46 @@ def _restore_backup(filepath: str) -> bool:
     return False
 
 
+def _patch_js_files_for_human_thinking(qwenpaw_root: str) -> list:
+    """
+    修补打包后的 JS 文件，添加 human_thinking 选项
+
+    v1.1.3.post1 pip 包中没有 TypeScript 源码，只有打包后的 JS 文件。
+    这个函数直接修补 JS 文件。
+
+    Returns:
+        list: 成功修补的文件列表
+    """
+    console_dir = find_qwenpaw_console_static_dir(qwenpaw_root)
+    if not console_dir:
+        logger.warning("无法找到 console 目录")
+        return []
+
+    js_files = []
+    for root, dirs, files in os.walk(console_dir):
+        for f in files:
+            if f.endswith(".js") and not f.endswith(".humanthinking.bak"):
+                js_files.append(os.path.join(root, f))
+
+    logger.info(f"扫描 {len(js_files)} 个 JS 文件...")
+
+    patched_files = []
+    for js_file in js_files:
+        if patch_js_file(js_file):
+            patched_files.append(os.path.basename(js_file))
+
+    if patched_files:
+        logger.info(f"成功修补 {len(patched_files)} 个 JS 文件: {', '.join(patched_files)}")
+    else:
+        logger.warning("没有找到需要修补的 JS 文件")
+
+    return patched_files
+
+
 def patch_js_file(filepath: str) -> bool:
     """
     修改打包后的 JS 文件，添加 HumanThinking 选项
-    
+
     匹配多种可能的压缩格式：
     - {value:"remelight",label:"ReMeLight"}
     - {value:"remelight",label:i18n.t("...")}
@@ -83,7 +119,7 @@ def patch_js_file(filepath: str) -> bool:
             content = f.read()
 
         logger.debug(f"File size: {len(content)} characters")
-        
+
         if "human_thinking" in content:
             logger.debug(f"Already patched: {filepath}")
             return True
@@ -95,10 +131,16 @@ def patch_js_file(filepath: str) -> bool:
 
         logger.info(f"Found remelight reference in: {os.path.basename(filepath)}")
 
-        # 快速检查：是否包含选项对象语法 {value:"remelight" 或 {value:'remelight'}
-        # 如果没有，说明 remelight 只出现在翻译文本中，直接跳过，不产生警告
-        if not re.search(r'\{[^}]*value\s*:\s*["\']remelight["\']', content):
+        # 快速检查：是否包含 remelight 选项对象语法
+        # 必须是 {value:"remelight"...} 格式，而不是翻译文本中的 remelight
+        # 使用更严格的检查：必须同时包含 value: 和 label: 字段
+        remelight_option_match = re.search(r'\{\s*[^}]*?\bvalue\s*:\s*["\']remelight["\'][^}]*?\blabel\s*:', content)
+        if not remelight_option_match:
             logger.info(f"  Skipping: no remelight option object (only i18n text)")
+            logger.info(f"  Found 'remelight' but not as option object. Searching for context...")
+            # 查找 remelight 出现的位置
+            for match in re.finditer(r'.{0,50}remelight.{0,50}', content, re.IGNORECASE):
+                logger.info(f"    Context: ...{match.group(0)}...")
             return False
 
         _make_backup(filepath)
@@ -109,53 +151,36 @@ def patch_js_file(filepath: str) -> bool:
             context_start = max(0, remelight_idx - 100)
             context_end = min(len(content), remelight_idx + 200)
             context = content[context_start:context_end]
-            logger.debug(f"Context around 'remelight' in {os.path.basename(filepath)}:")
-            logger.debug(f"  [{context_start}:{context_end}] {context}")
+            logger.info(f"  Context around 'remelight': ...{context}...")
 
         # 替换模式: 在 remelight 选项后添加 human_thinking
         # 关键：必须匹配选项对象（包含 value: 字段），排除翻译文本
-        
+        # 实际观察到的模式: ik=[{value:"remelight",label:"ReMeLight"},{value:"human_thinking",...}]
+
         patterns_to_try = [
             # 模式1: 标准紧凑格式 {value:"remelight",label:"ReMeLight"}
             r'(\{value\s*:\s*"remelight"\s*,\s*label\s*:\s*"ReMeLight"\s*\})',
             # 模式2: 单引号格式 {value:'remelight',label:'ReMeLight'}
             r"(\{value\s*:\s*'remelight'\s*,\s*label\s*:\s*'ReMeLight'\s*\})",
-            # 模式3: 带额外字段的格式 {value:"remelight",label:"ReMeLight",...}
-            r'(\{value\s*:\s*"remelight"[^}]*\})',
-            # 模式4: 最宽松格式，只要包含 value:"remelight" 或 value:'remelight'
-            r'(\{[^}]*value\s*:\s*["\']remelight["\'][^}]*\})',
+            # 模式3: 带额外字段的格式 {value:"remelight",label:"ReMeLight",...}（末尾可能有?号）
+            r'(\{value\s*:\s*"remelight"[^}]*(?:\??)\})',
         ]
-        
+
         match = None
         matched_pattern = None
         for i, pattern in enumerate(patterns_to_try, 1):
             match = re.search(pattern, content)
             if match:
                 matched_pattern = i
-                logger.info(f"✓ Pattern {i} matched: {pattern}")
+                logger.info(f"  ✓ Pattern {i} matched: {pattern}")
+                logger.info(f"  ✓ Matched text: {match.group(0)}")
                 break
-        
-        if match:
-            logger.info(f"✓ Matched pattern #{matched_pattern} for remelight option in {os.path.basename(filepath)}")
-            logger.info(f"  Matched text: {match.group(0)}")
-            logger.info(f"  Match position: {match.start()}-{match.end()}")
-            # 显示匹配文本前后的内容，帮助理解上下文
-            before_match = content[max(0, match.start()-150):match.start()]
-            after_match = content[match.end():min(len(content), match.end()+150)]
-            logger.info(f"  Before match: ...{before_match}")
-            logger.info(f"  After match: {after_match}...")
-            
-            # 关键验证：检查是否是真正的选项对象
-            matched_text = match.group(0)
-            # 选项对象必须包含 value: 或 value: 的压缩形式
-            if re.search(r'value\s*:\s*["\']', matched_text):
-                logger.info(f"  ✓ Confirmed: matched text is an option object (contains value: field)")
             else:
-                logger.warning(f"  ✗ Warning: matched text may be i18n text, not an option object")
-                logger.warning(f"  Skipping this match")
-                return False
-        else:
+                logger.info(f"  ✗ Pattern {i} did not match: {pattern}")
+
+        if not match:
             logger.warning(f"✗ No remelight option object found in {os.path.basename(filepath)}")
+            logger.info(f"  Tried {len(patterns_to_try)} patterns but none matched")
             return False
         
         matched_pattern_idx = matched_pattern - 1  # 转换为 0-based 索引
@@ -225,6 +250,108 @@ def patch_js_file(filepath: str) -> bool:
     except Exception as e:
         logger.error(f"Failed to patch {filepath}: {e}", exc_info=True)
         return False
+
+
+def patch_agent_config_refresh(qwenpaw_root: str) -> dict:
+    """
+    修补前端JS，添加agent切换时自动刷新配置的功能
+    
+    问题：原生UI的useAgentConfig hook在切换agent时不会重新加载配置，
+    因为fetchConfig的依赖数组只有[form, t]，不包含selectedAgent。
+    
+    解决方案：注入一个全局的agent切换监听器，当检测到agent变化时，
+    自动调用fetchConfig或刷新页面。
+    """
+    results = {"success": False, "patched": [], "errors": []}
+    
+    console_dir = find_qwenpaw_console_static_dir(qwenpaw_root)
+    if not console_dir:
+        results["errors"].append("无法找到 console 目录")
+        return results
+    
+    # 查找所有JS文件
+    js_files = []
+    for root, dirs, files in os.walk(console_dir):
+        for f in files:
+            if f.endswith(".js") and not f.endswith(".humanthinking.bak"):
+                js_files.append(os.path.join(root, f))
+    
+    logger.info(f"[AgentRefresh] Scanning {len(js_files)} JS files for agent config refresh patch...")
+    
+    # 要注入的代码：监听sessionStorage变化，当agent切换时刷新配置
+    refresh_code = '''
+// HumanThinking: Agent切换自动刷新配置
+(function(){
+    var lastAgent = sessionStorage.getItem("qwenpaw-agent-storage") ? JSON.parse(sessionStorage.getItem("qwenpaw-agent-storage")).state?.selectedAgent : null;
+    var checkInterval = setInterval(function(){
+        try {
+            var storage = sessionStorage.getItem("qwenpaw-agent-storage");
+            if (!storage) return;
+            var data = JSON.parse(storage);
+            var currentAgent = data.state?.selectedAgent;
+            if (currentAgent && currentAgent !== lastAgent) {
+                lastAgent = currentAgent;
+                console.log("[HumanThinking] Agent switched to:", currentAgent, "- Reloading config...");
+                // 方法1：尝试调用全局fetchConfig（如果存在）
+                if (window.__agentConfigFetch) {
+                    window.__agentConfigFetch();
+                } else {
+                    // 方法2：刷新页面（兜底方案）
+                    window.location.reload();
+                }
+            }
+        } catch(e) {}
+    }, 500);
+})();
+'''
+    
+    # 找到最大的JS文件（通常是主chunk）
+    largest_file = None
+    largest_size = 0
+    
+    for js_file in js_files:
+        try:
+            size = os.path.getsize(js_file)
+            if size > largest_size:
+                largest_size = size
+                largest_file = js_file
+        except:
+            pass
+    
+    if largest_file and largest_size > 100000:  # 主chunk通常大于100KB
+        try:
+            with open(largest_file, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+            
+            # 检查是否已经注入
+            if "HumanThinking: Agent切换自动刷新配置" in content:
+                logger.debug(f"[AgentRefresh] Already patched: {os.path.basename(largest_file)}")
+                results["success"] = True
+                return results
+            
+            _make_backup(largest_file)
+            
+            # 在文件末尾注入代码
+            new_content = content + "\n" + refresh_code
+            
+            with open(largest_file, "w", encoding="utf-8") as f:
+                f.write(new_content)
+            
+            results["patched"].append(os.path.basename(largest_file))
+            logger.info(f"[AgentRefresh] ✓ Patched largest JS file: {os.path.basename(largest_file)} ({largest_size} bytes)")
+        except Exception as e:
+            results["errors"].append(f"Failed to patch {largest_file}: {e}")
+    else:
+        logger.warning(f"[AgentRefresh] No suitable JS file found (largest: {largest_size} bytes)")
+        results["errors"].append("No suitable JS file found for patching")
+    
+    if results["patched"]:
+        results["success"] = True
+        logger.info(f"[AgentRefresh] Successfully patched {len(results['patched'])} files")
+    else:
+        logger.warning("[AgentRefresh] No files were patched")
+    
+    return results
 
 
 def install_human_thinking_to_qwenpaw(qwenpaw_root: str, plugin_dir: str = None) -> dict:
@@ -723,10 +850,10 @@ def patch_runtime_config_model() -> dict:
 def patch_production_ui(qwenpaw_root: str) -> dict:
     """
     修改生产环境的前端文件
-    
+
     Args:
         qwenpaw_root: QwenPaw 根目录
-        
+
     Returns:
         修改结果
     """
@@ -754,7 +881,6 @@ def patch_production_ui(qwenpaw_root: str) -> dict:
         "patched_files": [],
     }
 
-    # 查找所有 JS 文件
     js_files = []
     for root, dirs, files in os.walk(console_dir):
         for f in files:
@@ -762,37 +888,15 @@ def patch_production_ui(qwenpaw_root: str) -> dict:
                 js_files.append(os.path.join(root, f))
 
     logger.info(f"Scanning {len(js_files)} JS files for remelight references...")
-    logger.info(f"JS files list (first 10): {[os.path.basename(f) for f in js_files[:10]]}")
 
     patched_count = 0
     for idx, js_file in enumerate(js_files, 1):
-        logger.info(f"[{idx}/{len(js_files)}] Checking: {os.path.basename(js_file)}")
         if patch_js_file(js_file):
             results["patched_files"].append(os.path.basename(js_file))
             patched_count += 1
-            logger.info(f"  [{patched_count}] Patched: {os.path.basename(js_file)}")
 
     if patched_count > 0:
         logger.info(f"Successfully patched {patched_count} file(s)")
-        logger.info(f"PATCHED FILES DETAIL:")
-        for pf in results["patched_files"]:
-            # 找到修补后的文件并输出详细内容
-            for js_file in js_files:
-                if os.path.basename(js_file) == pf:
-                    try:
-                        with open(js_file, "r", encoding="utf-8", errors="ignore") as f:
-                            content = f.read()
-                        ht_idx = content.find("human_thinking")
-                        if ht_idx >= 0:
-                            start = max(0, ht_idx - 100)
-                            end = min(len(content), ht_idx + 200)
-                            logger.info(f"  File: {pf}")
-                            logger.info(f"  human_thinking at position: {ht_idx}")
-                            logger.info(f"  Content context:")
-                            logger.info(f"    {content[start:end]}")
-                    except Exception as e:
-                        logger.warning(f"  Could not read {pf}: {e}")
-                    break
     else:
         logger.warning("No files were patched - may need manual review")
         results["success"] = False

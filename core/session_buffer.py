@@ -28,6 +28,7 @@ class MemoryItem:
     agent_id: str
     session_id: str
     user_id: Optional[str] = None
+    target_id: Optional[str] = None  # 对话对象ID，区分不同Agent/用户
     role: str = "assistant"
     importance: int = 3
     memory_type: str = "general"

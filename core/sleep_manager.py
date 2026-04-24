@@ -2,17 +2,20 @@
 """
 HumanThinking 睡眠管理器
 
-设计：
-- 事件驱动：每次会话触发时检查空闲时间
-- 无需后台轮询，节省资源
-- 睡眠触发后才执行整理和遗忘曲线
+三阶段睡眠设计：
+- 阶段一：浅睡眠（Light Sleep）- 扫描7天日志，去重过滤，标记重要信息，暂存
+- 阶段二：REM - 提取主题，发现跨对话模式，生成反思摘要，识别持久真理
+- 阶段三：深睡眠（Deep Sleep）- 六维评分，高分写入MEMORY.md长期记忆
 """
 
 import logging
 import time
+import os
 from typing import Dict, Optional, List
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -22,32 +25,56 @@ class SleepConfig:
     def __init__(
         self,
         enable_agent_sleep: bool = True,
-        sleep_idle_hours: float = 2,
+        light_sleep_minutes: float = 30,
+        rem_minutes: float = 60,
+        deep_sleep_minutes: float = 120,
         auto_consolidate: bool = True,
         consolidate_days: int = 7,
-        frozen_days: int = 7,
-        archive_days: int = 30,
+        frozen_days: int = 30,
+        archive_days: int = 90,
+        delete_days: int = 180,
         enable_insight: bool = True,
         enable_dream_log: bool = True,
+        memory_md_path: str = None,
     ):
         self.enable_agent_sleep = enable_agent_sleep
-        self.sleep_idle_seconds = int(sleep_idle_hours * 3600)
+        self.light_sleep_seconds = int(light_sleep_minutes * 60)
+        self.rem_seconds = int(rem_minutes * 60)
+        self.deep_sleep_seconds = int(deep_sleep_minutes * 60)
+        self.light_sleep_minutes = light_sleep_minutes
+        self.rem_minutes = rem_minutes
+        self.deep_sleep_minutes = deep_sleep_minutes
         self.auto_consolidate = auto_consolidate
         self.consolidate_days = consolidate_days
         self.frozen_days = min(max(frozen_days, 1), 90)
         self.archive_days = min(max(archive_days, frozen_days + 1), 180)
+        self.delete_days = min(max(delete_days, archive_days + 1), 365)
         self.enable_insight = enable_insight
         self.enable_dream_log = enable_dream_log
+        self.memory_md_path = memory_md_path
 
 
-@dataclass
 class AgentSleepState:
-    """Agent 睡眠状态"""
-    agent_id: str
-    is_sleeping: bool = False
-    last_active_time: float = field(default_factory=time.time)
-    sleep_start_time: Optional[float] = None
-    last_consolidate_time: Optional[float] = None
+    """Agent 睡眠状态
+    
+    状态转换：
+    active → light_sleep → rem → deep_sleep → active(唤醒)
+    """
+    def __init__(self, agent_id: str):
+        self.agent_id = agent_id
+        self.is_active = True
+        self.is_light_sleep = False
+        self.is_rem = False
+        self.is_deep_sleep = False
+        self.last_active_time = time.time()
+        self.last_light_sleep_time: Optional[float] = None
+        self.last_rem_time: Optional[float] = None
+        self.last_deep_sleep_time: Optional[float] = None
+        self.last_consolidate_time: Optional[float] = None
+        
+        self.pending_importance: List[Dict] = []
+        self.lasting_truths: List[Dict] = []
+        self.theme_summary: Optional[str] = None
 
 
 class SleepManager:
@@ -57,7 +84,7 @@ class SleepManager:
         self.config = config or SleepConfig()
         self._agent_states: Dict[str, AgentSleepState] = {}
         
-        logger.info(f"SleepManager initialized (event-driven): {self.config.__dict__}")
+        logger.info(f"SleepManager initialized: {self.config.__dict__}")
     
     def update_config(self, config: SleepConfig):
         """更新配置"""
@@ -65,194 +92,584 @@ class SleepManager:
         logger.info(f"SleepManager config updated: {config.__dict__}")
     
     def record_activity(self, agent_id: str) -> bool:
-        """记录活动并检查是否需要进入睡眠
+        """记录活动并检查睡眠状态
         
         Returns:
-            True 表示触发了睡眠后整理
+            True 表示执行了睡眠任务
         """
         if not self.config.enable_agent_sleep:
             return False
         
         if agent_id not in self._agent_states:
-            self._agent_states[agent_id] = AgentSleepState(agent_id=agent_id)
+            self._agent_states[agent_id] = AgentSleepState(agent_id)
         
         state = self._agent_states[agent_id]
         current_time = time.time()
         
-        # 如果已经在睡眠，记录唤醒
-        if state.is_sleeping:
-            logger.info(f"Agent {agent_id} woke up")
-            state.is_sleeping = False
-            state.sleep_start_time = None
-            state.last_active_time = current_time
-            return False
+        if state.is_deep_sleep:
+            logger.info(f"Agent {agent_id} woke up from deep sleep")
+            self._write_memory_md(agent_id, state)
+            self._reset_to_active(state)
+            return True
         
-        # 检查是否应该进入睡眠（之前已经在睡眠边缘）
-        idle_time = current_time - state.last_active_time
+        if state.is_rem:
+            idle_time = current_time - state.last_active_time
+            if idle_time >= self.config.deep_sleep_seconds:
+                logger.info(f"Agent {agent_id} entering deep sleep (was REM)")
+                state.is_rem = False
+                state.is_deep_sleep = True
+                state.last_deep_sleep_time = current_time
+                self._execute_deep_sleep(agent_id, state)
+                return True
+            else:
+                return False
         
-        # 如果超过空闲阈值，触发睡眠
-        if idle_time >= self.config.sleep_idle_seconds:
-            return self._trigger_sleep(agent_id, state, current_time)
+        if state.is_light_sleep:
+            idle_time = current_time - state.last_active_time
+            if idle_time >= self.config.rem_seconds:
+                logger.info(f"Agent {agent_id} entering REM (was light sleep)")
+                state.is_light_sleep = False
+                state.is_rem = True
+                state.last_rem_time = current_time
+                self._execute_rem(agent_id, state)
+                return True
+            elif idle_time >= self.config.deep_sleep_seconds:
+                logger.info(f"Agent {agent_id} entering deep sleep (was light sleep)")
+                state.is_light_sleep = False
+                state.is_deep_sleep = True
+                state.last_deep_sleep_time = current_time
+                self._execute_deep_sleep(agent_id, state)
+                return True
+            else:
+                return False
         
-        # 更新活跃时间
+        if state.is_active:
+            idle_time = current_time - state.last_active_time
+            
+            if idle_time >= self.config.deep_sleep_seconds:
+                logger.info(f"Agent {agent_id} entering deep sleep (from active)")
+                self._enter_deep_sleep(state, current_time)
+                return True
+            elif idle_time >= self.config.rem_seconds:
+                logger.info(f"Agent {agent_id} entering REM (from active)")
+                self._enter_rem(state, current_time)
+                return True
+            elif idle_time >= self.config.light_sleep_seconds:
+                logger.info(f"Agent {agent_id} entering light sleep")
+                self._enter_light_sleep(state, current_time)
+                return True
+        
         state.last_active_time = current_time
         return False
     
-    def _trigger_sleep(self, agent_id: str, state: AgentSleepState, current_time: float) -> bool:
-        """触发睡眠并执行整理
+    def _reset_to_active(self, state: AgentSleepState):
+        """重置为活跃状态"""
+        state.is_active = True
+        state.is_light_sleep = False
+        state.is_rem = False
+        state.is_deep_sleep = False
+        state.last_active_time = time.time()
+    
+    def _enter_light_sleep(self, state: AgentSleepState, current_time: float):
+        """进入浅层睡眠"""
+        state.is_active = False
+        state.is_light_sleep = True
+        state.last_light_sleep_time = current_time
         
-        Returns:
-            True 表示执行了睡眠整理
+        self._execute_light_sleep(state.agent_id, state)
+    
+    def _enter_rem(self, state: AgentSleepState, current_time: float):
+        """进入REM阶段"""
+        state.is_active = False
+        state.is_rem = True
+        state.last_rem_time = current_time
+        
+        self._execute_rem(state.agent_id, state)
+    
+    def _enter_deep_sleep(self, state: AgentSleepState, current_time: float):
+        """进入深层睡眠"""
+        state.is_active = False
+        state.is_deep_sleep = True
+        state.last_deep_sleep_time = current_time
+        
+        self._execute_deep_sleep(state.agent_id, state)
+    
+    def _execute_light_sleep(self, agent_id: str, state: AgentSleepState):
+        """阶段一：浅层睡眠
+        
+        扫描最近7天内的对话日志
+        去重、过滤废话、标记潜在重要信息
+        仅暂存，不写入长期记忆
         """
-        state.is_sleeping = True
-        state.sleep_start_time = current_time
-        
-        logger.info(f"Agent {agent_id} entering sleep mode (idle: {current_time - state.last_active_time:.0f}s)")
-        
-        # 异步执行遗忘曲线和整理
         try:
             import asyncio
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(self._execute_sleep_tasks(agent_id))
+            loop.run_until_complete(self._async_light_sleep(agent_id, state))
             loop.close()
         except Exception as e:
-            logger.error(f"Error in sleep tasks: {e}", exc_info=True)
-        
-        return True
+            logger.error(f"Error in light sleep: {e}", exc_info=True)
     
-    async def _execute_sleep_tasks(self, agent_id: str):
-        """执行睡眠时的任务"""
+    async def _async_light_sleep(self, agent_id: str, state: AgentSleepState):
+        """异步执行浅层睡眠任务"""
         from .database import HumanThinkingDB
         
         db = HumanThinkingDB(agent_id)
         await db.initialize()
         
         try:
-            # 1. 记录梦境日志
             if self.config.enable_dream_log:
-                await db.add_dream_log(agent_id, "ENTER_SLEEP", "进入睡眠模式")
+                await db.add_dream_log(agent_id, "LIGHT_SLEEP", "阶段一：浅层睡眠 - 扫描7天日志，去重过滤")
             
-            # 2. 应用遗忘曲线（冷藏/归档/删除）
-            forgetting_result = await db.apply_forgetting_curve(
-                agent_id,
-                frozen_days=self.config.frozen_days,
-                archive_days=self.config.archive_days
-            )
-            logger.info(f"Forgetting curve applied: {forgetting_result}")
+            memories = await db.get_recent_memories(agent_id, days=7)
             
-            # 3. 检查是否需要整理
-            if self.config.auto_consolidate:
-                await self._consolidate_memories(agent_id, db)
+            if not memories:
+                logger.info(f"No memories to process in light sleep")
+                return
             
-            # 4. 记录完成
+            deduplicated = self._deduplicate_memories(memories)
+            filtered = self._filter_noise(deduplicated)
+            important = self._mark_potential_importance(filtered)
+            
+            state.pending_importance = important
+            
             if self.config.enable_dream_log:
-                await db.add_dream_log(agent_id, "SLEEP_COMPLETE", "睡眠任务完成")
-                
+                await db.add_dream_log(
+                    agent_id, "LIGHT_SLEEP_COMPLETE",
+                    f"阶段一完成：扫描{len(memories)}条，去重{len(deduplicated)}条，标记{len(important)}条潜在重要",
+                    memories_scanned=len(memories),
+                    memories_deduped=len(deduplicated),
+                    important_count=len(important)
+                )
+            
+            logger.info(f"Light sleep: scanned={len(memories)}, deduped={len(deduplicated)}, important={len(important)}")
+            
         finally:
             await db.close()
     
-    async def _consolidate_memories(self, agent_id: str, db):
-        """整理记忆"""
-        memories = await db.get_memories_for_consolidation(agent_id, self.config.consolidate_days)
-        
+    def _deduplicate_memories(self, memories: List[Dict]) -> List[Dict]:
+        """去重 - 基于内容相似度"""
         if not memories:
-            return
+            return []
         
-        memories_scanned = len(memories)
-        memories_consolidated = 0
-        
-        logger.info(f"Consolidating {memories_scanned} memories")
+        deduplicated = []
+        seen_contents = set()
         
         for memory in memories:
-            memory_id = memory.get("id")
             content = memory.get("content", "")
-            current_type = memory.get("memory_type", "general")
+            content_hash = hash(content[:100])
             
-            # 分类到四种类型
-            new_type = self._classify_memory(content, current_type)
-            if new_type != current_type:
-                await db.update_memory_type(memory_id, new_type)
-                memories_consolidated += 1
-            
-            # 分类到层级
-            access_count = memory.get("access_count", 0)
-            new_tier = self._classify_tier(access_count, memory)
-            if new_tier != memory.get("memory_tier", "short_term"):
-                await db.set_memory_tier(memory_id, new_tier)
-            
-            # 更新衰减
-            await db.update_decay(memory_id, self._calculate_decay(memory))
+            if content_hash not in seen_contents:
+                seen_contents.add(content_hash)
+                deduplicated.append(memory)
         
-        # 生成洞察
-        if self.config.enable_insight:
-            tier_stats = await db.get_tier_stats(agent_id)
-            category_stats = await db.get_category_stats(agent_id)
-            insights = self._generate_insights(memories, tier_stats, category_stats)
+        return deduplicated
+    
+    def _filter_noise(self, memories: List[Dict]) -> List[Dict]:
+        """过滤废话"""
+        noise_patterns = [
+            r"^好的$",
+            r"^收到$",
+            r"^明白$",
+            r"^是的$",
+            r"^ok$",
+            r"^OK$",
+            r"^\[图片\]",
+            r"^\[表情\]",
+            r"^hi$",
+            r"^hello$",
+            r"^hey$",
+        ]
+        
+        filtered = []
+        for memory in memories:
+            content = memory.get("content", "").strip()
+            is_noise = any(re.match(pattern, content, re.IGNORECASE) for pattern in noise_patterns)
             
-            for insight in insights:
-                await db.add_insight(
+            if not is_noise and len(content) > 5:
+                filtered.append(memory)
+        
+        return filtered
+    
+    def _mark_potential_importance(self, memories: List[Dict]) -> List[Dict]:
+        """标记潜在重要信息"""
+        important_keywords = [
+            "喜欢", "讨厌", "偏好", "想要", "希望", "需要", "要求",
+            "订单", "地址", "电话", "账号", "密码", "支付",
+            "价格", "优惠", "折扣", "活动", "促销",
+            "问题", "错误", "故障", "解决", "修复",
+            "喜欢", "感谢", "满意", "不满意", "投诉",
+            "first", "important", "remember", "never forget",
+        ]
+        
+        important = []
+        for memory in memories:
+            content = memory.get("content", "").lower()
+            importance_score = sum(1 for kw in important_keywords if kw.lower() in content)
+            
+            if importance_score > 0:
+                memory["potential_importance"] = importance_score
+                important.append(memory)
+        
+        return sorted(important, key=lambda x: x.get("potential_importance", 0), reverse=True)
+    
+    def _execute_rem(self, agent_id: str, state: AgentSleepState):
+        """阶段二：REM - 快速眼动
+        
+        提取主题、发现跨对话的关联模式
+        生成"反思摘要"，识别"持久真理"（Lasting Truths）
+        仍不写入长期记忆，仅为决策提供依据
+        """
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self._async_rem(agent_id, state))
+            loop.close()
+        except Exception as e:
+            logger.error(f"Error in REM: {e}", exc_info=True)
+    
+    async def _async_rem(self, agent_id: str, state: AgentSleepState):
+        """异步执行REM阶段"""
+        from .database import HumanThinkingDB
+        
+        db = HumanThinkingDB(agent_id)
+        await db.initialize()
+        
+        try:
+            if self.config.enable_dream_log:
+                await db.add_dream_log(agent_id, "REM", "阶段二：REM - 提取主题，发现关联模式")
+            
+            pending = state.pending_importance
+            if not pending:
+                memories = await db.get_recent_memories(agent_id, days=7)
+                pending = self._deduplicate_memories(memories)
+                pending = self._filter_noise(pending)
+            
+            themes = self._extract_themes(pending)
+            state.theme_summary = themes["summary"]
+            
+            patterns = self._find_cross_session_patterns(pending)
+            lasting_truths = self._identify_lasting_truths(pending, patterns)
+            state.lasting_truths = lasting_truths
+            
+            if self.config.enable_insight:
+                theme_summary = f"近期主要关注：{', '.join([p.get('theme', '') for p in themes['themes'][:3]])}"
+                await db.add_dream_log(
                     agent_id=agent_id,
-                    title=insight["title"],
-                    content=insight["content"],
-                    memory_count=memories_scanned,
-                    insight_type=insight.get("type", "pattern")
+                    action="REFLECTION",
+                    details=theme_summary,
+                    memories_scanned=len(themes['themes']) if themes.get('themes') else 0,
+                    memories_consolidated=len(lasting_truths) if lasting_truths else 0
                 )
+            
+            if self.config.enable_dream_log:
+                await db.add_dream_log(
+                    agent_id, "REM_COMPLETE",
+                    f"阶段二完成：提取{len(themes['themes'])}个主题，识别{len(lasting_truths)}条持久真理",
+                    themes_count=len(themes["themes"]),
+                    truths_count=len(lasting_truths)
+                )
+            
+            logger.info(f"REM: themes={len(themes['themes'])}, truths={len(lasting_truths)}")
+            
+        finally:
+            await db.close()
+    
+    def _extract_themes(self, memories: List[Dict]) -> Dict:
+        """提取主题"""
+        themes = []
+        theme_keywords = {
+            "购物": ["订单", "商品", "购买", "支付", "快递", "收货"],
+            "售后": ["退货", "退款", "换货", "维修", "投诉"],
+            "咨询": ["价格", "优惠", "活动", "推荐", "介绍"],
+            "技术支持": ["问题", "错误", "故障", "解决", "使用"],
+            "账户": ["账号", "密码", "登录", "注册", "绑定"],
+        }
         
-        # 记录梦境
-        if self.config.enable_dream_log:
-            await db.add_dream_log(
-                agent_id=agent_id,
-                action="CONSOLIDATE_COMPLETE",
-                details=f"扫描{memories_scanned}条，分类{memories_consolidated}条",
-                memories_scanned=memories_scanned,
-                memories_consolidated=memories_consolidated
+        theme_counts = {theme: 0 for theme in theme_keywords}
+        
+        for memory in memories:
+            content = memory.get("content", "")
+            for theme, keywords in theme_keywords.items():
+                if any(kw in content for kw in keywords):
+                    theme_counts[theme] += 1
+        
+        for theme, count in theme_counts.items():
+            if count > 0:
+                themes.append({"theme": theme, "count": count})
+        
+        themes = sorted(themes, key=lambda x: x["count"], reverse=True)[:5]
+        
+        summary = f"近期主要关注：{', '.join([t['theme'] for t in themes[:3]])}"
+        
+        return {"themes": themes, "summary": summary}
+    
+    def _find_cross_session_patterns(self, memories: List[Dict]) -> List[Dict]:
+        """发现跨对话关联模式"""
+        patterns = []
+        
+        user_sessions = {}
+        for memory in memories:
+            session_id = memory.get("session_id", "unknown")
+            user_id = memory.get("user_id", "unknown")
+            key = f"{user_id}:{session_id}"
+            
+            if key not in user_sessions:
+                user_sessions[key] = []
+            user_sessions[key].append(memory)
+        
+        for key, session_memories in user_sessions.items():
+            if len(session_memories) > 3:
+                content_preview = session_memories[0].get("content", "")[:50]
+                patterns.append({
+                    "session": key,
+                    "message_count": len(session_memories),
+                    "preview": content_preview
+                })
+        
+        return patterns[:10]
+    
+    def _identify_lasting_truths(self, memories: List[Dict], patterns: List[Dict]) -> List[Dict]:
+        """识别持久真理"""
+        truths = []
+        
+        preference_keywords = ["喜欢", "想要", "偏好", "希望", "讨厌", "不要"]
+        fact_keywords = ["订单号", "地址", "电话", "账号"]
+        emotion_keywords = ["感谢", "满意", "开心", "生气", "失望"]
+        
+        for memory in memories:
+            content = memory.get("content", "")
+            
+            truth_type = None
+            if any(kw in content for kw in preference_keywords):
+                truth_type = "preference"
+            elif any(kw in content for kw in fact_keywords):
+                truth_type = "fact"
+            elif any(kw in content for kw in emotion_keywords):
+                truth_type = "emotion"
+            
+            if truth_type and memory.get("potential_importance", 0) >= 1:
+                truths.append({
+                    "type": truth_type,
+                    "content": content[:200],
+                    "importance": memory.get("potential_importance", 1)
+                })
+        
+        return sorted(truths, key=lambda x: x.get("importance", 0), reverse=True)[:20]
+    
+    def _execute_deep_sleep(self, agent_id: str, state: AgentSleepState):
+        """阶段三：深层睡眠
+        
+        对候选信息进行六维加权评分
+        高分条目写入 MEMORY.md，成为AI的"长期记忆"
+        """
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self._async_deep_sleep(agent_id, state))
+            loop.close()
+        except Exception as e:
+            logger.error(f"Error in deep sleep: {e}", exc_info=True)
+    
+    async def _async_deep_sleep(self, agent_id: str, state: AgentSleepState):
+        """异步执行深层睡眠任务"""
+        from .database import HumanThinkingDB
+        
+        db = HumanThinkingDB(agent_id)
+        await db.initialize()
+        
+        try:
+            if self.config.enable_dream_log:
+                await db.add_dream_log(agent_id, "DEEP_SLEEP", "阶段三：深层睡眠 - 六维评分，写入长期记忆")
+            
+            forgetting_result = await db.apply_forgetting_curve(
+                agent_id,
+                frozen_days=self.config.frozen_days,
+                archive_days=self.config.archive_days,
+                delete_days=self.config.delete_days
             )
-        
-        logger.info(f"Consolidation complete: scanned={memories_scanned}, consolidated={memories_consolidated}")
+            
+            all_memories = await db.get_memories_for_consolidation(agent_id, self.config.consolidate_days)
+            
+            candidates = state.pending_importance + all_memories
+            
+            promoted_count = 0
+            long_term_memories = []
+            
+            for memory in candidates:
+                memory_importance = memory.get("importance", 3)
+                scores = self._six_dimensional_score(memory, all_memories)
+                
+                # 两种情况提升为长期记忆：
+                # 1. importance >= 4 直接提升
+                # 2. 六维评分 >= 0.5 提升
+                should_promote = memory_importance >= 4 or scores["total"] >= 0.5
+                
+                if should_promote:
+                    memory_id = memory.get("id")
+                    await db.set_memory_tier(memory_id, "long_term")
+                    await db.update_memory_score(memory_id, scores["total"])
+                    
+                    long_term_memories.append({
+                        "content": memory.get("content", "")[:300],
+                        "score": scores["total"],
+                        "importance": memory_importance,
+                        "type": memory.get("memory_type", "general")
+                    })
+                    promoted_count += 1
+            
+            state.lasting_truths.extend(long_term_memories[:10])
+            
+            if self.config.enable_insight:
+                insights = self._generate_insights(all_memories)
+                for insight in insights:
+                    await db.add_insight(
+                        agent_id=agent_id,
+                        title=insight["title"],
+                        content=insight["content"],
+                        memory_count=len(all_memories),
+                        insight_type=insight.get("type", "pattern")
+                    )
+            
+            if self.config.enable_dream_log:
+                await db.add_dream_log(
+                    agent_id, "DEEP_SLEEP_COMPLETE",
+                    f"阶段三完成：六维评分，{promoted_count}条写入长期记忆",
+                    promoted_count=promoted_count,
+                    forgetting_result=forgetting_result
+                )
+            
+            logger.info(f"Deep sleep: promoted={promoted_count}, forgetting={forgetting_result}")
+            
+        finally:
+            await db.close()
     
-    def _classify_memory(self, content: str, current_type: str) -> str:
-        """根据内容分类记忆"""
-        content_lower = content.lower()
+    def _write_memory_md(self, agent_id: str, state: AgentSleepState):
+        """写入 MEMORY.md 长期记忆文件"""
+        if not self.config.memory_md_path:
+            return
         
-        emotion_keywords = ["喜欢", "讨厌", "开心", "生气", "难过", "满意", "emotion", "feel", "happy"]
-        if any(kw in content_lower for kw in emotion_keywords):
-            return "emotion"
-        
-        preference_keywords = ["偏好", "喜欢", "想要", "希望", "preference", "like", "want"]
-        if any(kw in content_lower for kw in preference_keywords):
-            return "preference"
-        
-        fact_keywords = ["订单", "手机", "地址", "账号", "订单号", "fact", "order", "phone"]
-        if any(kw in content_lower for kw in fact_keywords):
-            return "fact"
-        
-        return "general"
+        try:
+            memory_file = Path(self.config.memory_md_path) / agent_id / "MEMORY.md"
+            memory_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            content_lines = ["# AI 长期记忆\n", f"更新时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"]
+            
+            if state.lasting_truths:
+                content_lines.append("## 持久真理 (Lasting Truths)\n\n")
+                for i, truth in enumerate(state.lasting_truths[:20], 1):
+                    truth_type = truth.get("type", "general")
+                    truth_content = truth.get("content", "")
+                    content_lines.append(f"{i}. [{truth_type}] {truth_content}\n")
+                content_lines.append("\n")
+            
+            content_lines.append("## 反思摘要 (Reflection Summary)\n\n")
+            content_lines.append(f"{state.theme_summary or '暂无'}\n\n")
+            
+            content_lines.append("---\n*此文件由AI自动生成，定期更新*\n")
+            
+            memory_file.write_text("".join(content_lines), encoding="utf-8")
+            logger.info(f"MEMORY.md written for agent {agent_id}")
+            
+        except Exception as e:
+            logger.error(f"Error writing MEMORY.md: {e}")
     
-    def _classify_tier(self, access_count: int, memory: Dict) -> str:
-        """根据访问次数分类层级"""
-        importance = memory.get("importance", 3)
+    def _six_dimensional_score(self, memory: Dict, all_memories: List[Dict] = None) -> Dict[str, float]:
+        """六维加权评分系统
         
-        if access_count >= 10 and importance >= 4:
-            return "long_term"
+        评分维度及权重：
+        - 相关性（30%）：与用户长期兴趣的相关程度
+        - 频率（24%）：出现频率
+        - 时效性（15%）：时效性权重
+        - 查询多样性（15%）：被查询的模式多样性
+        - 整合度（10%）：与其他记忆的关联程度
+        - 概念丰富度（6%）：内容的概念密度
+        """
+        scores = {}
         
-        if access_count <= 1 and importance <= 2:
-            return "archived"
-        
-        return "short_term"
-    
-    def _calculate_decay(self, memory: Dict) -> float:
-        """计算遗忘分数"""
-        base_decay = 0.95
+        content = memory.get("content", "")
         importance = memory.get("importance", 3)
         access_count = memory.get("access_count", 0)
+        memory_type = memory.get("memory_type", "general")
         
-        importance_factor = 1.0 + (importance - 3) * 0.1
-        access_factor = 1.0 + min(access_count * 0.05, 0.5)
+        relevance_score = self._calc_relevance(memory, all_memories or [])
+        frequency_score = min(access_count / 10.0, 1.0)
+        recency_score = self._calc_recency(memory)
+        diversity_score = self._calc_diversity(memory, all_memories or [])
+        integration_score = self._calc_integration(memory, all_memories or [])
+        concept_score = self._calc_concept_richness(content)
         
-        return min(base_decay * importance_factor * access_factor, 1.0)
+        scores["relevance"] = relevance_score * 0.30
+        scores["frequency"] = frequency_score * 0.24
+        scores["recency"] = recency_score * 0.15
+        scores["diversity"] = diversity_score * 0.15
+        scores["integration"] = integration_score * 0.10
+        scores["concept"] = concept_score * 0.06
+        
+        scores["total"] = sum(scores.values())
+        return scores
     
-    def _generate_insights(self, memories: List[Dict], tier_stats: Dict = None, category_stats: Dict = None) -> List[Dict]:
+    def _calc_relevance(self, memory: Dict, all_memories: List[Dict]) -> float:
+        """计算相关性分数"""
+        importance = memory.get("importance", 3)
+        memory_type = memory.get("memory_type", "general")
+        
+        type_weights = {"fact": 0.9, "preference": 0.85, "emotion": 0.8, "general": 0.5}
+        type_weight = type_weights.get(memory_type, 0.5)
+        
+        return min((importance / 5.0) * type_weight, 1.0)
+    
+    def _calc_recency(self, memory: Dict) -> float:
+        """计算时效性分数"""
+        created_at = memory.get("created_at")
+        if not created_at:
+            return 0.5
+        
+        if isinstance(created_at, str):
+            try:
+                dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                age_days = (datetime.now() - dt.replace(tzinfo=None)).days
+            except:
+                return 0.5
+        else:
+            age_days = (time.time() - created_at) / 86400
+        
+        return max(0, 1.0 - (age_days / 30.0))
+    
+    def _calc_diversity(self, memory: Dict, all_memories: List[Dict]) -> float:
+        """计算查询多样性分数"""
+        access_patterns = memory.get("access_patterns", [])
+        if not access_patterns:
+            return 0.3
+        
+        unique_contexts = len(set(str(p) for p in access_patterns[-10:]))
+        return min(unique_contexts / 5.0, 1.0)
+    
+    def _calc_integration(self, memory: Dict, all_memories: List[Dict]) -> float:
+        """计算整合度分数"""
+        related_ids = memory.get("related_memory_ids", [])
+        if not related_ids:
+            return 0.2
+        
+        return min(len(related_ids) / 10.0, 1.0)
+    
+    def _calc_concept_richness(self, content: str) -> float:
+        """计算概念丰富度分数"""
+        if not content:
+            return 0.0
+        
+        concept_keywords = [
+            "因为", "所以", "但是", "如果", "虽然", "而且", "或者",
+            "first", "then", "because", "however", "therefore",
+            "分析", "比较", "总结", "结论", "建议"
+        ]
+        
+        keyword_count = sum(1 for kw in concept_keywords if kw.lower() in content.lower())
+        return min(keyword_count / 5.0, 1.0)
+    
+    def _generate_insights(self, memories: List[Dict]) -> List[Dict]:
         """生成洞察"""
         insights = []
         
@@ -277,27 +694,32 @@ class SleepManager:
     
     def is_sleeping(self, agent_id: str) -> bool:
         """检查 Agent 是否在睡眠"""
-        return self._agent_states.get(agent_id, AgentSleepState(agent_id=agent_id)).is_sleeping
+        state = self._agent_states.get(agent_id)
+        if not state:
+            return False
+        return state.is_light_sleep or state.is_rem or state.is_deep_sleep
     
     def get_sleeping_agents(self) -> List[str]:
         """获取所有睡眠中的 Agent"""
         return [
             agent_id for agent_id, state in self._agent_states.items()
-            if state.is_sleeping
+            if state.is_light_sleep or state.is_rem or state.is_deep_sleep
         ]
     
     def get_status(self, agent_id: str) -> dict:
         """获取 Agent 睡眠状态"""
         state = self._agent_states.get(agent_id)
         if not state:
-            return {"agent_id": agent_id, "is_sleeping": False, "last_active": None}
+            return {"agent_id": agent_id, "status": "active", "sleep_type": None}
         
-        return {
-            "agent_id": agent_id,
-            "is_sleeping": state.is_sleeping,
-            "last_active": datetime.fromtimestamp(state.last_active_time).isoformat(),
-            "sleep_duration": time.time() - state.sleep_start_time if state.sleep_start_time else 0
-        }
+        if state.is_deep_sleep:
+            return {"agent_id": agent_id, "status": "sleeping", "sleep_type": "deep"}
+        elif state.is_rem:
+            return {"agent_id": agent_id, "status": "sleeping", "sleep_type": "rem"}
+        elif state.is_light_sleep:
+            return {"agent_id": agent_id, "status": "sleeping", "sleep_type": "light"}
+        else:
+            return {"agent_id": agent_id, "status": "active", "sleep_type": None}
 
 
 _global_sleep_manager: Optional[SleepManager] = None
@@ -314,23 +736,19 @@ def init_sleep_manager(config: SleepConfig = None) -> SleepManager:
 
 
 def record_agent_activity(agent_id: str) -> bool:
-    """记录活动并检查是否触发睡眠
-    
-    Returns:
-        True 表示触发了睡眠后整理
-    """
+    """记录活动并检查睡眠状态"""
     if _global_sleep_manager:
         return _global_sleep_manager.record_activity(agent_id)
     return False
 
 
 def pulse_agent(agent_id: str) -> bool:
-    """心跳 - 唤醒/记录活动"""
+    """心跳"""
     return record_agent_activity(agent_id)
 
 
 def notify_task_start(agent_id: str) -> bool:
-    """定时任务 - 记录活动"""
+    """定时任务"""
     return record_agent_activity(agent_id)
 
 
