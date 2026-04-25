@@ -212,15 +212,33 @@ class VectorStoreBackend:
         # 启用 pgvector 扩展
         with self._pg_conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            cur.execute(f"""
-                CREATE TABLE IF NOT EXISTS {self.collection_name} (
+            # 使用参数化查询防止SQL注入，表名使用合法标识符验证
+            safe_collection = self._sanitize_identifier(self.collection_name)
+            cur.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {safe_collection} (
                     id TEXT PRIMARY KEY,
-                    vector VECTOR({self.embedding_dim}),
+                    vector VECTOR(%s),
                     metadata JSONB,
                     document TEXT
                 );
-            """)
+                """,
+                (self.embedding_dim,)
+            )
             self._pg_conn.commit()
+    
+    def _sanitize_identifier(self, name: str) -> str:
+        """清理SQL标识符，防止SQL注入"""
+        import re
+        # 只允许字母、数字、下划线，且不能以数字开头
+        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
+            # 如果包含非法字符，使用安全的默认名称并记录警告
+            safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', name)
+            if safe_name[0].isdigit():
+                safe_name = '_' + safe_name
+            print(f"警告: 集合名称 '{name}' 包含非法字符，已清理为 '{safe_name}'")
+            return safe_name
+        return name
     
     async def add_vectors(
         self,
@@ -307,12 +325,13 @@ class VectorStoreBackend:
         """PgVector 模式添加向量"""
         from psycopg2.extras import execute_values
         
+        safe_collection = self._sanitize_identifier(self.collection_name)
         with self._pg_conn.cursor() as cur:
             # 使用 JSON 格式化向量
             for vec_record in vectors:
                 vector_str = f"[{','.join(map(str, vec_record.vector))}]"
                 cur.execute(
-                    f"INSERT INTO {self.collection_name} (id, vector, metadata, document) "
+                    f"INSERT INTO {safe_collection} (id, vector, metadata, document) "
                     f"VALUES (%s, %s::vector, %s::jsonb, %s) "
                     f"ON CONFLICT (id) DO UPDATE SET vector=EXCLUDED.vector, metadata=EXCLUDED.metadata, document=EXCLUDED.document;",
                     (vec_record.id, vector_str, str(vec_record.metadata), vec_record.document)
@@ -471,21 +490,23 @@ class VectorStoreBackend:
     ) -> List[SearchResult]:
         """PgVector 模式向量搜索"""
         vector_str = f"[{','.join(map(str, query_vector))}]"
+        safe_collection = self._sanitize_identifier(self.collection_name)
         
         where_clause = ""
         where_params = []
         if filter_metadata:
             conditions = []
             for key, value in filter_metadata.items():
-                conditions.append(f"metadata->>'{key}' = %s")
-                where_params.append(str(value))
+                # 使用参数化查询防止SQL注入
+                conditions.append("metadata->>%s = %s")
+                where_params.extend([str(key), str(value)])
             where_clause = "WHERE " + " AND ".join(conditions)
         
         with self._pg_conn.cursor() as cur:
             cur.execute(f"""
                 SELECT id, vector, metadata, document,
                        1 - (vector <=> %s::vector) AS similarity
-                FROM {self.collection_name}
+                FROM {safe_collection}
                 {where_clause}
                 ORDER BY similarity DESC
                 LIMIT %s;
@@ -643,10 +664,11 @@ class VectorStoreBackend:
     
     def _delete_pgvector(self, ids: List[str]) -> int:
         """PgVector 模式删除向量"""
+        safe_collection = self._sanitize_identifier(self.collection_name)
         with self._pg_conn.cursor() as cur:
             placeholders = ",".join(["%s"] * len(ids))
             cur.execute(
-                f"DELETE FROM {self.collection_name} WHERE id IN ({placeholders});",
+                f"DELETE FROM {safe_collection} WHERE id IN ({placeholders});",
                 ids
             )
             self._pg_conn.commit()
@@ -684,15 +706,19 @@ class VectorStoreBackend:
             ).count
         
         elif self.backend_type == VectorBackendType.PGVECTOR:
+            safe_collection = self._sanitize_identifier(self.collection_name)
             with self._pg_conn.cursor() as cur:
                 if filter_metadata:
                     conditions = " AND ".join([
-                        f"metadata->>'{key}' = '{value}'"
-                        for key, value in filter_metadata.items()
+                        "metadata->>%s = %s"
+                        for _ in filter_metadata.items()
                     ])
-                    cur.execute(f"SELECT COUNT(*) FROM {self.collection_name} WHERE {conditions};")
+                    params = []
+                    for key, value in filter_metadata.items():
+                        params.extend([str(key), str(value)])
+                    cur.execute(f"SELECT COUNT(*) FROM {safe_collection} WHERE {conditions};", params)
                 else:
-                    cur.execute(f"SELECT COUNT(*) FROM {self.collection_name};")
+                    cur.execute(f"SELECT COUNT(*) FROM {safe_collection};")
                 return cur.fetchone()[0]
         
         return 0
@@ -710,8 +736,9 @@ class VectorStoreBackend:
             self._client.delete_collection(self.collection_name)
             self._init_qdrant()
         elif self.backend_type == VectorBackendType.PGVECTOR:
+            safe_collection = self._sanitize_identifier(self.collection_name)
             with self._pg_conn.cursor() as cur:
-                cur.execute(f"DELETE FROM {self.collection_name};")
+                cur.execute(f"DELETE FROM {safe_collection};")
                 self._pg_conn.commit()
     
     def get_stats(self) -> Dict[str, Any]:

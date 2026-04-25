@@ -631,7 +631,7 @@ class SleepManager:
             try:
                 dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
                 age_days = (datetime.now() - dt.replace(tzinfo=None)).days
-            except:
+            except (ValueError, TypeError):
                 return 0.5
         else:
             age_days = (time.time() - created_at) / 86400
@@ -722,10 +722,33 @@ class SleepManager:
             return {"agent_id": agent_id, "status": "active", "sleep_type": None}
 
 
+# Agent 配置隔离 - 每个 Agent 拥有独立的睡眠配置
+_agent_sleep_configs: Dict[str, SleepConfig] = {}
 _global_sleep_manager: Optional[SleepManager] = None
 
 
-def get_sleep_manager() -> Optional[SleepManager]:
+def get_sleep_manager(agent_id: str = None) -> Optional[SleepManager]:
+    """获取睡眠管理器
+    
+    Args:
+        agent_id: Agent ID，用于获取 Agent 专属配置
+    
+    Returns:
+        SleepManager: 如果指定了 agent_id，返回带有该 Agent 配置的 SleepManager
+    """
+    global _global_sleep_manager, _agent_sleep_configs
+    
+    if not _global_sleep_manager:
+        return None
+    
+    if agent_id and agent_id in _agent_sleep_configs:
+        # 返回带有 Agent 专属配置的管理器副本
+        agent_config = _agent_sleep_configs[agent_id]
+        agent_manager = SleepManager(agent_config)
+        # 复制状态
+        agent_manager._agent_states = _global_sleep_manager._agent_states
+        return agent_manager
+    
     return _global_sleep_manager
 
 
@@ -733,6 +756,115 @@ def init_sleep_manager(config: SleepConfig = None) -> SleepManager:
     global _global_sleep_manager
     _global_sleep_manager = SleepManager(config or SleepConfig())
     return _global_sleep_manager
+
+
+def get_agent_sleep_config(agent_id: str = None) -> SleepConfig:
+    """获取 Agent 专属睡眠配置
+    
+    Args:
+        agent_id: Agent ID
+    
+    Returns:
+        SleepConfig: 如果存在 Agent 专属配置则返回，否则返回全局配置
+    """
+    global _agent_sleep_configs, _global_sleep_manager
+    
+    if agent_id and agent_id in _agent_sleep_configs:
+        return _agent_sleep_configs[agent_id]
+    
+    if _global_sleep_manager:
+        return _global_sleep_manager.config
+    
+    return SleepConfig()
+
+
+def set_agent_sleep_config(agent_id: str, config: SleepConfig):
+    """设置 Agent 专属睡眠配置
+    
+    Args:
+        agent_id: Agent ID
+        config: 睡眠配置对象
+    """
+    global _agent_sleep_configs
+    _agent_sleep_configs[agent_id] = config
+    logger.info(f"Sleep config set for agent {agent_id}: {config.__dict__}")
+
+
+def load_agent_sleep_config(agent_id: str) -> SleepConfig:
+    """从文件加载 Agent 专属睡眠配置
+    
+    Args:
+        agent_id: Agent ID
+    
+    Returns:
+        SleepConfig: 加载的配置，如果文件不存在则返回默认配置
+    """
+    from pathlib import Path
+    import json
+    
+    config_path = Path.home() / ".qwenpaw" / "workspaces" / agent_id / "sleep_config.json"
+    
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            config = SleepConfig()
+            for key, value in data.items():
+                if hasattr(config, key):
+                    setattr(config, key, value)
+            
+            # 缓存配置
+            set_agent_sleep_config(agent_id, config)
+            logger.info(f"Loaded sleep config for agent {agent_id} from {config_path}")
+            return config
+        except Exception as e:
+            logger.warning(f"Failed to load sleep config for agent {agent_id}: {e}")
+    
+    return get_agent_sleep_config(agent_id)
+
+
+def save_agent_sleep_config(agent_id: str, config: SleepConfig) -> bool:
+    """保存 Agent 专属睡眠配置到文件
+    
+    Args:
+        agent_id: Agent ID
+        config: 睡眠配置对象
+    
+    Returns:
+        bool: 是否保存成功
+    """
+    from pathlib import Path
+    import json
+    
+    try:
+        config_path = Path.home() / ".qwenpaw" / "workspaces" / agent_id / "sleep_config.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        config_dict = {
+            "enable_agent_sleep": config.enable_agent_sleep,
+            "light_sleep_minutes": config.light_sleep_minutes,
+            "rem_minutes": config.rem_minutes,
+            "deep_sleep_minutes": config.deep_sleep_minutes,
+            "auto_consolidate": config.auto_consolidate,
+            "consolidate_days": config.consolidate_days,
+            "frozen_days": config.frozen_days,
+            "archive_days": config.archive_days,
+            "delete_days": config.delete_days,
+            "enable_insight": config.enable_insight,
+            "enable_dream_log": config.enable_dream_log,
+        }
+        
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config_dict, f, ensure_ascii=False, indent=2)
+        
+        # 更新缓存
+        set_agent_sleep_config(agent_id, config)
+        logger.info(f"Saved sleep config for agent {agent_id} to {config_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save sleep config for agent {agent_id}: {e}")
+        return False
 
 
 def record_agent_activity(agent_id: str) -> bool:

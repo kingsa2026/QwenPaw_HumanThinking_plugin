@@ -91,8 +91,8 @@ class HumanThinkingDB:
                 conn = sqlite3.connect(str(f), check_same_thread=False)
                 self._shard_conns[shard_num] = conn
                 self._shard_index = max(self._shard_index, shard_num)
-            except:
-                pass
+            except (ValueError, sqlite3.Error) as e:
+                logger.warning(f"Failed to load shard {f}: {e}")
         
         logger.info(f"Shard manager initialized: {len(self._shard_conns)} shards found")
     

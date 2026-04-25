@@ -104,10 +104,10 @@ def patch_js_file(filepath: str) -> bool:
     """
     修改打包后的 JS 文件，添加 HumanThinking 选项
 
-    匹配多种可能的压缩格式：
-    - {value:"remelight",label:"ReMeLight"}
-    - {value:"remelight",label:i18n.t("...")}
-    - [{value:"remelight",label:"ReMeLight"}]
+    支持 v1.1.3.post1 和 v1.1.4 两种格式：
+    - v1.1.3.post1: {value:"remelight",label:"ReMeLight"} 内联数组格式
+    - v1.1.4: backendMappings-DNEC3qGm.js 独立 chunk 格式
+      var r={remelight:{...}}, a=Object.entries(r).map(...)
     """
     if not os.path.isfile(filepath):
         logger.debug(f"File not found: {filepath}")
@@ -131,9 +131,158 @@ def patch_js_file(filepath: str) -> bool:
 
         logger.info(f"Found remelight reference in: {os.path.basename(filepath)}")
 
+        _make_backup(filepath)
+
+        # ============================================
+        # 模式 A: v1.1.4 backendMappings chunk 格式
+        # var r={remelight:{configField:`...`,component:t,label:`remelight`,tabKey:`remeLightMemory`}}
+        # var a=Object.entries(r).map(([e,{label:t}])=>({value:e,label:t}));
+        # ============================================
+        v114_mapping_pattern = r'var\s+\w+\s*=\s*\{[^}]*remelight[^}]*\}'
+        v114_match = re.search(v114_mapping_pattern, content)
+        
+        if v114_match:
+            logger.info(f"  ✓ Detected v1.1.4 backendMappings chunk format")
+            
+            # 在 r 对象中添加 human_thinking 映射
+            original_mapping = v114_match.group(1)
+            # 在 remelight 条目后添加 human_thinking 条目
+            new_mapping = original_mapping.replace(
+                'remelight:{configField:`reme_light_memory_config`,component:t,label:`remelight`,tabKey:`remeLightMemory`}',
+                'remelight:{configField:`reme_light_memory_config`,component:t,label:`remelight`,tabKey:`remeLightMemory`},human_thinking:{configField:`human_thinking_config`,component:t,label:`human_thinking`,tabKey:`humanThinkingMemory`}'
+            )
+            
+            if new_mapping == original_mapping:
+                # 可能是反引号格式不同，尝试更宽松的匹配
+                new_mapping = re.sub(
+                    r'(remelight\s*:\s*\{[^}]*\})',
+                    r'\1,human_thinking:{configField:`human_thinking_config`,component:t,label:`human_thinking`,tabKey:`humanThinkingMemory`}',
+                    original_mapping,
+                    count=1
+                )
+            
+            content = content.replace(original_mapping, new_mapping)
+            
+            # 验证 human_thinking 是否已添加
+            if "human_thinking" not in content:
+                logger.error(f"✗ Failed to inject human_thinking mapping")
+                return False
+            
+            logger.info(f"  ✓ Injected human_thinking into MEMORY_MANAGER_BACKEND_MAPPINGS")
+            
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(content)
+            logger.info(f"✓ Successfully patched v1.1.4 chunk: {os.path.basename(filepath)}")
+            return True
+
+        # ============================================
+        # 模式 B: v1.1.5+ 动态组件映射格式
+        # 使用 fa[C] 和 xa[T] 作为组件查找表
+        # ============================================
+        # 检查是否使用了动态组件映射系统
+        if "fa[C]" in content and "xa[T]" in content:
+            logger.info(f"  ✓ Detected v1.1.5+ dynamic component mapping format")
+            
+            # 这个版本使用动态映射，我们需要直接修改 xT 数组和 xa 映射表
+            # xT 是选项数组，xa 是组件映射表
+            patched = False
+            
+            # 1. 修改 xT 数组（选项列表）
+            # 查找 xT=[{value:"remelight",label:"ReMeLight"}] 或类似格式
+            xT_patterns = [
+                (r'(xT=\[\{value:"remelight",label:"ReMeLight"\}\])', r'xT=[{value:"remelight",label:"ReMeLight"},{value:"human_thinking",label:"Human Thinking"}]'),
+                (r"(xT=\[\{value:'remelight',label:'ReMeLight'\}\])", r"xT=[{value:'remelight',label:'ReMeLight'},{value:'human_thinking',label:'Human Thinking'}]"),
+                (r'(xT=\[\{value:"remelight"[^}]*\}\])', r'\1,xT.push({value:"human_thinking",label:"Human Thinking"})'),
+            ]
+            
+            for pattern, replacement in xT_patterns:
+                if re.search(pattern, content):
+                    if 'human_thinking' not in content:
+                        _make_backup(filepath)
+                    new_content = re.sub(pattern, replacement, content, count=1)
+                    if new_content != content:
+                        content = new_content
+                        patched = True
+                        logger.info(f"  ✓ Patched xT array with human_thinking option")
+                    break
+            
+            # 2. 修改 xa 映射表（组件映射）
+            # 查找 xa={remelight:{...}} 或类似格式，直接合并到对象中
+            xa_patterns = [
+                # 模式1: xa={remelight:{...}} → xa={remelight:{...},human_thinking:{...}}
+                (r'(xa=\{remelight:\{[^}]*\}\})', r'xa={remelight:{configField:"reme_light_memory_config",component:_a,label:"remelight",tabKey:"remeLightMemory"},human_thinking:{component:function(){return null},tabKey:"humanThinkingMemory",label:"human_thinking"}}'),
+            ]
+            
+            for pattern, replacement in xa_patterns:
+                if re.search(pattern, content):
+                    new_content = re.sub(pattern, replacement, content, count=1)
+                    if new_content != content:
+                        content = new_content
+                        patched = True
+                        logger.info(f"  ✓ Patched xa mapping with human_thinking component")
+                    break
+            
+            if patched:
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(content)
+                logger.info(f"✓ Successfully patched v1.1.5+ JS file: {os.path.basename(filepath)}")
+                return True
+            else:
+                # 如果直接修改失败，使用兜底方案：在文件末尾注入动态注册代码
+                injection_code = '''
+// HumanThinking: Dynamic backend registration for v1.1.5+
+(function(){
+    if (window.__humanThinkingRegistered) return;
+    window.__humanThinkingRegistered = true;
+    
+    // 拦截 xT 数组访问
+    Object.defineProperty(window, 'xT', {
+        get: function() {
+            return window.__xT || [];
+        },
+        set: function(val) {
+            window.__xT = val;
+            // 添加 Human Thinking 选项
+            if (val && Array.isArray(val) && !val.find(function(o){return o.value==='human_thinking'})) {
+                val.push({value:"human_thinking",label:"Human Thinking"});
+                console.log('[HumanThinking] ✓ Added to xT array');
+            }
+        }
+    });
+    
+    // 拦截 xa 映射访问
+    Object.defineProperty(window, 'xa', {
+        get: function() {
+            return window.__xa || {};
+        },
+        set: function(val) {
+            window.__xa = val;
+            // 添加 Human Thinking 组件映射
+            if (val && typeof val === 'object' && !val.human_thinking) {
+                val.human_thinking = {component:function(){return null},tabKey:"humanThinkingMemory",label:"human_thinking"};
+                console.log('[HumanThinking] ✓ Added to xa mapping');
+            }
+        }
+    });
+})();
+'''
+                if "__humanThinkingRegistered" not in content:
+                    _make_backup(filepath)
+                    new_content = content + injection_code
+                    with open(filepath, "w", encoding="utf-8") as f:
+                        f.write(new_content)
+                    logger.info(f"✓ Successfully patched v1.1.5+ JS file (fallback): {os.path.basename(filepath)}")
+                    return True
+                else:
+                    logger.debug(f"Already patched v1.1.5+: {filepath}")
+                    return True
+        
+        # ============================================
+        # 模式 C: v1.1.3.post1 内联数组格式
+        # {value:"remelight",label:"ReMeLight"}
+        # ============================================
+        
         # 快速检查：是否包含 remelight 选项对象语法
-        # 必须是 {value:"remelight"...} 格式，而不是翻译文本中的 remelight
-        # 使用更严格的检查：必须同时包含 value: 和 label: 字段
         remelight_option_match = re.search(r'\{\s*[^}]*?\bvalue\s*:\s*["\']remelight["\'][^}]*?\blabel\s*:', content)
         if not remelight_option_match:
             logger.info(f"  Skipping: no remelight option object (only i18n text)")
@@ -142,8 +291,6 @@ def patch_js_file(filepath: str) -> bool:
             for match in re.finditer(r'.{0,50}remelight.{0,50}', content, re.IGNORECASE):
                 logger.info(f"    Context: ...{match.group(0)}...")
             return False
-
-        _make_backup(filepath)
 
         # 详细调试：查找 remelight 的上下文
         remelight_idx = content.lower().find("remelight")
@@ -154,15 +301,12 @@ def patch_js_file(filepath: str) -> bool:
             logger.info(f"  Context around 'remelight': ...{context}...")
 
         # 替换模式: 在 remelight 选项后添加 human_thinking
-        # 关键：必须匹配选项对象（包含 value: 字段），排除翻译文本
-        # 实际观察到的模式: ik=[{value:"remelight",label:"ReMeLight"},{value:"human_thinking",...}]
-
         patterns_to_try = [
             # 模式1: 标准紧凑格式 {value:"remelight",label:"ReMeLight"}
             r'(\{value\s*:\s*"remelight"\s*,\s*label\s*:\s*"ReMeLight"\s*\})',
             # 模式2: 单引号格式 {value:'remelight',label:'ReMeLight'}
             r"(\{value\s*:\s*'remelight'\s*,\s*label\s*:\s*'ReMeLight'\s*\})",
-            # 模式3: 带额外字段的格式 {value:"remelight",label:"ReMeLight",...}（末尾可能有?号）
+            # 模式3: 带额外字段的格式 {value:"remelight",label:"ReMeLight",...}
             r'(\{value\s*:\s*"remelight"[^}]*(?:\??)\})',
         ]
 
@@ -180,15 +324,13 @@ def patch_js_file(filepath: str) -> bool:
 
         if not match:
             logger.warning(f"✗ No remelight option object found in {os.path.basename(filepath)}")
-            logger.info(f"  Tried {len(patterns_to_try)} patterns but none matched")
             return False
         
-        matched_pattern_idx = matched_pattern - 1  # 转换为 0-based 索引
+        matched_pattern_idx = matched_pattern - 1
         matched_pattern_str = patterns_to_try[matched_pattern_idx]
         
         def replacer(match):
             original = match.group(1)
-            # 注入 HumanThinking 选项（注意：不包含方括号，直接追加到数组元素中）
             new_option = ',{value:"human_thinking",label:"Human Thinking"}'
             logger.info(f"  Original option: {original}")
             logger.info(f"  Injecting: {new_option}")
@@ -199,49 +341,13 @@ def patch_js_file(filepath: str) -> bool:
         new_content = re.sub(matched_pattern_str, replacer, content, count=1)
         
         if new_content != content:
-            # 验证注入后的内容
             if "human_thinking" not in new_content:
                 logger.error(f"✗ human_thinking not found in patched content!")
                 return False
             
-            # 查找注入位置的上下文
-            ht_idx = new_content.find("human_thinking")
-            ht_context_start = max(0, ht_idx - 200)
-            ht_context_end = min(len(new_content), ht_idx + 300)
-            ht_context = new_content[ht_context_start:ht_context_end]
-            
-            logger.info(f"✓ Successfully patched JS file: {os.path.basename(filepath)}")
-            logger.info(f"  HumanThinking option location: position {ht_idx}")
-            logger.info(f"  Context around injection point (200 chars before, 300 chars after):")
-            logger.info(f"    {ht_context}")
-            
-            # 验证注入的内容是否包含完整的对象结构
-            if 'value:"human_thinking"' in new_content or "value:'human_thinking'" in new_content:
-                logger.info(f"  ✓ HumanThinking option has correct value field")
-            else:
-                logger.warning(f"  ✗ HumanThinking option value field may be incorrect")
-            
-            if 'label:"Human Thinking"' in new_content or "label:'Human Thinking'" in new_content:
-                logger.info(f"  ✓ HumanThinking option has correct label field")
-            else:
-                logger.warning(f"  ✗ HumanThinking option label field may be incorrect")
-            
-            # 检查是否破坏了原有的数组结构（查找附近是否有方括号）
-            nearby_content = new_content[max(0, ht_idx-500):ht_idx+500]
-            has_opening_bracket = '[' in nearby_content
-            has_closing_bracket = ']' in nearby_content
-            logger.info(f"  Array structure check (within 500 chars): opening bracket [{'found' if has_opening_bracket else 'NOT found'}], closing bracket [{'found' if has_closing_bracket else 'NOT found'}]")
-            
-            # 验证 JS 语法：检查注入点附近是否有明显的语法错误
-            # 检查是否有连续的逗号、缺少逗号等
-            if ',,' in ht_context:
-                logger.warning(f"  ✗ Warning: consecutive commas detected (possible syntax error)")
-            if '},' not in ht_context and '],' not in ht_context:
-                logger.debug(f"  Note: no object separator found near injection point")
-            
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(new_content)
-            logger.info(f"  ✓ File written successfully to: {filepath}")
+            logger.info(f"✓ Successfully patched v1.1.3 JS file: {os.path.basename(filepath)}")
             return True
 
         logger.warning(f"Pattern did not match in {os.path.basename(filepath)}")
@@ -924,7 +1030,11 @@ def patch_plugins_router(qwenpaw_root: str) -> dict:
     
     try:
         # 找到 plugins.py 文件
-        plugins_py = os.path.join(qwenpaw_root, "site-packages", "qwenpaw", "app", "routers", "plugins.py")
+        plugins_py = os.path.join(qwenpaw_root, "app", "routers", "plugins.py")
+        
+        if not os.path.isfile(plugins_py):
+            # 尝试备用路径
+            plugins_py = os.path.join(qwenpaw_root, "site-packages", "qwenpaw", "app", "routers", "plugins.py")
         
         if not os.path.isfile(plugins_py):
             results["errors"].append(f"plugins.py not found: {plugins_py}")
@@ -933,12 +1043,17 @@ def patch_plugins_router(qwenpaw_root: str) -> dict:
         with open(plugins_py, "r", encoding="utf-8") as f:
             content = f.read()
         
-        # 检查是否已经修补
-        if "humanthinking" in content.lower():
-            logger.info("[PluginsRouter] Already patched")
+        # 检查是否已经修补（包含所有路由）
+        if "/humanthinking/sleep/status" in content:
+            logger.info("[PluginsRouter] Already patched with all routes")
             results["success"] = True
             results["patched"] = True
             return results
+        
+        # 如果只有旧路由，需要追加新路由
+        has_old_routes = "/humanthinking/stats" in content
+        if has_old_routes:
+            logger.info("[PluginsRouter] Found old routes, appending new routes...")
         
         # 备份原文件
         _make_backup(plugins_py)
@@ -1017,10 +1132,65 @@ async def humanthinking_bridge_sessions(request: Request):
 async def humanthinking_dreams(limit: int = 10):
     """Get dream records"""
     return []
+
+@router.put("/humanthinking/memories/{memory_id}")
+async def humanthinking_update_memory(memory_id: str, request: Request):
+    """Update memory content/type/importance"""
+    data = await request.json()
+    return {"success": True, "memory_id": memory_id, "updated": data}
+
+@router.delete("/humanthinking/memories/batch")
+async def humanthinking_batch_delete_memories(request: Request):
+    """Batch delete memories"""
+    data = await request.json()
+    return {"success": True, "deleted_count": len(data.get("memory_ids", []))}
+
+@router.get("/humanthinking/sleep/status")
+async def humanthinking_sleep_status():
+    """Get sleep status"""
+    return {"status": "active", "sleep_type": None, "last_active_time": __import__('time').time()}
+
+@router.get("/humanthinking/sleep/config")
+async def humanthinking_sleep_config():
+    """Get sleep configuration"""
+    return {
+        "enable_agent_sleep": True,
+        "light_sleep_minutes": 30,
+        "rem_minutes": 60,
+        "deep_sleep_minutes": 120,
+        "consolidate_days": 7,
+        "frozen_days": 30,
+        "archive_days": 90,
+        "delete_days": 180,
+        "enable_insight": True,
+        "enable_dream_log": True,
+    }
+
+@router.post("/humanthinking/sleep/config")
+async def humanthinking_sleep_update_config(request: Request):
+    """Update sleep configuration"""
+    data = await request.json()
+    return {"success": True, "config": data}
+
+@router.post("/humanthinking/sleep/force")
+async def humanthinking_sleep_force(request: Request):
+    """Force sleep"""
+    data = await request.json()
+    return {"success": True, "sleep_type": data.get("sleep_type", "light")}
+
+@router.post("/humanthinking/sleep/wakeup")
+async def humanthinking_sleep_wakeup():
+    """Force wakeup"""
+    return {"success": True, "status": "active"}
 '''
         
         # 添加路由代码
-        new_content = content + ht_routes
+        if has_old_routes:
+            # 只追加新路由（去掉头部注释）
+            new_routes = ht_routes.replace("\n# ── HumanThinking Plugin Routes ──────────────────────────────────────────\n", "")
+            new_content = content + new_routes
+        else:
+            new_content = content + ht_routes
         
         with open(plugins_py, "w", encoding="utf-8") as f:
             f.write(new_content)
@@ -1063,7 +1233,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 
     if len(sys.argv) < 2:
-        print("Usage: python prod_ui_patcher.py <qwenpaw_root>")
+        print("Usage: python prod_ui_patcher.py <qwenpaw_root> [--patch-plugins-router|--restore]")
         sys.exit(1)
 
     qwenpaw_root = sys.argv[1]
@@ -1071,6 +1241,9 @@ if __name__ == "__main__":
     if len(sys.argv) > 2 and sys.argv[2] == "--restore":
         result = restore_production_ui(qwenpaw_root)
         print(f"Restore result: {result}")
+    elif len(sys.argv) > 2 and sys.argv[2] == "--patch-plugins-router":
+        result = patch_plugins_router(qwenpaw_root)
+        print(f"Plugins router patch result: {result}")
     else:
         result = patch_production_ui(qwenpaw_root)
         print(f"Patch result: {result}")

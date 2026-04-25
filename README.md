@@ -4,14 +4,15 @@
 
 ## 概述
 
-HumanThinking Memory Manager 是 QwenPaw V1.1.3+ 的第三方记忆管理插件，**不修改 QwenPaw 源码**，通过官方插件机制集成。
+HumanThinking Memory Manager 是 QwenPaw V1.1.4.post2+ 的第三方记忆管理插件，**不修改 QwenPaw 源码**，通过官方插件机制集成。
 
 支持：
-- ✅ QwenPaw V1.1.3+
+- ✅ QwenPaw V1.1.4.post2+
 - ✅ 官方 Console Plugin 侧边栏页面
 - ✅ 跨 Session 记忆连续性
 - ✅ 情感连续性引擎
 - ✅ 多渠道支持
+- ✅ Agent 配置隔离
 
 ***
 
@@ -247,8 +248,16 @@ A: v1.1.0 已修复，使用原生压缩机制 + 排除最近3轮策略
 
 ## 版本
 
-**v1.1.0** - 适配 QwenPaw V1.1.3
+**v1.4.1** - 适配 QwenPaw V1.1.4.post2
 
+- 兼容 QwenPaw V1.1.4.post2
+- Agent 配置隔离支持
+- Storage 事件监听优化 Agent 切换检测
+- 无痕模式兼容性修复
+
+**v1.4.0** - 适配 QwenPaw V1.1.4.post1
+
+- 初始版本支持
 - 官方 Console Plugin 支持
 - 侧边栏页面（记忆管理 + 记忆设置）
 - 直接查 DB 检索

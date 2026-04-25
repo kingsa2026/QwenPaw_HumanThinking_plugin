@@ -1,7 +1,14 @@
 # -*- coding: utf-8 -*-
-"""HumanThinking Memory Manager - QwenPaw Plugin Entry Point
+"""HumanThinking Plugin for QwenPaw v1.1.4.post2+
 
-v1.0.0-beta0.1 - 解决 QwenPaw Agent 跨Session认知与情感连续性问题
+支持跨会话记忆保持、睡眠管理和情感计算
+兼容 QwenPaw v1.1.4.post2 新特性：
+- Workspace API
+- Tool Guard 安全框架
+- Plan 模式
+- Agent配置隔离
+
+v1.4.1 - 兼容 QwenPaw v1.1.4.post2，优化Agent切换检测机制
 """
 
 from qwenpaw.plugins.api import PluginApi
@@ -111,13 +118,35 @@ class HumanThinkingMemoryPlugin:
             logger.info("✓ Shutdown hook registered")
 
             # 注册 API 路由
-            logger.info("Registering API routes...")
             try:
+                logger.info("Registering API routes...")
+                import sys
+                
+                # 使用 sys.modules 获取已加载的 app 模块，避免重新导入创建新实例
+                if 'qwenpaw.app._app' in sys.modules:
+                    app_module = sys.modules['qwenpaw.app._app']
+                    app = getattr(app_module, 'app', None)
+                else:
+                    from qwenpaw.app._app import app
+                
                 from .api.routes import router as ht_router
-                api.register_router(ht_router)
-                logger.info("✓ API routes registered")
+                
+                # 检查睡眠路由是否已注册
+                existing_paths = [getattr(r, 'path', '') for r in app.routes]
+                has_sleep = any('sleep' in p for p in existing_paths)
+                
+                if not has_sleep:
+                    app.include_router(ht_router)
+                    logger.info("✓ API routes registered to FastAPI app")
+                    
+                    # 验证
+                    new_paths = [getattr(r, 'path', '') for r in app.routes]
+                    sleep_routes = [p for p in new_paths if 'sleep' in p]
+                    logger.info(f"Sleep routes registered: {len(sleep_routes)}")
+                else:
+                    logger.info("✓ API routes already in FastAPI app")
             except Exception as e:
-                logger.warning(f"Failed to register API routes: {e}")
+                logger.warning(f"Failed to register API routes in register(): {e}")
 
             logger.info("=" * 60)
             logger.info("✓ HumanThinking Memory Manager registered")
@@ -314,6 +343,41 @@ class HumanThinkingMemoryPlugin:
 
     def _startup_hook(self):
         """启动钩子：初始化记忆管理器"""
+        
+        # 首先注册 API 路由（最重要，确保前端可以访问）
+        try:
+            logger.info("=== Registering API Routes ===")
+            import sys
+            
+            # 使用 sys.modules 获取已加载的 app 模块，避免重新导入创建新实例
+            if 'qwenpaw.app._app' in sys.modules:
+                app_module = sys.modules['qwenpaw.app._app']
+                app = getattr(app_module, 'app', None)
+            else:
+                from qwenpaw.app._app import app
+            
+            from .api.routes import router as ht_router
+            
+            # 检查睡眠路由是否已注册
+            existing_paths = [getattr(r, 'path', '') for r in app.routes]
+            has_sleep = any('sleep' in p for p in existing_paths)
+            
+            if not has_sleep:
+                app.include_router(ht_router)
+                logger.info("✓ API routes registered to FastAPI app")
+            else:
+                logger.info("✓ API routes already in FastAPI app")
+            
+            # 验证所有路由是否注册成功
+            new_paths = [getattr(r, 'path', '') for r in app.routes]
+            sleep_routes = [p for p in new_paths if 'sleep' in p]
+            logger.info(f"Sleep routes registered: {len(sleep_routes)}")
+            for p in sleep_routes:
+                logger.info(f"  - {p}")
+        except Exception as e:
+            logger.error(f"Failed to register API routes: {e}", exc_info=True)
+        
+        # 然后初始化记忆管理器（可选，失败不影响API）
         try:
             logger.info("=== HumanThinking Memory Manager Initialization ===")
 
@@ -322,8 +386,9 @@ class HumanThinkingMemoryPlugin:
                 logger.info("✓ HumanThinkingMemoryManager imported successfully")
             except ImportError as e:
                 logger.warning(f"Could not import HumanThinkingMemoryManager (may not be installed yet): {e}")
+                return  # 如果核心模块未安装，跳过初始化
 
-            from .core.memory_manager import get_config
+            from qwenpaw.agents.tools.HumanThinkingMemoryManager.core.memory_manager import get_config
             ht_config = load_humanthinking_config()
             global_config = get_config()
 
@@ -337,7 +402,7 @@ class HumanThinkingMemoryPlugin:
             auto_consolidate = sleep_config.get("auto_consolidate", True)
             consolidate_interval_hours = sleep_config.get("consolidate_interval_hours", 6)
 
-            from .core.sleep_manager import init_sleep_manager, SleepConfig
+            from qwenpaw.agents.tools.HumanThinkingMemoryManager.core.sleep_manager import init_sleep_manager, SleepConfig
             sleep_cfg = SleepConfig(
                 enable_agent_sleep=enable_agent_sleep,
                 light_sleep_minutes=30,
@@ -356,7 +421,7 @@ class HumanThinkingMemoryPlugin:
             # 初始化备份管理器
             qwenpaw_root = self._find_qwenpaw_root()
             if qwenpaw_root:
-                from .core.backup_manager import init_backup_manager, get_backup_manager
+                from qwenpaw.agents.tools.HumanThinkingMemoryManager.core.backup_manager import init_backup_manager, get_backup_manager
                 backup_config = load_backup_config()
                 auto_backup_hours = 0
                 if backup_config.get("auto_backup_enabled", False):
@@ -369,13 +434,6 @@ class HumanThinkingMemoryPlugin:
                     pass
                 
                 logger.info("✓ BackupManager initialized")
-
-            # 注册 API 路由到 FastAPI app
-            try:
-                self._register_api_routes()
-                logger.info("✓ API routes registered")
-            except Exception as e:
-                logger.warning(f"Failed to register API routes: {e}")
 
             logger.info("✓ HumanThinking Memory Manager initialized successfully")
 
@@ -403,9 +461,9 @@ class HumanThinkingMemoryPlugin:
                 from qwenpaw.app._app import app
                 from .api.routes import router as ht_router
                 
-                # 检查路由是否已注册
+                # 检查路由是否已注册（注意：路径是 /api/plugins/ 复数形式）
                 existing_paths = [getattr(r, 'path', '') for r in app.routes]
-                if '/api/plugin/humanthinking/stats' in existing_paths:
+                if '/api/plugins/humanthinking/stats' in existing_paths:
                     logger.info("✓ API routes already registered")
                     return
                 
@@ -414,7 +472,7 @@ class HumanThinkingMemoryPlugin:
                 
                 # 验证注册成功
                 new_paths = [getattr(r, 'path', '') for r in app.routes]
-                if '/api/plugin/humanthinking/stats' in new_paths:
+                if '/api/plugins/humanthinking/stats' in new_paths:
                     logger.info("✓ API routes successfully registered (delayed)")
                 else:
                     logger.warning("✗ API routes registration may have failed")
@@ -432,7 +490,7 @@ class HumanThinkingMemoryPlugin:
             logger.info("=== HumanThinking Memory Manager Cleanup ===")
 
             # 停止睡眠管理器
-            from .core.sleep_manager import get_sleep_manager
+            from qwenpaw.agents.tools.HumanThinkingMemoryManager.core.sleep_manager import get_sleep_manager
             sleep_mgr = get_sleep_manager()
             if sleep_mgr:
                 sleep_mgr.stop()

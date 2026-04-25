@@ -1,0 +1,23 @@
+# HumanThinking 代码质量检查配置
+# 用于预防常见代码问题
+
+repos:
+  - repo: local
+    hooks:
+      - id: check-bare-except
+        name: Check for bare except clauses
+        entry: python -c "import sys; content=open(sys.argv[1]).read(); sys.exit(1) if 'except:' in content else sys.exit(0)"
+        language: system
+        files: \.py$
+        
+      - id: check-hardcoded-data
+        name: Check for hardcoded mock data
+        entry: python -c "import sys; content=open(sys.argv[1]).read(); sys.exit(1) if 'return {' in content and 'mem_' in content else sys.exit(0)"
+        language: system
+        files: \.py$
+        
+      - id: check-pydantic-v1
+        name: Check for Pydantic v1 patterns
+        entry: python -c "import sys; content=open(sys.argv[1]).read(); sys.exit(1) if '.dict(' in content else sys.exit(0)"
+        language: system
+        files: \.py$

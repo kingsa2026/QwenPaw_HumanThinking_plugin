@@ -40,58 +40,79 @@ class HumanThinkingConfig:
     delete_days: int = 180   # 删除天数
     enable_distributed_db: bool = False  # 分布式数据库开关
     db_size_threshold_mb: int = 800     # 分布式阈值（MB）
+    # API 降级配置
+    enable_api_fallback: bool = False  # 默认关闭API降级模式
 
 
+# Agent 配置缓存，实现真正的配置隔离
+_agent_configs: Dict[str, HumanThinkingConfig] = {}
 _global_config = HumanThinkingConfig()
 
 
 def get_config(agent_id: str = None, working_dir: str = None) -> HumanThinkingConfig:
     """获取配置（支持按 Agent 隔离）
     
+    每个 Agent 拥有独立的配置实例，修改一个 Agent 的配置不会影响其他 Agent。
+    
     Args:
         agent_id: Agent ID
         working_dir: Agent 工作目录，用于定位配置文件
-    """
-    global _global_config
     
-    # 先加载默认值
-    config = _global_config
+    Returns:
+        HumanThinkingConfig: 配置对象的独立副本
+    """
+    global _global_config, _agent_configs
+    
+    # 确定配置标识符
+    config_key = f"{agent_id or 'global'}:{working_dir or ''}"
+    
+    # 如果已缓存，返回缓存的配置副本
+    if config_key in _agent_configs:
+        return _agent_configs[config_key]
+    
+    # 创建新的配置实例（基于全局默认值）
+    config = HumanThinkingConfig()
+    
+    # 从全局配置复制默认值
+    for key in vars(_global_config):
+        if hasattr(config, key):
+            setattr(config, key, getattr(_global_config, key))
     
     # 尝试从文件加载配置
     try:
         from pathlib import Path
         import json
         
+        config_path = None
+        
         # 优先从 Agent 工作目录读取
         if working_dir:
             config_path = Path(working_dir) / "memory" / "human_thinking_config.json"
-            if config_path.exists():
-                with open(config_path, "r", encoding="utf-8") as f:
-                    user_config = json.load(f)
-                for key, value in user_config.items():
-                    if hasattr(config, key):
-                        setattr(config, key, value)
-                return config
         
         # 如果有 agent_id，尝试从全局配置目录读取
-        if agent_id:
+        elif agent_id:
             config_path = Path.home() / ".qwenpaw" / "workspaces" / agent_id / "memory" / "human_thinking_config.json"
-            if config_path.exists():
-                with open(config_path, "r", encoding="utf-8") as f:
-                    user_config = json.load(f)
-                for key, value in user_config.items():
-                    if hasattr(config, key):
-                        setattr(config, key, value)
-                return config
         
-    except Exception:
-        pass
+        if config_path and config_path.exists():
+            with open(config_path, "r", encoding="utf-8") as f:
+                user_config = json.load(f)
+            for key, value in user_config.items():
+                if hasattr(config, key):
+                    setattr(config, key, value)
+            logger.info(f"Loaded config for agent {agent_id} from {config_path}")
+        
+    except Exception as e:
+        logger.warning(f"Failed to load config for agent {agent_id}: {e}")
     
+    # 缓存配置实例
+    _agent_configs[config_key] = config
     return config
 
 
 def save_config(config: HumanThinkingConfig, agent_id: str = None, working_dir: str = None) -> bool:
     """保存配置到 Agent 专属配置文件
+    
+    保存后会更新对应的缓存配置，确保内存中的配置与文件一致。
     
     Args:
         config: 配置对象
@@ -103,51 +124,93 @@ def save_config(config: HumanThinkingConfig, agent_id: str = None, working_dir: 
     """
     import json
     
+    global _agent_configs
+    
     config_path = None
     
     if working_dir:
         config_path = Path(working_dir) / "memory" / "human_thinking_config.json"
     elif agent_id:
         config_path = Path.home() / ".qwenpaw" / "workspaces" / agent_id / "memory" / "human_thinking_config.json"
-    
-    if not config_path:
-        logger.warning("No agent_id or working_dir provided, cannot save config")
-        return False
+    else:
+        # 没有agent_id时，保存到插件全局配置目录
+        config_path = Path.home() / ".qwenpaw" / "plugins" / "HumanThinking" / "config.json"
     
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
         
+        # 使用 getattr 安全获取属性，避免属性不存在错误
         config_dict = {
-            "enable_cross_session": config.enable_cross_session,
-            "enable_emotion": config.enable_emotion,
+            "enable_cross_session": getattr(config, 'enable_cross_session', True),
+            "enable_emotion": getattr(config, 'enable_emotion', True),
             "enable_session_isolation": True,
             "enable_memory_freeze": True,
-            "session_idle_timeout": config.session_idle_timeout,
-            "refresh_interval": config.refresh_interval,
-            "max_results": config.max_results,
-            "max_memory_chars": config.max_memory_chars,
-            "disable_file_memory": config.disable_file_memory,
-            "frozen_days": config.frozen_days,
-            "archive_days": config.archive_days,
-            "delete_days": config.delete_days,
-            "enable_distributed_db": config.enable_distributed_db,
-            "db_size_threshold_mb": config.db_size_threshold_mb,
+            "session_idle_timeout": getattr(config, 'session_idle_timeout', 180),
+            "refresh_interval": getattr(config, 'refresh_interval', 5),
+            "max_results": getattr(config, 'max_results', 5),
+            "max_memory_chars": getattr(config, 'max_memory_chars', 150),
+            "disable_file_memory": getattr(config, 'disable_file_memory', True),
+            "frozen_days": getattr(config, 'frozen_days', 30),
+            "archive_days": getattr(config, 'archive_days', 90),
+            "delete_days": getattr(config, 'delete_days', 180),
+            "enable_distributed_db": getattr(config, 'enable_distributed_db', False),
+            "db_size_threshold_mb": getattr(config, 'db_size_threshold_mb', 800),
         }
         
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(config_dict, f, ensure_ascii=False, indent=2)
         
-        logger.info(f"Config saved to: {config_path}")
+        # 更新缓存中的配置实例
+        config_key = f"{agent_id or 'global'}:{working_dir or ''}"
+        _agent_configs[config_key] = config
+        
+        logger.info(f"Config saved to: {config_path} (agent_id={agent_id})")
         return True
     except Exception as e:
         logger.error(f"Failed to save config: {e}")
         return False
 
 
-def update_config(config: HumanThinkingConfig):
-    """更新全局配置"""
-    global _global_config
-    _global_config = config
+def update_config(config: HumanThinkingConfig, agent_id: str = None, working_dir: str = None):
+    """更新指定 Agent 的配置
+    
+    Args:
+        config: 配置对象
+        agent_id: Agent ID，为 None 时更新全局配置
+        working_dir: Agent 工作目录
+    """
+    global _global_config, _agent_configs
+    
+    if agent_id or working_dir:
+        config_key = f"{agent_id or 'global'}:{working_dir or ''}"
+        _agent_configs[config_key] = config
+    else:
+        _global_config = config
+
+
+def update_config_fields(fields: dict, agent_id: str = None, working_dir: str = None):
+    """安全更新指定 Agent 配置的指定字段
+    
+    Args:
+        fields: 要更新的字段字典
+        agent_id: Agent ID，为 None 时更新全局配置
+        working_dir: Agent 工作目录
+    """
+    global _global_config, _agent_configs
+    
+    if agent_id or working_dir:
+        config_key = f"{agent_id or 'global'}:{working_dir or ''}"
+        if config_key not in _agent_configs:
+            # 如果缓存中不存在，先获取（会创建缓存）
+            get_config(agent_id=agent_id, working_dir=working_dir)
+        
+        for key, value in fields.items():
+            if hasattr(_agent_configs[config_key], key):
+                setattr(_agent_configs[config_key], key, value)
+    else:
+        for key, value in fields.items():
+            if hasattr(_global_config, key):
+                setattr(_global_config, key, value)
 
 
 @dataclass
