@@ -8,7 +8,7 @@ HumanThinking API Routes
 import logging
 import time
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger("qwenpaw.humanthinking")
@@ -145,6 +145,17 @@ def _handle_db_operation(operation_name: str, operation_func, fallback_result=No
 # ============ API 路由 ============
 
 from .error_handler import handle_api_errors
+
+
+@router.get("/health")
+async def health_check():
+    """健康检查端点"""
+    return {
+        "status": "healthy",
+        "plugin": "humanthinking",
+        "version": "1.4.1",
+        "timestamp": time.time()
+    }
 
 
 @router.get("/stats", response_model=StatsResponse)
@@ -430,29 +441,6 @@ async def get_memory_timeline(
     return timeline if timeline else []
 
 
-@router.post("/sessions/bridge")
-async def bridge_sessions(
-    source_session: str = Field(..., min_length=1),
-    target_session: str = Field(..., min_length=1)
-):
-    """桥接两个会话"""
-    if source_session == target_session:
-        raise HTTPException(status_code=400, detail="源会话和目标会话不能相同")
-    
-    try:
-        from ..core.session_bridge import SessionBridgeEngine
-        bridge = SessionBridgeEngine()
-        
-        if hasattr(bridge, 'bridge_sessions'):
-            bridge.bridge_sessions(source_session, target_session)
-            logger.info(f"Bridged sessions: {source_session} -> {target_session}")
-        
-        return {"success": True, "source_session": source_session, "target_session": target_session}
-    except Exception as e:
-        logger.error(f"Failed to bridge sessions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.get("/config")
 async def get_config(agent_id: Optional[str] = None):
     """获取HumanThinking配置（支持按Agent隔离）"""
@@ -516,6 +504,33 @@ async def update_config(request: Request, agent_id: Optional[str] = None):
         success = save_config(config, agent_id=effective_agent_id)
         if not success:
             return {"success": False, "message": "配置保存失败，请检查日志"}
+        
+        # 保存配置时自动初始化数据库（如果尚未初始化）
+        try:
+            from ..core.memory_manager import HumanThinkingMemoryManager
+            import os
+            from pathlib import Path
+            
+            # 获取当前 agent 的工作目录
+            if effective_agent_id:
+                working_dir = str(Path.home() / ".qwenpaw" / "workspaces" / effective_agent_id)
+            else:
+                working_dir = str(Path.home() / ".qwenpaw" / "workspaces" / "default")
+            
+            db_path = Path(working_dir) / "memory" / f"human_thinking_memory_{effective_agent_id or 'default'}.db"
+            
+            if not db_path.exists():
+                # 数据库不存在，创建并初始化
+                Path(working_dir).mkdir(parents=True, exist_ok=True)
+                mm = HumanThinkingMemoryManager(
+                    working_dir=working_dir,
+                    agent_id=effective_agent_id or "default",
+                    user_id=None
+                )
+                await mm.start()
+                logger.info(f"Database auto-created on config save: {mm.db_path}")
+        except Exception as db_err:
+            logger.warning(f"Failed to auto-create database on config save: {db_err}")
         
         logger.info(f"Config updated for agent {effective_agent_id}: {list(update_fields.keys())}")
         return {"success": True, "config": data}

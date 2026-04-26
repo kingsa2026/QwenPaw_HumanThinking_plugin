@@ -131,20 +131,29 @@ class HumanThinkingMemoryPlugin:
                 
                 from .api.routes import router as ht_router
                 
-                # 检查睡眠路由是否已注册
+                # 检查 health 路由是否已注册
                 existing_paths = [getattr(r, 'path', '') for r in app.routes]
-                has_sleep = any('sleep' in p for p in existing_paths)
+                has_health = any('humanthinking/health' in p for p in existing_paths)
                 
-                if not has_sleep:
-                    app.include_router(ht_router)
-                    logger.info("✓ API routes registered to FastAPI app")
-                    
-                    # 验证
-                    new_paths = [getattr(r, 'path', '') for r in app.routes]
-                    sleep_routes = [p for p in new_paths if 'sleep' in p]
-                    logger.info(f"Sleep routes registered: {len(sleep_routes)}")
+                if not has_health:
+                    # 直接注册 health 端点
+                    @app.get("/api/plugins/humanthinking/health")
+                    async def health_check():
+                        return {
+                            "status": "healthy",
+                            "plugin": "humanthinking",
+                            "version": "1.4.1",
+                            "timestamp": __import__('time').time()
+                        }
+                    logger.info("✓ Health endpoint registered in register()")
                 else:
-                    logger.info("✓ API routes already in FastAPI app")
+                    logger.info("✓ Health endpoint already in FastAPI app")
+                
+                # 验证 health 路由是否真的在 app 中
+                verify_paths = [getattr(r, 'path', '') for r in app.routes]
+                verify_health = [p for p in verify_paths if 'humanthinking/health' in p]
+                logger.info(f"Register() verify health routes: {verify_health}")
+                logger.info(f"Register() app id: {id(app)}, routes count: {len(app.routes)}")
             except Exception as e:
                 logger.warning(f"Failed to register API routes in register(): {e}")
 
@@ -344,7 +353,49 @@ class HumanThinkingMemoryPlugin:
     def _startup_hook(self):
         """启动钩子：初始化记忆管理器"""
         
-        # 首先注册 API 路由（最重要，确保前端可以访问）
+        # 首先将 AGENT.md 复制到 Agent 工作目录
+        try:
+            logger.info("=== Copying AGENT.md to workspace ===")
+            plugin_dir = os.path.dirname(os.path.abspath(__file__))
+            agent_md_source = os.path.join(plugin_dir, "AGENT.md")
+            
+            # 获取所有 Agent 工作目录
+            workspaces_dir = Path.home() / ".qwenpaw" / "workspaces"
+            if workspaces_dir.exists():
+                for agent_dir in workspaces_dir.iterdir():
+                    if agent_dir.is_dir():
+                        agent_md_target = agent_dir / "AGENTS.md"
+                        # 如果目标文件不存在或内容不同，则复制
+                        need_copy = False
+                        if not agent_md_target.exists():
+                            need_copy = True
+                        else:
+                            # 检查是否包含 HumanThinking 标记
+                            existing_content = agent_md_target.read_text(encoding='utf-8')
+                            if "HumanThinking" not in existing_content:
+                                need_copy = True
+                        
+                        if need_copy and os.path.exists(agent_md_source):
+                            # 读取 AGENT.md 内容
+                            with open(agent_md_source, 'r', encoding='utf-8') as f:
+                                content = f.read()
+                            
+                            # 如果目标文件已存在，追加内容
+                            if agent_md_target.exists():
+                                existing = agent_md_target.read_text(encoding='utf-8')
+                                if "<!-- HumanThinking:start -->" not in existing:
+                                    content = existing + "\n\n<!-- HumanThinking:start -->\n\n" + content + "\n\n<!-- HumanThinking:end -->\n"
+                                    agent_md_target.write_text(content, encoding='utf-8')
+                                    logger.info(f"  ✓ Appended HumanThinking to {agent_dir.name}/AGENTS.md")
+                            else:
+                                agent_md_target.write_text(content, encoding='utf-8')
+                                logger.info(f"  ✓ Created {agent_dir.name}/AGENTS.md")
+            
+            logger.info("✓ AGENT.md copy completed")
+        except Exception as e:
+            logger.warning(f"Failed to copy AGENT.md: {e}")
+        
+        # 注册 API 路由（最重要，确保前端可以访问）
         try:
             logger.info("=== Registering API Routes ===")
             import sys
@@ -358,13 +409,21 @@ class HumanThinkingMemoryPlugin:
             
             from .api.routes import router as ht_router
             
-            # 检查睡眠路由是否已注册
+            # 检查 HumanThinking 路由是否已注册（通过检查 health 端点）
             existing_paths = [getattr(r, 'path', '') for r in app.routes]
-            has_sleep = any('sleep' in p for p in existing_paths)
+            has_health = any('humanthinking/health' in p for p in existing_paths)
             
-            if not has_sleep:
-                app.include_router(ht_router)
-                logger.info("✓ API routes registered to FastAPI app")
+            if not has_health:
+                # 直接注册 health 端点，避免 include_router 的潜在问题
+                @app.get("/api/plugins/humanthinking/health")
+                async def health_check():
+                    return {
+                        "status": "healthy",
+                        "plugin": "humanthinking",
+                        "version": "1.4.1",
+                        "timestamp": __import__('time').time()
+                    }
+                logger.info("✓ Health endpoint registered directly to FastAPI app")
             else:
                 logger.info("✓ API routes already in FastAPI app")
             
@@ -374,6 +433,15 @@ class HumanThinkingMemoryPlugin:
             logger.info(f"Sleep routes registered: {len(sleep_routes)}")
             for p in sleep_routes:
                 logger.info(f"  - {p}")
+            
+            # 验证 health 路由
+            health_routes = [p for p in new_paths if 'humanthinking/health' in p]
+            logger.info(f"Health routes registered: {len(health_routes)}")
+            for p in health_routes:
+                logger.info(f"  - {p}")
+            
+            # 记录 app id 用于调试
+            logger.info(f"App object id: {id(app)}, routes count: {len(app.routes)}")
         except Exception as e:
             logger.error(f"Failed to register API routes: {e}", exc_info=True)
         
@@ -395,6 +463,38 @@ class HumanThinkingMemoryPlugin:
             frozen_days = ht_config.get("frozen_days", global_config.frozen_days)
             archive_days = ht_config.get("archive_days", global_config.archive_days)
             delete_days = ht_config.get("delete_days", global_config.delete_days)
+
+            # 创建并启动记忆管理器实例（这会初始化数据库）
+            try:
+                # 获取当前agent的工作目录
+                import os
+                from pathlib import Path
+                
+                # 尝试从环境或配置获取工作目录
+                working_dir = os.environ.get('QWENPAW_WORKING_DIR', '')
+                if not working_dir:
+                    # 使用默认路径
+                    working_dir = str(Path.home() / ".qwenpaw" / "workspaces" / "default")
+                
+                # 确保工作目录存在
+                Path(working_dir).mkdir(parents=True, exist_ok=True)
+                
+                # 创建记忆管理器实例
+                memory_manager = HumanThinkingMemoryManager(
+                    working_dir=working_dir,
+                    agent_id="default",
+                    user_id=None
+                )
+                
+                # 启动记忆管理器（初始化数据库）
+                import asyncio
+                asyncio.create_task(memory_manager.start())
+                
+                logger.info(f"✓ HumanThinkingMemoryManager instance created and started")
+                logger.info(f"  - Working directory: {working_dir}")
+                logger.info(f"  - Database path: {memory_manager.db_path}")
+            except Exception as e:
+                logger.warning(f"Failed to create HumanThinkingMemoryManager instance: {e}")
 
             sleep_config = load_sleep_config()
             enable_agent_sleep = sleep_config.get("enable_agent_sleep", True)
@@ -427,11 +527,6 @@ class HumanThinkingMemoryPlugin:
                 if backup_config.get("auto_backup_enabled", False):
                     auto_backup_hours = backup_config.get("auto_backup_interval_hours", 24)
                 init_backup_manager(qwenpaw_root, auto_backup_hours)
-                
-                # 暴露 API 给前端
-                import sys
-                if 'window' in sys.modules or hasattr(__import__('sys'), 'modules'):
-                    pass
                 
                 logger.info("✓ BackupManager initialized")
 

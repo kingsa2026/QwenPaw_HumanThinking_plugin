@@ -694,16 +694,23 @@
                             unCheckedChildren: '关闭'
                         })
                     ),
-                    // 分布式数据库开关 - 开启后无法关闭（强制启用）
+                    // 分布式数据库开关 - 默认关闭，开启后无法关闭
                     React.createElement('div', { style: { marginBottom: 16 } },
                         React.createElement('label', { style: { display: 'block', marginBottom: 8 } }, '分布式数据库'),
                         React.createElement(Switch, {
-                            checked: true,
-                            disabled: true,
+                            checked: config.enable_distributed_db || false,
+                            disabled: config.enable_distributed_db || false,
+                            onChange: checked => {
+                                if (!config.enable_distributed_db) {
+                                    setConfig({ ...config, enable_distributed_db: checked });
+                                }
+                            },
                             checkedChildren: '已启用',
                             unCheckedChildren: '已禁用'
                         }),
-                        React.createElement('div', { style: { fontSize: 12, color: '#999', marginTop: 4 } }, '分布式数据库已强制启用，不可关闭')
+                        React.createElement('div', { style: { fontSize: 12, color: '#999', marginTop: 4 } }, 
+                            config.enable_distributed_db ? '分布式数据库已启用，不可关闭' : '开启后将启用分布式数据库（开启后不可关闭）'
+                        )
                     ),
                     React.createElement(Divider, null),
                     React.createElement('div', { style: { marginBottom: 16 } },
@@ -862,7 +869,7 @@
                 { key: 'search', label: '🔍 记忆搜索', children: renderSearch() },
                 { key: 'emotion', label: '💝 情感状态', children: renderEmotion() },
                 { key: 'timeline', label: '📅 时间线', children: renderTimeline() },
-                { key: 'config', label: '⚙️ 配置信息', children: renderConfig() }
+                { key: 'config', label: '⚙️ 记忆配置', children: renderConfig() }
             ];
 
             return React.createElement('div', { style: { height: '100%', display: 'flex', flexDirection: 'column' } },
@@ -1240,35 +1247,796 @@
 
     // 初始化
     const init = async () => {
-        await waitForDependencies();
-        console.log('[HumanThinking] 依赖已加载，开始注册...');
+        try {
+            await waitForDependencies();
+            console.log('[HumanThinking] 依赖已加载，开始注册...');
 
-        const { MemoryManagementSidebar, SleepManagementSidebar } = createComponents();
+            const { MemoryManagementSidebar, SleepManagementSidebar } = createComponents();
 
-        if (window.QwenPaw?.registerRoutes) {
-            window.QwenPaw.registerRoutes(PLUGIN_ID, [
-                {
-                    path: '/humanthinking/memory',
-                    component: MemoryManagementSidebar,
-                    label: '记忆管理',
-                    icon: '🧠',
-                    priority: 10
-                },
-                {
-                    path: '/humanthinking/sleep',
-                    component: SleepManagementSidebar,
-                    label: '睡眠管理',
-                    icon: '🌙',
-                    priority: 20
-                }
-            ]);
-            console.log('[HumanThinking] ✓ 路由注册成功');
-        } else {
-            console.error('[HumanThinking] ✗ window.QwenPaw.registerRoutes 不可用');
+            if (window.QwenPaw?.registerRoutes) {
+                window.QwenPaw.registerRoutes(PLUGIN_ID, [
+                    {
+                        path: '/humanthinking/memory',
+                        component: MemoryManagementSidebar,
+                        label: '记忆管理',
+                        icon: '🧠',
+                        priority: 10
+                    },
+                    {
+                        path: '/humanthinking/sleep',
+                        component: SleepManagementSidebar,
+                        label: '睡眠管理',
+                        icon: '🌙',
+                        priority: 20
+                    }
+                ]);
+                console.log('[HumanThinking] ✓ 路由注册成功');
+            } else {
+                console.error('[HumanThinking] ✗ window.QwenPaw.registerRoutes 不可用');
+            }
+
+            console.log('[HumanThinking] ✓ 前端插件加载完成');
+
+            // 注入记忆管理器下拉菜单选项和HT配置tab
+            injectMemoryManagerDropdown();
+        } catch (err) {
+            console.error('[HumanThinking] 初始化失败:', err);
         }
 
-        console.log('[HumanThinking] ✓ 前端插件加载完成');
+        // 暴露全局API供调试和外部调用（无论初始化是否成功）
+        window.HumanThinkingAPI = {
+            showHTConfigTab: showHTConfigTab,
+            hideHTConfigTab: hideHTConfigTab,
+            checkAndShowHTTab: checkAndShowHTTab,
+            addHumanThinkingOption: addHumanThinkingOption,
+            injectDropdownOption: injectDropdownOption
+        };
+        console.log('[HumanThinking] ✓ 全局API已暴露: window.HumanThinkingAPI');
+
+        // 尝试动态修改 MEMORY_MANAGER_BACKEND_MAPPINGS
+        injectBackendMapping();
     };
+
+    // 动态修改 MEMORY_MANAGER_BACKEND_MAPPINGS 以支持 human_thinking
+    function injectBackendMapping() {
+        try {
+            // 查找 QwenPaw 的模块系统
+            const modules = window.QwenPaw?.modules;
+            if (!modules) {
+                console.log('[HumanThinking] QwenPaw modules not found, trying alternative approach');
+                return;
+            }
+
+            // 查找 backendMappings 模块
+            for (const [key, mod] of Object.entries(modules)) {
+                if (key.includes('backendMappings') || key.includes('constants')) {
+                    console.log('[HumanThinking] Found potential backendMappings module:', key);
+                    if (mod.MEMORY_MANAGER_BACKEND_MAPPINGS) {
+                        mod.MEMORY_MANAGER_BACKEND_MAPPINGS['human_thinking'] = {
+                            configField: 'human_thinking_config',
+                            component: HTMemoryConfigComponent,
+                            label: 'human_thinking',
+                            tabKey: 'htMemoryConfig'
+                        };
+                        console.log('[HumanThinking] ✓ Added human_thinking to MEMORY_MANAGER_BACKEND_MAPPINGS');
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('[HumanThinking] Failed to inject backend mapping:', e);
+        }
+    }
+
+    // HT 记忆配置组件
+    function HTMemoryConfigComponent() {
+        const baseUrl = getApiBase();
+        const token = window.QwenPaw?.host?.getApiToken?.() || '';
+        const [config, setConfig] = React.useState({
+            enable_cross_session: true,
+            enable_emotion: true,
+            session_idle_timeout: 180,
+            max_memory_chars: 150,
+            max_results: 5,
+            frozen_days: 30,
+            archive_days: 90,
+            delete_days: 180,
+        });
+        const [loading, setLoading] = React.useState(true);
+        const [saving, setSaving] = React.useState(false);
+
+        React.useEffect(() => {
+            fetch(`${baseUrl}/config`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            })
+            .then(res => res.json())
+            .then(data => {
+                setConfig(prev => ({ ...prev, ...data }));
+                setLoading(false);
+            })
+            .catch(err => {
+                console.error('[HumanThinking] Failed to load config:', err);
+                setLoading(false);
+            });
+        }, []);
+
+        const handleSave = () => {
+            setSaving(true);
+            fetch(`${baseUrl}/config`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(config)
+            })
+            .then(res => res.json())
+            .then(() => {
+                setSaving(false);
+                alert('配置保存成功');
+            })
+            .catch(err => {
+                console.error('[HumanThinking] Failed to save config:', err);
+                setSaving(false);
+                alert('配置保存失败');
+            });
+        };
+
+        const updateConfig = (key, value) => {
+            setConfig(prev => ({ ...prev, [key]: value }));
+        };
+
+        if (loading) {
+            return React.createElement('div', { style: { padding: '40px', textAlign: 'center' } }, '加载中...');
+        }
+
+        return React.createElement('div', { style: { padding: '16px' } },
+            React.createElement('h3', { style: { marginBottom: '16px' } }, '🧠 HumanThinking 记忆配置'),
+            React.createElement('div', { style: { marginBottom: '16px' } },
+                React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, '跨会话记忆'),
+                React.createElement('input', {
+                    type: 'checkbox',
+                    checked: config.enable_cross_session,
+                    onChange: (e) => updateConfig('enable_cross_session', e.target.checked),
+                    style: { marginRight: '8px' }
+                }),
+                React.createElement('span', null, '启用跨会话记忆保持')
+            ),
+            React.createElement('div', { style: { marginBottom: '16px' } },
+                React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, '情感跟踪'),
+                React.createElement('input', {
+                    type: 'checkbox',
+                    checked: config.enable_emotion,
+                    onChange: (e) => updateConfig('enable_emotion', e.target.checked),
+                    style: { marginRight: '8px' }
+                }),
+                React.createElement('span', null, '启用情感状态计算')
+            ),
+            React.createElement('div', { style: { marginBottom: '16px' } },
+                React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, '分布式数据库'),
+                React.createElement('input', {
+                    type: 'checkbox',
+                    checked: config.distributed_db || false,
+                    onChange: (e) => updateConfig('distributed_db', e.target.checked),
+                    style: { marginRight: '8px' }
+                }),
+                React.createElement('span', null, '启用分布式数据库（开启后不可关闭）')
+            ),
+            React.createElement('div', { style: { marginBottom: '16px' } },
+                React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, `会话空闲超时: ${config.session_idle_timeout}秒`),
+                React.createElement('input', {
+                    type: 'range',
+                    min: 60,
+                    max: 600,
+                    value: config.session_idle_timeout,
+                    onChange: (e) => updateConfig('session_idle_timeout', parseInt(e.target.value)),
+                    style: { width: '100%' }
+                })
+            ),
+            React.createElement('div', { style: { marginBottom: '16px' } },
+                React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, `单条记忆最大字符数: ${config.max_memory_chars}字符`),
+                React.createElement('input', {
+                    type: 'range',
+                    min: 100,
+                    max: 500,
+                    value: config.max_memory_chars,
+                    onChange: (e) => updateConfig('max_memory_chars', parseInt(e.target.value)),
+                    style: { width: '100%' }
+                })
+            ),
+            React.createElement('div', { style: { marginBottom: '16px' } },
+                React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, `搜索限制: ${config.max_results}条记录`),
+                React.createElement('input', {
+                    type: 'range',
+                    min: 5,
+                    max: 50,
+                    value: config.max_results,
+                    onChange: (e) => updateConfig('max_results', parseInt(e.target.value)),
+                    style: { width: '100%' }
+                })
+            ),
+            React.createElement('div', { style: { marginBottom: '16px', borderTop: '1px solid #eae9e7', paddingTop: '16px' } },
+                React.createElement('h4', { style: { marginBottom: '12px' } }, '记忆生命周期'),
+                React.createElement('div', { style: { marginBottom: '12px' } },
+                    React.createElement('label', { style: { display: 'block', marginBottom: '4px' } }, `冷藏天数: ${config.frozen_days}天`),
+                    React.createElement('input', {
+                        type: 'range',
+                        min: 7,
+                        max: 90,
+                        value: config.frozen_days,
+                        onChange: (e) => updateConfig('frozen_days', parseInt(e.target.value)),
+                        style: { width: '100%' }
+                    })
+                ),
+                React.createElement('div', { style: { marginBottom: '12px' } },
+                    React.createElement('label', { style: { display: 'block', marginBottom: '4px' } }, `归档天数: ${config.archive_days}天`),
+                    React.createElement('input', {
+                        type: 'range',
+                        min: 30,
+                        max: 365,
+                        value: config.archive_days,
+                        onChange: (e) => updateConfig('archive_days', parseInt(e.target.value)),
+                        style: { width: '100%' }
+                    })
+                ),
+                React.createElement('div', { style: { marginBottom: '12px' } },
+                    React.createElement('label', { style: { display: 'block', marginBottom: '4px' } }, `删除天数: ${config.delete_days}天`),
+                    React.createElement('input', {
+                        type: 'range',
+                        min: 90,
+                        max: 730,
+                        value: config.delete_days,
+                        onChange: (e) => updateConfig('delete_days', parseInt(e.target.value)),
+                        style: { width: '100%' }
+                    })
+                )
+            ),
+            React.createElement('div', { style: { marginTop: '24px' } },
+                React.createElement('button', {
+                    onClick: handleSave,
+                    disabled: saving,
+                    style: {
+                        padding: '8px 24px',
+                        background: '#1890ff',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer'
+                    }
+                }, saving ? '保存中...' : '保存配置')
+            )
+        );
+    }
+
+    // 注入记忆管理器下拉菜单选项和HT配置tab
+    function injectMemoryManagerDropdown() {
+        console.log('[HumanThinking] 开始注入记忆管理器下拉菜单...');
+
+        // 等待页面加载完成
+        const startInject = () => {
+            // 1. 向下拉菜单添加 human_thinking 选项
+            addHumanThinkingOption();
+
+            // 2. 监听下拉菜单变化，动态添加HT配置tab
+            watchMemoryBackendChange();
+
+            // 3. 定期检查和修复（防止页面重新渲染后丢失）
+            setInterval(() => {
+                addHumanThinkingOption();
+                checkAndShowHTTab();
+            }, 2000);
+        };
+
+        // 延迟执行，确保QwenPaw页面已渲染
+        setTimeout(startInject, 3000);
+
+        // 自动测试：页面加载后10秒自动显示HT tab（用于验证功能）
+        setTimeout(() => {
+            console.log('[HumanThinking] Auto-test: calling showHTConfigTab');
+            showHTConfigTab();
+        }, 10000);
+    }
+
+    // 向下拉菜单添加 human_thinking 选项
+    function addHumanThinkingOption() {
+        try {
+            // 查找所有Select组件，找到记忆管理器后端下拉框
+            const allSelects = document.querySelectorAll('.ant-select');
+            let targetSelect = null;
+
+            for (const select of allSelects) {
+                const parent = select.closest('.ant-form-item');
+                if (parent) {
+                    const label = parent.textContent || '';
+                    if (label.includes('记忆管理') || label.includes('Memory Manager') || label.includes('memory_manager_backend')) {
+                        targetSelect = select;
+                        break;
+                    }
+                }
+            }
+
+            if (!targetSelect) {
+                const inputs = document.querySelectorAll('input[name="memory_manager_backend"]');
+                if (inputs.length > 0) {
+                    targetSelect = inputs[0].closest('.ant-select');
+                }
+            }
+
+            if (!targetSelect) return;
+
+            // 检查是否已经添加过（通过标记）
+            if (targetSelect.dataset.htInjected === 'true') return;
+
+            // 标记已注入
+            targetSelect.dataset.htInjected = 'true';
+
+            // 监听下拉框点击事件，在打开时注入选项
+            const trigger = targetSelect.querySelector('.ant-select-selector');
+            if (trigger) {
+                trigger.addEventListener('click', function() {
+                    setTimeout(injectDropdownOption, 100);
+                });
+                trigger.addEventListener('mousedown', function() {
+                    setTimeout(injectDropdownOption, 100);
+                });
+            }
+
+            // 也监听键盘事件
+            targetSelect.addEventListener('keydown', function() {
+                setTimeout(injectDropdownOption, 100);
+            });
+
+            console.log('[HumanThinking] ✓ 已绑定下拉框事件');
+        } catch (e) {
+            console.error('[HumanThinking] 添加下拉选项失败:', e);
+        }
+    }
+
+    // 实际注入下拉选项到打开的列表中
+    function injectDropdownOption() {
+        try {
+            const dropdown = document.querySelector('.ant-select-dropdown:not([style*="display: none"]):not([style*="display:none"])');
+            if (!dropdown) return;
+
+            const list = dropdown.querySelector('.rc-virtual-list-holder-inner');
+            if (!list) return;
+
+            // 检查是否已有 human_thinking 选项
+            const existingOptions = list.querySelectorAll('.ant-select-item-option-content');
+            for (const opt of existingOptions) {
+                if (opt.textContent === 'human_thinking') return;
+            }
+
+            // 创建新的选项元素
+            const newOption = document.createElement('div');
+            newOption.className = 'ant-select-item ant-select-item-option';
+            newOption.setAttribute('data-value', 'human_thinking');
+            newOption.setAttribute('title', 'human_thinking');
+            newOption.setAttribute('aria-selected', 'false');
+            newOption.innerHTML = '<div class="ant-select-item-option-content">human_thinking</div>';
+
+            // 点击事件 - 选择此选项
+            newOption.addEventListener('click', function(e) {
+                e.stopPropagation();
+                e.preventDefault();
+
+                // 找到对应的select
+                const allSelects = document.querySelectorAll('.ant-select');
+                let targetSelect = null;
+                for (const select of allSelects) {
+                    const parent = select.closest('.ant-form-item');
+                    if (parent) {
+                        const label = parent.textContent || '';
+                        if (label.includes('记忆管理') || label.includes('Memory Manager')) {
+                            targetSelect = select;
+                            break;
+                        }
+                    }
+                }
+
+                if (targetSelect) {
+                    // 更新显示文本
+                    const titleEl = targetSelect.querySelector('.ant-select-selection-item');
+                    if (titleEl) {
+                        titleEl.textContent = 'human_thinking';
+                        titleEl.setAttribute('title', 'human_thinking');
+                    }
+
+                    // 更新input值
+                    const input = targetSelect.querySelector('input.ant-select-selection-search-input');
+                    if (input) {
+                        input.value = 'human_thinking';
+                        // 触发React onChange
+                        const tracker = input._valueTracker;
+                        if (tracker) {
+                            tracker.setValue('');
+                        }
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                        input.dispatchEvent(new Event('blur', { bubbles: true }));
+                    }
+
+                    // 更新aria属性
+                    targetSelect.setAttribute('aria-activedescendant', '');
+                }
+
+                // 关闭下拉框
+                document.body.click();
+
+                // 触发HT tab显示
+                setTimeout(showHTConfigTab, 200);
+
+                console.log('[HumanThinking] ✓ 已选择 human_thinking');
+            });
+
+            // 鼠标悬停效果
+            newOption.addEventListener('mouseenter', function() {
+                this.classList.add('ant-select-item-option-active');
+            });
+            newOption.addEventListener('mouseleave', function() {
+                this.classList.remove('ant-select-item-option-active');
+            });
+
+            list.appendChild(newOption);
+            console.log('[HumanThinking] ✓ 已添加 human_thinking 下拉选项');
+        } catch (e) {
+            console.error('[HumanThinking] 注入下拉选项失败:', e);
+        }
+    }
+
+    // 监听记忆管理后端选择变化
+    function watchMemoryBackendChange() {
+        // 使用MutationObserver监听页面变化
+        const observer = new MutationObserver((mutations) => {
+            checkAndShowHTTab();
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['value', 'class', 'textContent']
+        });
+
+        // 同时定期检查
+        setInterval(checkAndShowHTTab, 1000);
+    }
+
+    // 检查并显示HT配置tab
+    function checkAndShowHTTab() {
+        try {
+            let currentValue = '';
+
+            // 方法1: 通过input的value
+            const inputs = document.querySelectorAll('input[name="memory_manager_backend"]');
+            for (const input of inputs) {
+                if (input.value) {
+                    currentValue = input.value;
+                    break;
+                }
+            }
+
+            // 方法2: 通过显示文本
+            if (!currentValue) {
+                const selects = document.querySelectorAll('.ant-select');
+                for (const select of selects) {
+                    const parent = select.closest('.ant-form-item');
+                    if (parent) {
+                        const label = parent.textContent || '';
+                        if (label.includes('记忆管理') || label.includes('Memory Manager')) {
+                            const title = select.querySelector('.ant-select-selection-item');
+                            if (title) {
+                                const text = title.textContent.trim();
+                                if (text === 'human_thinking') {
+                                    currentValue = 'human_thinking';
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 方法3: 通过aria-label或title
+            if (!currentValue) {
+                const selects = document.querySelectorAll('.ant-select');
+                for (const select of selects) {
+                    const parent = select.closest('.ant-form-item');
+                    if (parent) {
+                        const label = parent.textContent || '';
+                        if (label.includes('记忆管理') || label.includes('Memory Manager')) {
+                            const title = select.querySelector('.ant-select-selection-item');
+                            if (title) {
+                                const text = title.getAttribute('title') || title.textContent.trim();
+                                if (text === 'human_thinking') {
+                                    currentValue = 'human_thinking';
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (currentValue === 'human_thinking') {
+                console.log('[HumanThinking] Detected human_thinking, showing HT tab');
+                showHTConfigTab();
+            } else {
+                hideHTConfigTab();
+            }
+        } catch (e) {
+            console.error('[HumanThinking] checkAndShowHTTab error:', e);
+        }
+    }
+
+    // HT配置tab的容器
+    let htTabContainer = null;
+    let htTabBtn = null;
+
+    // 显示HT配置tab
+    function showHTConfigTab() {
+        console.log('[HumanThinking] showHTConfigTab called');
+        try {
+            // 如果已经存在，显示即可
+            if (htTabContainer && htTabBtn) {
+                console.log('[HumanThinking] HT tab already exists, showing');
+                htTabBtn.style.display = 'inline-flex';
+                htTabContainer.style.display = 'block';
+                return;
+            }
+
+            // 查找Tabs容器
+            const tabsNav = document.querySelector('.ant-tabs-nav');
+            const tabsContent = document.querySelector('.ant-tabs-content-holder');
+            console.log('[HumanThinking] tabsNav found:', !!tabsNav, 'tabsContent found:', !!tabsContent);
+            if (!tabsNav || !tabsContent) {
+                console.log('[HumanThinking] 未找到Tabs容器');
+                return;
+            }
+
+            // 创建HT Tab按钮
+            htTabBtn = document.createElement('div');
+            htTabBtn.className = 'ant-tabs-tab';
+            htTabBtn.setAttribute('data-node-key', 'htMemoryConfig');
+            htTabBtn.innerHTML = '<div class="ant-tabs-tab-btn" role="tab" aria-selected="false" tabindex="-1">HT记忆配置</div>';
+
+            // 添加到tab列表（在"长期记忆"tab之后）
+            const tabList = tabsNav.querySelector('.ant-tabs-nav-list');
+            const allTabs = tabsNav.querySelectorAll('.ant-tabs-tab');
+            console.log('[HumanThinking] tabList found:', !!tabList, 'allTabs count:', allTabs.length);
+
+            let inserted = false;
+            for (let i = 0; i < allTabs.length; i++) {
+                const tabText = allTabs[i].textContent || '';
+                if (tabText.includes('长期记忆')) {
+                    if (allTabs[i + 1] && tabList) {
+                        tabList.insertBefore(htTabBtn, allTabs[i + 1]);
+                        inserted = true;
+                        console.log('[HumanThinking] ✓ HT tab inserted after 长期记忆');
+                        break;
+                    }
+                }
+            }
+            if (!inserted && tabList) {
+                tabList.appendChild(htTabBtn);
+                console.log('[HumanThinking] ✓ HT tab appended to list');
+            }
+
+            // 创建HT配置内容面板
+            htTabContainer = document.createElement('div');
+            htTabContainer.className = 'ant-tabs-tabpane ant-tabs-tabpane-active';
+            htTabContainer.setAttribute('role', 'tabpanel');
+            htTabContainer.setAttribute('tabindex', '-1');
+            htTabContainer.style.cssText = 'padding: 16px;';
+
+            // 渲染HT配置内容
+            renderHTConfigContent(htTabContainer);
+
+            // 添加到tab内容区
+            tabsContent.appendChild(htTabContainer);
+
+            // Tab点击事件
+            htTabBtn.addEventListener('click', function() {
+                // 隐藏所有tab内容
+                const allPanes = tabsContent.querySelectorAll('.ant-tabs-tabpane');
+                for (const pane of allPanes) {
+                    pane.style.display = 'none';
+                    pane.classList.remove('ant-tabs-tabpane-active');
+                }
+                // 显示HT内容
+                htTabContainer.style.display = 'block';
+                htTabContainer.classList.add('ant-tabs-tabpane-active');
+
+                // 更新tab样式
+                const allTabEls = tabsNav.querySelectorAll('.ant-tabs-tab');
+                for (const tab of allTabEls) {
+                    tab.classList.remove('ant-tabs-tab-active');
+                    tab.setAttribute('aria-selected', 'false');
+                }
+                htTabBtn.classList.add('ant-tabs-tab-active');
+                htTabBtn.setAttribute('aria-selected', 'true');
+            });
+
+            console.log('[HumanThinking] ✓ HT记忆配置tab已创建');
+        } catch (err) {
+            console.error('[HumanThinking] showHTConfigTab error:', err);
+        }
+    }
+
+    // 隐藏HT配置tab
+    function hideHTConfigTab() {
+        if (htTabContainer) {
+            htTabContainer.style.display = 'none';
+        }
+        if (htTabBtn) {
+            htTabBtn.style.display = 'none';
+        }
+    }
+
+    // 渲染HT配置内容
+    function renderHTConfigContent(container) {
+        const baseUrl = getApiBase();
+        const token = window.QwenPaw?.host?.getApiToken?.() || '';
+
+        container.innerHTML = `
+            <div style="padding: 16px;">
+                <h3 style="margin-bottom: 16px;">🧠 HumanThinking 记忆配置</h3>
+                <div id="ht-config-loading" style="text-align: center; padding: 40px;">
+                    加载中...
+                </div>
+                <div id="ht-config-content" style="display: none;">
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 8px;">跨会话记忆</label>
+                        <input type="checkbox" id="ht-cross-session" checked style="margin-right: 8px;">
+                        <span>启用跨会话记忆保持</span>
+                    </div>
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 8px;">情感跟踪</label>
+                        <input type="checkbox" id="ht-emotion" checked style="margin-right: 8px;">
+                        <span>启用情感状态计算</span>
+                    </div>
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 8px;">会话空闲超时（秒）</label>
+                        <input type="range" id="ht-timeout" min="60" max="600" value="180" style="width: 100%;">
+                        <span id="ht-timeout-value">180</span>秒
+                    </div>
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 8px;">单条记忆最大字符数</label>
+                        <input type="range" id="ht-max-chars" min="100" max="500" value="150" style="width: 100%;">
+                        <span id="ht-max-chars-value">150</span>字符
+                    </div>
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 8px;">搜索限制（条）</label>
+                        <input type="range" id="ht-max-results" min="5" max="50" value="5" style="width: 100%;">
+                        <span id="ht-max-results-value">5</span>条
+                    </div>
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 8px;">冷藏天数</label>
+                        <input type="range" id="ht-frozen-days" min="7" max="90" value="30" style="width: 100%;">
+                        <span id="ht-frozen-days-value">30</span>天
+                    </div>
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 8px;">归档天数</label>
+                        <input type="range" id="ht-archive-days" min="30" max="365" value="90" style="width: 100%;">
+                        <span id="ht-archive-days-value">90</span>天
+                    </div>
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 8px;">删除天数</label>
+                        <input type="range" id="ht-delete-days" min="90" max="730" value="180" style="width: 100%;">
+                        <span id="ht-delete-days-value">180</span>天
+                    </div>
+                    <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #eae9e7;">
+                        <button id="ht-save-config" style="padding: 8px 24px; background: #1890ff; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                            保存配置
+                        </button>
+                        <span id="ht-save-status" style="margin-left: 16px; color: #52c41a;"></span>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // 绑定range输入事件
+        const ranges = ['timeout', 'max-chars', 'max-results', 'frozen-days', 'archive-days', 'delete-days'];
+        for (const id of ranges) {
+            const input = container.querySelector(`#ht-${id}`);
+            const display = container.querySelector(`#ht-${id}-value`);
+            if (input && display) {
+                input.addEventListener('input', function() {
+                    display.textContent = this.value;
+                });
+            }
+        }
+
+        // 加载配置
+        loadHTConfig(container, baseUrl, token);
+
+        // 保存按钮事件
+        const saveBtn = container.querySelector('#ht-save-config');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', function() {
+                saveHTConfig(container, baseUrl, token);
+            });
+        }
+    }
+
+    // 加载HT配置
+    function loadHTConfig(container, apiBase, token) {
+        fetch(`${apiBase}/config`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        })
+        .then(res => res.json())
+        .then(data => {
+            const contentDiv = container.querySelector('#ht-config-content');
+            const loadingDiv = container.querySelector('#ht-config-loading');
+            if (contentDiv) contentDiv.style.display = 'block';
+            if (loadingDiv) loadingDiv.style.display = 'none';
+
+            // 设置表单值
+            const crossSession = container.querySelector('#ht-cross-session');
+            const emotion = container.querySelector('#ht-emotion');
+            const timeout = container.querySelector('#ht-timeout');
+            const maxChars = container.querySelector('#ht-max-chars');
+            const maxResults = container.querySelector('#ht-max-results');
+            const frozenDays = container.querySelector('#ht-frozen-days');
+            const archiveDays = container.querySelector('#ht-archive-days');
+            const deleteDays = container.querySelector('#ht-delete-days');
+
+            if (crossSession) crossSession.checked = data.enable_cross_session !== false;
+            if (emotion) emotion.checked = data.enable_emotion !== false;
+            if (timeout) { timeout.value = data.session_idle_timeout || 180; container.querySelector('#ht-timeout-value').textContent = timeout.value; }
+            if (maxChars) { maxChars.value = data.max_memory_chars || 150; container.querySelector('#ht-max-chars-value').textContent = maxChars.value; }
+            if (maxResults) { maxResults.value = data.max_results || 5; container.querySelector('#ht-max-results-value').textContent = maxResults.value; }
+            if (frozenDays) { frozenDays.value = data.frozen_days || 30; container.querySelector('#ht-frozen-days-value').textContent = frozenDays.value; }
+            if (archiveDays) { archiveDays.value = data.archive_days || 90; container.querySelector('#ht-archive-days-value').textContent = archiveDays.value; }
+            if (deleteDays) { deleteDays.value = data.delete_days || 180; container.querySelector('#ht-delete-days-value').textContent = deleteDays.value; }
+        })
+        .catch(err => {
+            console.error('[HumanThinking] 加载配置失败:', err);
+            const loadingDiv = container.querySelector('#ht-config-loading');
+            if (loadingDiv) loadingDiv.innerHTML = '加载失败，使用默认配置';
+            const contentDiv = container.querySelector('#ht-config-content');
+            if (contentDiv) contentDiv.style.display = 'block';
+        });
+    }
+
+    // 保存HT配置
+    function saveHTConfig(container, apiBase, token) {
+        const config = {
+            enable_cross_session: container.querySelector('#ht-cross-session')?.checked ?? true,
+            enable_emotion: container.querySelector('#ht-emotion')?.checked ?? true,
+            session_idle_timeout: parseInt(container.querySelector('#ht-timeout')?.value || '180'),
+            max_memory_chars: parseInt(container.querySelector('#ht-max-chars')?.value || '150'),
+            max_results: parseInt(container.querySelector('#ht-max-results')?.value || '5'),
+            frozen_days: parseInt(container.querySelector('#ht-frozen-days')?.value || '30'),
+            archive_days: parseInt(container.querySelector('#ht-archive-days')?.value || '90'),
+            delete_days: parseInt(container.querySelector('#ht-delete-days')?.value || '180'),
+        };
+
+        fetch(`${apiBase}/config`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(config)
+        })
+        .then(res => res.json())
+        .then(data => {
+            const status = container.querySelector('#ht-save-status');
+            if (status) {
+                status.textContent = '✓ 保存成功';
+                setTimeout(() => { status.textContent = ''; }, 3000);
+            }
+        })
+        .catch(err => {
+            console.error('[HumanThinking] 保存配置失败:', err);
+            const status = container.querySelector('#ht-save-status');
+            if (status) {
+                status.textContent = '✗ 保存失败';
+                status.style.color = '#ff4d4f';
+                setTimeout(() => { status.textContent = ''; status.style.color = '#52c41a'; }, 3000);
+            }
+        });
+    }
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);

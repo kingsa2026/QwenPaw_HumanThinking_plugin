@@ -27,19 +27,29 @@ def find_qwenpaw_console_static_dir(qwenpaw_root: str) -> str:
     except (ImportError, AttributeError):
         pass
 
-    # 方法2: 常见路径
+    # 方法2: 常见路径（包括 venv 中的 site-packages）
     candidates = [
         os.path.join(qwenpaw_root, "console"),
         os.path.join(qwenpaw_root, "dist", "console"),
         os.path.expanduser("~/.qwenpaw/console"),
         "/root/.qwenpaw/console",
+        # venv 中的 site-packages 路径
+        os.path.join(qwenpaw_root, "venv", "lib", "python3.12", "site-packages", "qwenpaw", "console"),
+        os.path.join(qwenpaw_root, "venv", "lib", "python3.11", "site-packages", "qwenpaw", "console"),
+        os.path.join(qwenpaw_root, "venv", "lib", "python3.10", "site-packages", "qwenpaw", "console"),
+        # 系统级安装路径
+        "/usr/local/lib/python3.12/site-packages/qwenpaw/console",
+        "/usr/local/lib/python3.11/site-packages/qwenpaw/console",
+        "/usr/lib/python3.12/site-packages/qwenpaw/console",
+        "/usr/lib/python3.11/site-packages/qwenpaw/console",
     ]
 
     for candidate in candidates:
         if os.path.isdir(candidate) and os.path.isfile(os.path.join(candidate, "index.html")):
+            logger.info(f"Found console directory: {candidate}")
             return candidate
 
-    logger.debug("No console static directory found")
+    logger.warning("No console static directory found")
     return ""
 
 
@@ -135,8 +145,13 @@ def patch_js_file(filepath: str) -> bool:
 
         # ============================================
         # 模式 A: v1.1.4 backendMappings chunk 格式
-        # var r={remelight:{configField:`...`,component:t,label:`remelight`,tabKey:`remeLightMemory`}}
+        # var r={remelight:{configField:`...`,component:_a,label:`remelight`,tabKey:`remeLightMemory`}}
         # var a=Object.entries(r).map(([e,{label:t}])=>({value:e,label:t}));
+        # ============================================
+        # 关键修改：
+        # 1. human_thinking 使用 tabKey: remeLightMemory（显示"长期记忆"）
+        # 2. component 必须指向 ReMeLightMemoryCard 组件（变量名 _a）
+        # 3. 不使用 human_thinking_config，因为前端只查找 xa[memoryBackend]（即 xa['human_thinking']）
         # ============================================
         v114_mapping_pattern = r'var\s+\w+\s*=\s*\{[^}]*remelight[^}]*\}'
         v114_match = re.search(v114_mapping_pattern, content)
@@ -145,18 +160,32 @@ def patch_js_file(filepath: str) -> bool:
             logger.info(f"  ✓ Detected v1.1.4 backendMappings chunk format")
             
             # 在 r 对象中添加 human_thinking 映射
-            original_mapping = v114_match.group(1)
+            original_mapping = v114_match.group(0)
+            
+            # 提取 remelight 使用的 component 变量名（如 _a）
+            component_match = re.search(r'component:([A-Za-z0-9_$]+)', original_mapping)
+            if component_match:
+                component_var = component_match.group(1)
+                logger.info(f"  ✓ Found ReMeLightMemoryCard component variable: {component_var}")
+            else:
+                component_var = '_a'  # 默认值
+                logger.warning(f"  ⚠ Could not detect component variable, using default: {component_var}")
+            
+            # human_thinking: 使用 remeLightMemory tabKey（显示"长期记忆"）
+            # component 使用与 remelight 相同的组件变量（ReMeLightMemoryCard）
+            ht_mapping = f',human_thinking:{{configField:`human_thinking_config`,component:{component_var},label:`human_thinking`,tabKey:`remeLightMemory`}}'
+            
             # 在 remelight 条目后添加 human_thinking 条目
             new_mapping = original_mapping.replace(
                 'remelight:{configField:`reme_light_memory_config`,component:t,label:`remelight`,tabKey:`remeLightMemory`}',
-                'remelight:{configField:`reme_light_memory_config`,component:t,label:`remelight`,tabKey:`remeLightMemory`},human_thinking:{configField:`human_thinking_config`,component:t,label:`human_thinking`,tabKey:`humanThinkingMemory`}'
+                'remelight:{configField:`reme_light_memory_config`,component:t,label:`remelight`,tabKey:`remeLightMemory`}' + ht_mapping
             )
             
             if new_mapping == original_mapping:
                 # 可能是反引号格式不同，尝试更宽松的匹配
                 new_mapping = re.sub(
                     r'(remelight\s*:\s*\{[^}]*\})',
-                    r'\1,human_thinking:{configField:`human_thinking_config`,component:t,label:`human_thinking`,tabKey:`humanThinkingMemory`}',
+                    rf'\1,human_thinking:{{configField:`human_thinking_config`,component:{component_var},label:`human_thinking`,tabKey:`remeLightMemory`}}',
                     original_mapping,
                     count=1
                 )
@@ -169,6 +198,8 @@ def patch_js_file(filepath: str) -> bool:
                 return False
             
             logger.info(f"  ✓ Injected human_thinking into MEMORY_MANAGER_BACKEND_MAPPINGS")
+            logger.info(f"  ✓ tabKey 'remeLightMemory' -> 显示'长期记忆'")
+            logger.info(f"  ✓ component '{component_var}' -> ReMeLightMemoryCard")
             
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(content)
@@ -207,10 +238,14 @@ def patch_js_file(filepath: str) -> bool:
                     break
             
             # 2. 修改 xa 映射表（组件映射）
+            # 关键修复：tabKey 必须是 remeLightMemory（使用已有的 i18n 翻译）
+            # component 必须使用 _a（ReMeLightMemoryCard），不能使用 function(){return null}
             # 查找 xa={remelight:{...}} 或类似格式，直接合并到对象中
             xa_patterns = [
                 # 模式1: xa={remelight:{...}} → xa={remelight:{...},human_thinking:{...}}
-                (r'(xa=\{remelight:\{[^}]*\}\})', r'xa={remelight:{configField:"reme_light_memory_config",component:_a,label:"remelight",tabKey:"remeLightMemory"},human_thinking:{component:function(){return null},tabKey:"humanThinkingMemory",label:"human_thinking"}}'),
+                # tabKey 使用 remeLightMemory 而不是 humanThinkingMemory，避免 i18n 缺失问题
+                # component 使用 _a（ReMeLightMemoryCard）
+                (r'(xa=\{remelight:\{[^}]*\}\})', r'xa={remelight:{configField:"reme_light_memory_config",component:_a,label:"remelight",tabKey:"remeLightMemory"},human_thinking:{configField:"human_thinking_config",component:_a,label:"human_thinking",tabKey:"remeLightMemory"}}'),
             ]
             
             for pattern, replacement in xa_patterns:
@@ -220,6 +255,7 @@ def patch_js_file(filepath: str) -> bool:
                         content = new_content
                         patched = True
                         logger.info(f"  ✓ Patched xa mapping with human_thinking component")
+                        logger.info(f"  ✓ tabKey set to 'remeLightMemory' (uses existing i18n)")
                     break
             
             if patched:
@@ -229,6 +265,7 @@ def patch_js_file(filepath: str) -> bool:
                 return True
             else:
                 # 如果直接修改失败，使用兜底方案：在文件末尾注入动态注册代码
+                # 关键修复：tabKey 使用 remeLightMemory 而不是 humanThinkingMemory
                 injection_code = '''
 // HumanThinking: Dynamic backend registration for v1.1.5+
 (function(){
@@ -251,6 +288,8 @@ def patch_js_file(filepath: str) -> bool:
     });
     
     // 拦截 xa 映射访问
+    // 关键：tabKey 必须是 remeLightMemory（前端已存在该 i18n 翻译）
+    // 如果使用 humanThinkingMemory，前端会查找 agentConfig.humanThinkingMemoryTitle，但该翻译不存在！
     Object.defineProperty(window, 'xa', {
         get: function() {
             return window.__xa || {};
@@ -259,8 +298,8 @@ def patch_js_file(filepath: str) -> bool:
             window.__xa = val;
             // 添加 Human Thinking 组件映射
             if (val && typeof val === 'object' && !val.human_thinking) {
-                val.human_thinking = {component:function(){return null},tabKey:"humanThinkingMemory",label:"human_thinking"};
-                console.log('[HumanThinking] ✓ Added to xa mapping');
+                val.human_thinking = {component:function(){return null},tabKey:"remeLightMemory",label:"human_thinking"};
+                console.log('[HumanThinking] ✓ Added to xa mapping (tabKey: remeLightMemory)');
             }
         }
     });
@@ -356,6 +395,142 @@ def patch_js_file(filepath: str) -> bool:
     except Exception as e:
         logger.error(f"Failed to patch {filepath}: {e}", exc_info=True)
         return False
+
+
+def patch_human_thinking_config_tab(qwenpaw_root: str) -> dict:
+    """
+    修补前端JS，在选择 HumanThinking 时添加"HT记忆配置" tab
+    
+    问题：原生UI只支持一个记忆管理tab。选择 HumanThinking 后，
+    需要显示两个tab："长期记忆" + "HT记忆配置"。
+    
+    解决方案：修改打包后的JS，在 dynamicTabs 生成逻辑中注入额外的tab。
+    当 memoryBackend 为 human_thinking 时，额外添加一个 HT记忆配置 tab。
+    """
+    results = {"success": False, "patched": [], "errors": []}
+    
+    console_dir = find_qwenpaw_console_static_dir(qwenpaw_root)
+    if not console_dir:
+        results["errors"].append("无法找到 console 目录")
+        return results
+    
+    # 查找所有JS文件
+    js_files = []
+    for root, dirs, files in os.walk(console_dir):
+        for f in files:
+            if f.endswith(".js") and not f.endswith(".humanthinking.bak"):
+                js_files.append(os.path.join(root, f))
+    
+    logger.info(f"[HTConfigTab] Scanning {len(js_files)} JS files for tab injection...")
+    
+    # 找到最大的JS文件（通常是主chunk，包含 Agent/Config/index.tsx）
+    largest_file = None
+    largest_size = 0
+    
+    for js_file in js_files:
+        try:
+            size = os.path.getsize(js_file)
+            if size > largest_size:
+                largest_size = size
+                largest_file = js_file
+        except:
+            pass
+    
+    if not largest_file or largest_size < 100000:
+        results["errors"].append(f"No suitable JS file found (largest: {largest_size} bytes)")
+        return results
+    
+    try:
+        with open(largest_file, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+        
+        # 检查是否已经注入
+        if "HumanThinking: HT记忆配置 tab" in content:
+            logger.info(f"[HTConfigTab] Already patched: {os.path.basename(largest_file)}")
+            results["success"] = True
+            return results
+        
+        # 查找 dynamicTabs 生成逻辑中的 memoryMapping 处理代码
+        # 打包后的代码类似：const v=xa[T];if(v){const j=v.component;R.push({key:v.tabKey,label:...,children:...})}
+        # 我们需要在这段代码后面注入额外的 tab
+        
+        # 模式1：查找 memoryMapping 处理代码（压缩后的变量名可能不同）
+        # 关键特征：xa[T] 或类似的后端映射查找
+        memory_mapping_patterns = [
+            # v1.1.4 打包后模式：const v=xa[T];if(v){const j=v.component;R.push({key:v.tabKey,...})}
+            r'(const\s+\w+=\w+\[T\];if\(\w+\)\{const\s+\w+=\w+\.component;\w+\.push\(\{key:\w+\.tabKey,label:[^}]+\},children:[^}]+\}\)\}\))',
+            # 更宽松的模式
+            r'(\w+\.push\(\{key:\w+\.tabKey,label:[^}]*agentConfig\.\$\{\w+\.tabKey\}Title[^}]*\},children:[^}]+\}\)\}\))',
+        ]
+        
+        patched = False
+        for pattern in memory_mapping_patterns:
+            match = re.search(pattern, content)
+            if match:
+                logger.info(f"[HTConfigTab] Found memoryMapping push code")
+                original_code = match.group(1)
+                
+                # 注入额外的 HT记忆配置 tab
+                # 当 memoryBackend 为 human_thinking 时，添加额外的 tab
+                injection_code = '''
+// HumanThinking: HT记忆配置 tab
+(function(){
+    // 检查当前是否为 human_thinking 后端
+    var memoryBackend = (function(){
+        try {
+            var storage = sessionStorage.getItem('qwenpaw-agent-storage');
+            if (storage) {
+                var data = JSON.parse(storage);
+                return data.state?.selectedAgent ? 'human_thinking' : 'remelight';
+            }
+        } catch(e) {}
+        return 'remelight';
+    })();
+    
+    if (memoryBackend === 'human_thinking' || true) {  // 总是添加，让前端控制显示
+        // 添加 HT记忆配置 tab
+        var htConfigTab = {
+            key: "humanThinkingConfig",
+            label: React.createElement("span", {className: "ht-tab-label"}, "HT记忆配置"),
+            children: React.createElement("div", {className: "ht-tab-content"}, 
+                React.createElement("div", {style: {padding: 16}},
+                    React.createElement("h3", null, "HumanThinking 记忆配置"),
+                    React.createElement("p", null, "此配置已移至侧边栏 HumanThinking 记忆管理页面。"),
+                    React.createElement("p", null, "请使用右侧侧边栏进行配置。")
+                )
+            )
+        };
+        
+        // 找到 tab 数组并添加
+        if (typeof R !== 'undefined' && Array.isArray(R)) {
+            R.push(htConfigTab);
+            console.log('[HumanThinking] ✓ Added HT记忆配置 tab');
+        }
+    }
+})();
+'''
+                # 在原始代码后面添加注入代码
+                new_content = content.replace(original_code, original_code + injection_code)
+                
+                if new_content != content:
+                    _make_backup(largest_file)
+                    with open(largest_file, "w", encoding="utf-8") as f:
+                        f.write(new_content)
+                    results["patched"].append(os.path.basename(largest_file))
+                    results["success"] = True
+                    patched = True
+                    logger.info(f"[HTConfigTab] ✓ Patched: {os.path.basename(largest_file)}")
+                    break
+        
+        if not patched:
+            logger.warning(f"[HTConfigTab] Could not find memoryMapping pattern in {os.path.basename(largest_file)}")
+            results["errors"].append("Could not find injection point")
+            
+    except Exception as e:
+        results["errors"].append(str(e))
+        logger.error(f"[HTConfigTab] Failed to patch: {e}", exc_info=True)
+    
+    return results
 
 
 def patch_agent_config_refresh(qwenpaw_root: str) -> dict:
@@ -1015,7 +1190,112 @@ def patch_production_ui(qwenpaw_root: str) -> dict:
         logger.warning("No files were patched - may need manual review")
         results["success"] = False
         results["error"] = "未找到包含 remelight 选项对象的 JS 文件"
+    
+    # 额外注入 HT记忆配置 tab
+    logger.info("[patch_production_ui] Injecting HT记忆配置 tab...")
+    ht_result = patch_human_thinking_config_tab(qwenpaw_root)
+    if ht_result.get("success"):
+        logger.info("[patch_production_ui] ✓ HT记忆配置 tab injected")
+    else:
+        logger.warning(f"[patch_production_ui] ✗ HT记忆配置 tab injection failed: {ht_result.get('errors', [])}")
 
+    # 修改注释文字：记忆管理器的后端类型，目前仅支持 remelight -> 记忆管理器的后端类型，目前可支持 remelight 和 HumanThinking
+    logger.info("[patch_production_ui] Updating tooltip text...")
+    tooltip_result = patch_memory_manager_tooltip(js_files)
+    if tooltip_result.get("success"):
+        logger.info("[patch_production_ui] ✓ Tooltip text updated")
+    else:
+        logger.warning(f"[patch_production_ui] ✗ Tooltip update failed: {tooltip_result.get('errors', [])}")
+    
+    # 确保 xa 映射表中包含 human_thinking
+    logger.info("[patch_production_ui] Ensuring xa mapping has human_thinking...")
+    xa_result = ensure_xa_human_thinking(js_files)
+    if xa_result.get("success"):
+        logger.info("[patch_production_ui] ✓ xa mapping verified")
+    else:
+        logger.warning(f"[patch_production_ui] ✗ xa mapping fix failed: {xa_result.get('errors', [])}")
+
+    return results
+
+
+def patch_memory_manager_tooltip(js_files: list) -> dict:
+    """
+    修改前端 JS 中的注释文字：
+    "记忆管理器的后端类型，目前仅支持 remelight" -> "记忆管理器的后端类型，目前可支持 remelight 和 HumanThinking"
+    """
+    results = {"success": False, "patched": [], "errors": []}
+    
+    old_text = "记忆管理器的后端类型，目前仅支持 remelight"
+    new_text = "记忆管理器的后端类型，目前可支持 remelight 和 HumanThinking"
+    
+    patched_count = 0
+    for js_file in js_files:
+        try:
+            with open(js_file, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+            
+            if old_text in content:
+                new_content = content.replace(old_text, new_text)
+                if new_content != content:
+                    _make_backup(js_file)
+                    with open(js_file, "w", encoding="utf-8") as f:
+                        f.write(new_content)
+                    results["patched"].append(os.path.basename(js_file))
+                    patched_count += 1
+                    logger.info(f"  ✓ Updated tooltip in {os.path.basename(js_file)}")
+        except Exception as e:
+            results["errors"].append(str(e))
+    
+    if patched_count > 0:
+        results["success"] = True
+    
+    return results
+
+
+def ensure_xa_human_thinking(js_files: list) -> dict:
+    """
+    确保 xa 映射表中包含 human_thinking 条目。
+    
+    问题：QwenPaw 启动时可能会从备份恢复 JS 文件，导致 human_thinking 丢失。
+    解决方案：直接检查并修复 xa 映射表。
+    """
+    results = {"success": False, "patched": [], "errors": []}
+    
+    for js_file in js_files:
+        try:
+            with open(js_file, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+            
+            # 查找 xa= 映射表
+            match = re.search(r'xa=\{[^}]*\}', content)
+            if match:
+                old_mapping = match.group()
+                
+                # 检查是否已包含 human_thinking
+                if 'human_thinking' not in old_mapping:
+                    # 提取 remelight 的 configField 和 component
+                    reme_match = re.search(r'remelight:\{([^}]+)\}', old_mapping)
+                    if reme_match:
+                        reme_content = reme_match.group(1)
+                        # 构建 human_thinking 映射
+                        ht_mapping = f'human_thinking:{{{reme_content}}}'
+                        # 在 remelight 后添加 human_thinking
+                        new_mapping = old_mapping.replace(
+                            f'remelight:{{{reme_content}}}',
+                            f'remelight:{{{reme_content}}},{ht_mapping}'
+                        )
+                        
+                        if new_mapping != old_mapping:
+                            content = content.replace(old_mapping, new_mapping)
+                            with open(js_file, "w", encoding="utf-8") as f:
+                                f.write(content)
+                            results["patched"].append(os.path.basename(js_file))
+                            results["success"] = True
+                            logger.info(f"  ✓ Added human_thinking to xa in {os.path.basename(js_file)}")
+                            break
+        except Exception as e:
+            results["errors"].append(str(e))
+    
     return results
 
 

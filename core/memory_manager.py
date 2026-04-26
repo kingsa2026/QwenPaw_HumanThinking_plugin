@@ -653,7 +653,116 @@ class HumanThinkingMemoryManager(BaseMemoryManager):
         if config.enable_emotion:
             self.emotional_engine = EmotionalContinuityEngine(db=self.db)
         
+        # 5. 初始化系统记忆（首次使用时写入）
+        await self._init_system_memory()
+        
         logger.info("HumanThinkingMemoryManager v1.0.0 started successfully")
+    
+    async def _init_system_memory(self):
+        """初始化系统记忆 - 首次使用时写入 HumanThinking 使用说明"""
+        try:
+            import uuid
+            
+            # 检查是否已有系统记忆
+            results = await self.db.search_memories(
+                agent_id=self.agent_id,
+                query="HumanThinking 系统使用说明",
+                max_results=1
+            )
+            
+            if results and len(results) > 0:
+                logger.debug("System memory already exists, skipping initialization")
+                return
+            
+            # 创建系统记忆
+            system_content = """# HumanThinking 系统使用说明
+
+## 核心功能
+HumanThinking 是你的记忆管理系统，具有以下能力：
+
+### 1. 自动记忆存储
+- 对话结束后自动保存重要内容到 SQLite 数据库
+- 支持记忆分类：fact（事实）、preference（偏好）、emotion（情感）、general（一般）
+- 重要性分级：1-5级
+
+### 2. 自动记忆检索
+- 思索前自动检索相关历史记忆
+- 关键词匹配 + 重要性排序 + 就近时间优先
+- 跨会话检索（之前的对话也记得）
+
+### 3. 睡眠整理功能
+- 当 Agent 空闲时会自动进入睡眠状态
+- 睡眠期间会整理记忆：合并相似记忆、提取洞察、归档旧记忆
+- 睡眠可以手动触发或自动触发
+- 睡眠期间生成的洞察会保存到数据库
+
+## 数据库架构
+
+### 主表：qwenpaw_memory
+- 存储所有活跃记忆
+- 字段：id, agent_id, session_id, content, importance, memory_type, created_at, etc.
+- 按 agent_id 隔离（不同 Agent 的记忆互不可见）
+
+### 归档表：qwenpaw_memory_archive
+- 存储长期不访问的冷记忆
+- 可以通过搜索重新激活
+
+### 洞察表：humanthinking_insights
+- 存储睡眠期间生成的洞察
+- 可以通过 API 查看
+
+## 可用工具
+
+### memory_search(query, max_results=5)
+当用户询问之前聊过的话题时使用：
+- 用户问"之前我跟你说过的..."
+- 用户问"我之前提到过..."
+- 用户提到之前的话题
+
+## 重要原则
+1. **不要手动写记忆文件** - 系统会自动处理，不需要创建 MEMORY.md 或 memory/YYYY-MM-DD.md
+2. **主动使用记忆搜索** - 当用户提到过往内容时，先搜索再回答
+3. **记忆是跨会话的** - 会一直保留
+4. **Agent 隔离** - 每个 Agent 只能看到自己的记忆
+
+## 记忆类型识别
+- 用户明确说的信息 → fact
+- 用户表现出的偏好 → preference  
+- 用户情绪变化 → emotion
+
+## 睡眠功能使用
+- 睡眠是自动的，不需要手动操作
+- 可以通过 `/api/plugins/humanthinking/sleep/status` 查看睡眠状态
+- 睡眠期间会生成洞察，可以通过 `/api/plugins/humanthinking/sleep/insight` 查看
+
+## 示例
+用户："我上次跟你说的那个电影叫什么来着？"
+你：使用 memory_search(query="电影") 搜索，然后回答："根据之前的记录，您提到过最喜欢的电影是《盗梦空间》。"
+"""
+            
+            session_id = f"system_{uuid.uuid4().hex[:8]}"
+            
+            await self.db.add_memory(
+                agent_id=self.agent_id,
+                session_id=session_id,
+                content=system_content,
+                user_id="system",
+                target_id="system",
+                role="system",
+                importance=5,  # 最高重要性
+                memory_type="system",
+                tags=["system", "humanthinking", "guide"],
+                metadata={
+                    "is_system_memory": True,
+                    "category": "usage_guide",
+                    "version": "1.4.1"
+                }
+            )
+            
+            logger.info("✓ System memory initialized successfully")
+            
+        except Exception as e:
+            logger.warning(f"Failed to initialize system memory: {e}")
     
     def _init_agent_config(self):
         """初始化 Agent 专属配置文件"""
@@ -692,10 +801,38 @@ class HumanThinkingMemoryManager(BaseMemoryManager):
         return True
 
     def get_memory_prompt(self, language: str = "zh") -> str:
-        """返回记忆指导 prompt"""
+        """返回记忆指导 prompt - 引导 agent 阅读 agent-read.md"""
         prompts = {
-            "zh": "【记忆系统】你可以使用 memory_search(query) 搜索相关记忆。",
-            "en": "[Memory] You can use memory_search(query) to search relevant memories.",
+            "zh": """## 🧠 记忆系统 - HumanThinking
+
+你当前使用 **HumanThinking** 记忆管理系统。
+
+**重要：不要手动创建 MEMORY.md 或 memory/*.md 文件** - 记忆由系统自动管理。
+
+**首次使用请阅读**：`/root/.qwenpaw/plugins/HumanThinking/agent-read.md`
+阅读后，请将重要要点使用 `store_memory` 记入你的记忆数据库（importance=5）。
+
+**常用工具**：
+- `memory_search(query="关键词", max_results=5)` - 搜索历史记忆
+- `get_stats()` - 查看记忆统计
+
+**快速搜索**：memory_search(query="HumanThinking 系统使用说明")
+""",
+            "en": """## 🧠 Memory System - HumanThinking
+
+You are using the **HumanThinking** memory management system.
+
+**Important: Do not manually create MEMORY.md or memory/*.md files** - Memories are managed automatically.
+
+**First-time users please read**: `/root/.qwenpaw/plugins/HumanThinking/agent-read.md`
+After reading, please save key points to your memory database using `store_memory` (importance=5).
+
+**Common Tools**:
+- `memory_search(query="keywords", max_results=5)` - Search historical memories
+- `get_stats()` - View memory statistics
+
+**Quick search**: memory_search(query="HumanThinking system guide")
+""",
         }
         return prompts.get(language, prompts["zh"])
 

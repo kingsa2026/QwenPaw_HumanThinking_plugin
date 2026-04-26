@@ -808,10 +808,10 @@ class HumanThinkingDB:
             
             self.cursor.execute(archived_sql, archived_params)
             for row in self.cursor.fetchall():
-                results.append(dict(row))
+                results.append(self._row_to_record(row))
         
         # 4. 排序并返回结果
-        results.sort(key=lambda x: (x.get('importance', 0), x.get('created_at', '')), reverse=True)
+        results.sort(key=lambda x: (x.importance, x.created_at), reverse=True)
         return results[:max_results]
     
     async def wakeup_memory(self, memory_id: int) -> bool:
@@ -923,12 +923,20 @@ class HumanThinkingDB:
         """转换数据库行为 MemoryRecord"""
         import json
         
+        # sqlite3.Row 不支持 .get() 方法，使用 try/except 处理可能为 NULL 的字段
+        def _get_row_value(row, key, default=None):
+            try:
+                value = row[key]
+                return value if value is not None else default
+            except (KeyError, IndexError):
+                return default
+        
         return MemoryRecord(
             id=row["id"],
             agent_id=row["agent_id"],
             session_id=row["session_id"],
             user_id=row["user_id"],
-            target_id=row.get("target_id"),
+            target_id=_get_row_value(row, "target_id"),
             role=row["role"],
             content=row["content"],
             importance=row["importance"],
@@ -936,18 +944,18 @@ class HumanThinkingDB:
             metadata=json.loads(row["metadata"]),
             created_at=row["created_at"],
             session_key=row["session_key"],
-            content_embedding=row["content_embedding"],
-            content_summary=row["content_summary"],
-            importance_score=row["importance_score"],
-            access_count=row["access_count"],
-            search_count=row["search_count"],
-            search_score=row["search_score"],
-            access_frozen=row["access_frozen"],
-            frozen_at=row["frozen_at"],
-            last_accessed_at=row["last_accessed_at"],
-            last_searched_at=row["last_searched_at"],
-            updated_at=row["updated_at"],
-            deleted_at=row["deleted_at"],
+            content_embedding=_get_row_value(row, "content_embedding"),
+            content_summary=_get_row_value(row, "content_summary"),
+            importance_score=_get_row_value(row, "importance_score", 0.0),
+            access_count=_get_row_value(row, "access_count", 0),
+            search_count=_get_row_value(row, "search_count", 0),
+            search_score=_get_row_value(row, "search_score", 0.0),
+            access_frozen=_get_row_value(row, "access_frozen", False),
+            frozen_at=_get_row_value(row, "frozen_at"),
+            last_accessed_at=_get_row_value(row, "last_accessed_at"),
+            last_searched_at=_get_row_value(row, "last_searched_at"),
+            updated_at=_get_row_value(row, "updated_at"),
+            deleted_at=_get_row_value(row, "deleted_at"),
             tags=json.loads(row["tags"])
         )
 
