@@ -183,9 +183,20 @@
             if (agentStorage) {
                 const data = JSON.parse(agentStorage);
                 const agentId = data.state?.selectedAgent;
+                const agents = data.state?.agents;
+                
+                // 支持数组格式和对象格式
+                let agentName = '';
+                if (Array.isArray(agents)) {
+                    const found = agents.find(a => a.id === agentId || a.agent_id === agentId);
+                    agentName = found?.name || found?.agent_name || '';
+                } else if (agents && typeof agents === 'object') {
+                    agentName = agents[agentId]?.name || agents[agentId]?.agent_name || '';
+                }
+                
                 return {
                     agent_id: agentId,
-                    agent_name: data.state?.agents?.[agentId]?.name || '未命名Agent'
+                    agent_name: agentName || ''
                 };
             }
         } catch (e) {
@@ -229,9 +240,8 @@
 
             return React.createElement('div', { className: 'ht-agent-bar' },
                 React.createElement('span', { style: { fontSize: '14px' } }, '🤖'),
-                React.createElement('span', null, '当前智能体:'),
-                React.createElement('span', { style: { fontWeight: 600 } }, agent.agent_name),
-                React.createElement('span', { style: { marginLeft: 4, fontSize: '12px', opacity: 0.6 } }, `(${agent.agent_id})`)
+                React.createElement('span', null, '当前智能体：'),
+                React.createElement('span', { style: { fontWeight: 600 } }, agent.agent_name || '未选择')
             );
         };
 
