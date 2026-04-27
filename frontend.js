@@ -909,19 +909,35 @@
                     }
                 };
 
+                // 实时检测深色模式
+                const checkDarkMode = () => document.body.classList.contains('dark-mode') || document.documentElement.classList.contains('dark-mode');
+                const isDarkMode = checkDarkMode();
+                
                 const themeStyles = {
-                    cardBg: isDark ? 'rgba(255,255,255,0.04)' : '#f5f5f5',
-                    cardBorder: isDark ? 'rgba(255,255,255,0.12)' : '#eae9e7',
-                    textColor: isDark ? 'rgba(255,255,255,0.85)' : '#333',
-                    textSecondary: isDark ? 'rgba(255,255,255,0.45)' : '#666',
-                    featureBg: isDark ? 'rgba(82,196,26,0.08)' : '#f6ffed',
-                    featureBorder: isDark ? 'rgba(82,196,26,0.3)' : '#b7eb8f',
-                    dangerBg: isDark ? 'rgba(255,77,79,0.08)' : '#fff2f0',
-                    dangerBorder: isDark ? 'rgba(255,77,79,0.3)' : '#ffccc7',
-                    dangerText: isDark ? '#ff7875' : '#cf1322',
-                    linkColor: isDark ? '#40a9ff' : '#1890ff',
-                    modalBg: isDark ? '#1f1f1f' : '#fff',
-                    modalOverlay: isDark ? 'rgba(0,0,0,0.7)' : 'rgba(0,0,0,0.5)'
+                    // 背景色 - 匹配 QwenPaw 原生深色模式
+                    cardBg: isDarkMode ? '#1f1f1f' : '#f5f5f5',
+                    cardBorder: isDarkMode ? 'rgba(255,255,255,0.08)' : '#eae9e7',
+                    textColor: isDarkMode ? 'rgba(255,255,255,0.85)' : '#333',
+                    textSecondary: isDarkMode ? 'rgba(255,255,255,0.45)' : '#666',
+                    // 功能区域 - 使用更柔和的颜色
+                    featureBg: isDarkMode ? 'rgba(82,196,26,0.06)' : '#f6ffed',
+                    featureBorder: isDarkMode ? 'rgba(82,196,26,0.2)' : '#b7eb8f',
+                    // 危险区域
+                    dangerBg: isDarkMode ? 'rgba(255,77,79,0.06)' : '#fff2f0',
+                    dangerBorder: isDarkMode ? 'rgba(255,77,79,0.2)' : '#ffccc7',
+                    dangerText: isDarkMode ? '#ff7875' : '#cf1322',
+                    // 链接和强调色 - 使用 QwenPaw 橙色主题
+                    linkColor: isDarkMode ? '#ff7f16' : '#1890ff',
+                    accentColor: isDarkMode ? '#ff7f16' : '#1890ff',
+                    // 弹窗
+                    modalBg: isDarkMode ? '#141414' : '#fff',
+                    modalOverlay: isDarkMode ? 'rgba(0,0,0,0.7)' : 'rgba(0,0,0,0.5)',
+                    // 输入框和表单
+                    inputBg: isDarkMode ? '#1f1f1f' : '#fff',
+                    inputBorder: isDarkMode ? 'rgba(255,255,255,0.15)' : '#d9d9d9',
+                    // 按钮
+                    btnPrimary: isDarkMode ? '#ff7f16' : '#1890ff',
+                    btnDanger: isDarkMode ? '#ff4d4f' : '#ff4d4f'
                 };
 
                 return React.createElement('div', { style: { padding: 16, color: themeStyles.textColor } },
@@ -1005,7 +1021,7 @@
                                 disabled: uninstalling,
                                 style: {
                                     padding: '8px 24px',
-                                    background: '#ff4d4f',
+                                    background: themeStyles.btnDanger,
                                     color: 'white',
                                     border: 'none',
                                     borderRadius: '4px',
@@ -1100,7 +1116,7 @@
                                     onClick: () => setShowModal(false),
                                     style: {
                                         padding: '8px 16px',
-                                        background: 'transparent',
+                                        background: isDark ? 'rgba(255,255,255,0.08)' : 'transparent',
                                         color: themeStyles.textColor,
                                         border: `1px solid ${themeStyles.cardBorder}`,
                                         borderRadius: '4px',
@@ -1112,7 +1128,7 @@
                                     disabled: uninstalling,
                                     style: {
                                         padding: '8px 16px',
-                                        background: '#ff4d4f',
+                                        background: themeStyles.btnDanger,
                                         color: 'white',
                                         border: 'none',
                                         borderRadius: '4px',
