@@ -1099,10 +1099,34 @@
                                 )
                             ),
 
+                            // 保留数据说明
+                            React.createElement('div', { style: { marginBottom: 16, fontSize: 13, color: themeStyles.textSecondary } },
+                                React.createElement('div', { style: { fontWeight: 'bold', marginBottom: 8, color: themeStyles.textColor } }, '📦 保留数据选项'),
+                                React.createElement('ul', { style: { margin: '4px 0', paddingLeft: 20 } },
+                                    React.createElement('li', null, '默认勾选"保留数据（配置文件和数据库文件）"'),
+                                    React.createElement('li', null, '勾选时：卸载插件但保留所有记忆数据'),
+                                    React.createElement('li', null, '不勾选时：导出记忆后删除所有数据')
+                                )
+                            ),
+
+                            // 自动导出说明
+                            !keepData && React.createElement('div', { style: { marginBottom: 16, fontSize: 13, color: themeStyles.textSecondary } },
+                                React.createElement('div', { style: { fontWeight: 'bold', marginBottom: 8, color: themeStyles.textColor } }, '📤 自动导出记忆'),
+                                React.createElement('div', null, '不保留数据时，自动导出记忆到：'),
+                                React.createElement('code', { style: { background: themeStyles.cardBg, padding: '2px 6px', borderRadius: 3, fontSize: 12 } }, 'Memory/memory_backup_YYYYMMDD_HHMMSS.md'),
+                                React.createElement('div', { style: { marginTop: 4 } }, '导出文件包含：'),
+                                React.createElement('ul', { style: { margin: '4px 0', paddingLeft: 20 } },
+                                    React.createElement('li', null, '工作区名称'),
+                                    React.createElement('li', null, '导出时间'),
+                                    React.createElement('li', null, '插件版本'),
+                                    React.createElement('li', null, '原始数据库位置说明')
+                                )
+                            ),
+
                             // 操作说明
                             React.createElement('div', { style: { marginBottom: 16, fontSize: 13, color: themeStyles.textSecondary } },
-                                React.createElement('div', null, '卸载将执行：'),
-                                React.createElement('ul', { style: { margin: '8px 0', paddingLeft: 20 } },
+                                React.createElement('div', { style: { fontWeight: 'bold', marginBottom: 8, color: themeStyles.textColor } }, '⚡ 卸载将执行：'),
+                                React.createElement('ul', { style: { margin: '4px 0', paddingLeft: 20 } },
                                     React.createElement('li', null, '删除插件目录'),
                                     React.createElement('li', null, '从 QwenPaw 配置中移除插件'),
                                     keepData ? null : React.createElement('li', null, '导出记忆数据到 Memory 文件夹'),
