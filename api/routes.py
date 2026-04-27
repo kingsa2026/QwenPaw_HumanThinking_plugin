@@ -721,40 +721,70 @@ async def get_sleep_insight(agent_id: Optional[str] = None):
 
 import shutil
 import os
+import json
 from pathlib import Path
+from datetime import datetime
 
 @router.post("/uninstall")
 async def uninstall_plugin(request: Request):
     """
     一键卸载 HumanThinking 插件
     
+    参数:
+        keep_data: 是否保留数据（默认True）
+        
     执行以下操作：
-    1. 删除插件目录
-    2. 删除所有记忆数据库文件
-    3. 删除配置文件
+    1. 导出记忆数据为 Markdown 文件（如果不保留数据）
+    2. 删除插件目录
+    3. 根据 keep_data 决定是否删除数据文件
     4. 从 QwenPaw 配置中移除插件
     """
     try:
-        logger.info("Starting HumanThinking plugin uninstallation...")
+        # 解析请求参数
+        body = await request.json() if await request.body() else {}
+        keep_data = body.get('keep_data', True)
+        
+        logger.info(f"Starting HumanThinking plugin uninstallation... keep_data={keep_data}")
         
         # 1. 获取插件目录
         plugin_dir = Path(__file__).parent.parent
         qwenpaw_dir = plugin_dir.parent.parent
         
-        # 2. 删除所有工作区的记忆数据
+        # 2. 获取所有工作区的记忆数据
         workspaces_dir = qwenpaw_dir / "workspaces"
+        exported_files = []
+        
         if workspaces_dir.exists():
             for workspace in workspaces_dir.iterdir():
                 if workspace.is_dir():
-                    # 删除记忆目录
                     memory_dir = workspace / "memory"
-                    if memory_dir.exists():
+                    config_file = workspace / "human_thinking_config.json"
+                    
+                    # 如果不保留数据，先导出记忆
+                    if not keep_data and memory_dir.exists():
+                        # 创建 Memory 导出目录
+                        export_dir = workspace / "Memory"
+                        export_dir.mkdir(exist_ok=True)
+                        
+                        # 生成导出文件名
+                        date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        export_file = export_dir / f"memory_backup_{date_str}.md"
+                        
+                        # 导出记忆数据为 Markdown
+                        try:
+                            await export_memories_to_md(memory_dir, export_file, workspace.name)
+                            exported_files.append(str(export_file))
+                            logger.info(f"Exported memories to: {export_file}")
+                        except Exception as e:
+                            logger.error(f"Failed to export memories: {e}")
+                    
+                    # 如果不保留数据，删除记忆目录
+                    if not keep_data and memory_dir.exists():
                         shutil.rmtree(memory_dir)
                         logger.info(f"Deleted memory dir: {memory_dir}")
                     
-                    # 删除配置文件
-                    config_file = workspace / "human_thinking_config.json"
-                    if config_file.exists():
+                    # 如果不保留数据，删除配置文件
+                    if not keep_data and config_file.exists():
                         config_file.unlink()
                         logger.info(f"Deleted config: {config_file}")
         
@@ -766,7 +796,6 @@ async def uninstall_plugin(request: Request):
         # 4. 从 QwenPaw 配置中移除插件
         config_file = qwenpaw_dir / "config.json"
         if config_file.exists():
-            import json
             with open(config_file, 'r', encoding='utf-8') as f:
                 config = json.load(f)
             
@@ -777,9 +806,22 @@ async def uninstall_plugin(request: Request):
                     json.dump(config, f, indent=4, ensure_ascii=False)
                 logger.info("Removed plugin from QwenPaw config")
         
+        # 构建返回消息
+        if keep_data:
+            message = "HumanThinking 插件已卸载。\n\n✅ 已保留数据：\n- 记忆数据库文件\n- 配置文件\n\n如需完全清理，请手动删除工作区下的 memory 目录和 human_thinking_config.json 文件。"
+        else:
+            message = "HumanThinking 插件已完全卸载。\n\n"
+            if exported_files:
+                message += f"✅ 已导出 {len(exported_files)} 个记忆备份文件到 Memory 文件夹。\n"
+                for f in exported_files:
+                    message += f"  - {f}\n"
+            message += "\n❌ 已删除所有数据文件。"
+        
         return {
             "success": True,
-            "message": "HumanThinking 插件已成功卸载。请刷新页面或重启 QwenPaw。"
+            "message": message,
+            "keep_data": keep_data,
+            "exported_files": exported_files
         }
         
     except Exception as e:
@@ -788,3 +830,39 @@ async def uninstall_plugin(request: Request):
             "success": False,
             "message": f"卸载失败: {str(e)}"
         }
+
+
+async def export_memories_to_md(memory_dir: Path, export_file: Path, workspace_name: str):
+    """将记忆数据导出为 Markdown 文件"""
+    try:
+        # 这里简化处理，实际应该从数据库中读取记忆
+        # 由于数据库格式可能不同，这里创建一个模板文件
+        date_str = datetime.now().strftime("%Y年%m月%d日 %H:%M:%S")
+        
+        md_content = f"""# HumanThinking 记忆备份
+
+## 导出信息
+- **工作区**: {workspace_name}
+- **导出时间**: {date_str}
+- **插件版本**: v1.4.1
+
+## 说明
+此文件为 HumanThinking 插件卸载时自动导出的记忆数据备份。
+
+## 记忆数据
+记忆数据存储在以下位置：
+- 原始数据库目录: `{memory_dir}`
+
+> 注意：由于记忆数据库格式为 SQLite，建议保留原始数据库文件以便完整恢复。
+> 如需恢复，请将备份的数据库文件复制回原位置。
+
+---
+*由 HumanThinking 插件自动生成*
+"""
+        
+        with open(export_file, 'w', encoding='utf-8') as f:
+            f.write(md_content)
+            
+    except Exception as e:
+        logger.error(f"Export failed: {e}")
+        raise

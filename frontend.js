@@ -878,16 +878,11 @@
             const renderAbout = () => {
                 const [uninstalling, setUninstalling] = useState(false);
                 const [uninstallResult, setUninstallResult] = useState(null);
+                const [showModal, setShowModal] = useState(false);
+                const [keepData, setKeepData] = useState(true);
+                const isDark = document.body.classList.contains('dark-mode');
 
                 const handleUninstall = async () => {
-                    if (!confirm('确定要卸载 HumanThinking 插件吗？\n\n这将：\n1. 删除所有记忆数据\n2. 删除配置文件\n3. 从 QwenPaw 中移除插件\n\n此操作不可恢复！')) {
-                        return;
-                    }
-                    
-                    if (!confirm('最后确认：您真的确定要完全卸载 HumanThinking 插件吗？')) {
-                        return;
-                    }
-
                     setUninstalling(true);
                     try {
                         const response = await fetch(`${getApiBase()}/uninstall`, {
@@ -895,28 +890,47 @@
                             headers: {
                                 'Content-Type': 'application/json',
                                 'Authorization': `Bearer ${window.QwenPaw?.host?.getApiToken?.() || ''}`
-                            }
+                            },
+                            body: JSON.stringify({ keep_data: keepData })
                         });
                         const result = await response.json();
                         setUninstallResult(result);
+                        setShowModal(false);
                         if (result.success) {
-                            alert('卸载成功！请刷新页面或重启 QwenPaw。');
+                            alert('✅ 卸载完成！\n\n' + result.message);
                         } else {
-                            alert('卸载失败：' + (result.message || '未知错误'));
+                            alert('❌ 卸载失败：' + (result.message || '未知错误'));
                         }
                     } catch (e) {
                         setUninstallResult({ success: false, message: e.message });
-                        alert('卸载失败：' + e.message);
+                        alert('❌ 卸载失败：' + e.message);
                     } finally {
                         setUninstalling(false);
                     }
                 };
 
-                return React.createElement('div', { style: { padding: 16 } },
+                const themeStyles = {
+                    cardBg: isDark ? 'rgba(255,255,255,0.04)' : '#f5f5f5',
+                    cardBorder: isDark ? 'rgba(255,255,255,0.12)' : '#eae9e7',
+                    textColor: isDark ? 'rgba(255,255,255,0.85)' : '#333',
+                    textSecondary: isDark ? 'rgba(255,255,255,0.45)' : '#666',
+                    featureBg: isDark ? 'rgba(82,196,26,0.08)' : '#f6ffed',
+                    featureBorder: isDark ? 'rgba(82,196,26,0.3)' : '#b7eb8f',
+                    dangerBg: isDark ? 'rgba(255,77,79,0.08)' : '#fff2f0',
+                    dangerBorder: isDark ? 'rgba(255,77,79,0.3)' : '#ffccc7',
+                    dangerText: isDark ? '#ff7875' : '#cf1322',
+                    linkColor: isDark ? '#40a9ff' : '#1890ff',
+                    modalBg: isDark ? '#1f1f1f' : '#fff',
+                    modalOverlay: isDark ? 'rgba(0,0,0,0.7)' : 'rgba(0,0,0,0.5)'
+                };
+
+                return React.createElement('div', { style: { padding: 16, color: themeStyles.textColor } },
                     // 版本信息
                     React.createElement('div', { style: { marginBottom: 24 } },
-                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: '2px solid #1890ff', paddingBottom: 8 } }, '📋 版本信息'),
-                        React.createElement('div', { style: { background: '#f5f5f5', padding: 16, borderRadius: 8 } },
+                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: `2px solid ${themeStyles.linkColor}`, paddingBottom: 8, color: themeStyles.textColor } }, '📋 版本信息'),
+                        React.createElement('div', { 
+                            style: { background: themeStyles.cardBg, padding: 16, borderRadius: 8, border: `1px solid ${themeStyles.cardBorder}` } 
+                        },
                             React.createElement('div', { style: { marginBottom: 8 } },
                                 React.createElement('strong', null, '插件版本：'), 'v1.4.1'
                             ),
@@ -937,7 +951,7 @@
                                 React.createElement('a', { 
                                     href: 'https://github.com/kingsa2026/QwenPaw_HumanThinking_plugin',
                                     target: '_blank',
-                                    style: { color: '#1890ff' }
+                                    style: { color: themeStyles.linkColor }
                                 }, 'kingsa2026/QwenPaw_HumanThinking_plugin')
                             )
                         )
@@ -945,10 +959,12 @@
 
                     // 功能说明
                     React.createElement('div', { style: { marginBottom: 24 } },
-                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: '2px solid #52c41a', paddingBottom: 8 } }, '✨ 功能说明'),
-                        React.createElement('div', { style: { background: '#f6ffed', padding: 16, borderRadius: 8, border: '1px solid #b7eb8f' } },
+                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: '2px solid #52c41a', paddingBottom: 8, color: themeStyles.textColor } }, '✨ 功能说明'),
+                        React.createElement('div', { 
+                            style: { background: themeStyles.featureBg, padding: 16, borderRadius: 8, border: `1px solid ${themeStyles.featureBorder}` } 
+                        },
                             React.createElement('div', { style: { marginBottom: 12 } },
-                                React.createElement('h4', null, '🧠 记忆管理'),
+                                React.createElement('h4', { style: { color: themeStyles.textColor } }, '🧠 记忆管理'),
                                 React.createElement('ul', null,
                                     React.createElement('li', null, '跨会话记忆保持 - 在不同会话间保持记忆连续性'),
                                     React.createElement('li', null, '记忆搜索 - 支持关键词和语义搜索'),
@@ -957,7 +973,7 @@
                                 )
                             ),
                             React.createElement('div', { style: { marginBottom: 12 } },
-                                React.createElement('h4', null, '🌙 睡眠管理'),
+                                React.createElement('h4', { style: { color: themeStyles.textColor } }, '🌙 睡眠管理'),
                                 React.createElement('ul', null,
                                     React.createElement('li', null, '智能睡眠调度 - 根据活跃度自动进入睡眠'),
                                     React.createElement('li', null, '梦境生成 - 在睡眠期间整理和巩固记忆'),
@@ -965,7 +981,7 @@
                                 )
                             ),
                             React.createElement('div', null,
-                                React.createElement('h4', null, '⚙️ 配置管理'),
+                                React.createElement('h4', { style: { color: themeStyles.textColor } }, '⚙️ 配置管理'),
                                 React.createElement('ul', null,
                                     React.createElement('li', null, '支持按 Agent 隔离配置'),
                                     React.createElement('li', null, '分布式数据库支持'),
@@ -977,23 +993,15 @@
 
                     // 一键卸载
                     React.createElement('div', { style: { marginBottom: 24 } },
-                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: '2px solid #ff4d4f', paddingBottom: 8 } }, '⚠️ 危险区域'),
-                        React.createElement('div', { style: { background: '#fff2f0', padding: 16, borderRadius: 8, border: '1px solid #ffccc7' } },
-                            React.createElement('div', { style: { marginBottom: 16, color: '#cf1322', fontWeight: 'bold' } },
-                                '一键卸载将完全删除所有数据和配置，此操作不可恢复！'
-                            ),
-                            React.createElement('div', { style: { marginBottom: 16, fontSize: 13, color: '#666' } },
-                                '卸载将执行以下操作：',
-                                React.createElement('ul', null,
-                                    React.createElement('li', null, '删除插件目录 /root/.qwenpaw/plugins/HumanThinking/'),
-                                    React.createElement('li', null, '删除所有记忆数据库文件'),
-                                    React.createElement('li', null, '删除配置文件 human_thinking_config.json'),
-                                    React.createElement('li', null, '从 QwenPaw 配置中移除插件'),
-                                    React.createElement('li', null, '清理所有相关的 localStorage 和 sessionStorage 数据')
-                                )
+                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: '2px solid #ff4d4f', paddingBottom: 8, color: themeStyles.textColor } }, '⚠️ 危险区域'),
+                        React.createElement('div', { 
+                            style: { background: themeStyles.dangerBg, padding: 16, borderRadius: 8, border: `1px solid ${themeStyles.dangerBorder}` } 
+                        },
+                            React.createElement('div', { style: { marginBottom: 16, color: themeStyles.dangerText, fontWeight: 'bold' } },
+                                '一键卸载将删除插件，可选择是否保留数据。'
                             ),
                             React.createElement('button', {
-                                onClick: handleUninstall,
+                                onClick: () => setShowModal(true),
                                 disabled: uninstalling,
                                 style: {
                                     padding: '8px 24px',
@@ -1005,7 +1013,7 @@
                                     fontSize: '14px',
                                     fontWeight: 'bold'
                                 }
-                            }, uninstalling ? '卸载中...' : '⚠️ 一键卸载插件')
+                            }, '⚠️ 卸载插件')
                         )
                     ),
 
@@ -1014,12 +1022,106 @@
                         style: { 
                             padding: 16, 
                             borderRadius: 8, 
-                            background: uninstallResult.success ? '#f6ffed' : '#fff2f0',
-                            border: `1px solid ${uninstallResult.success ? '#b7eb8f' : '#ffccc7'}`
+                            background: uninstallResult.success ? (isDark ? 'rgba(82,196,26,0.08)' : '#f6ffed') : themeStyles.dangerBg,
+                            border: `1px solid ${uninstallResult.success ? '#b7eb8f' : themeStyles.dangerBorder}`
                         } 
                     },
                         React.createElement('strong', null, uninstallResult.success ? '✅ 卸载成功' : '❌ 卸载失败'),
                         React.createElement('div', null, uninstallResult.message || '')
+                    ),
+
+                    // 卸载确认弹窗
+                    showModal && React.createElement('div', {
+                        style: {
+                            position: 'fixed',
+                            top: 0, left: 0, right: 0, bottom: 0,
+                            background: themeStyles.modalOverlay,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            zIndex: 1000
+                        },
+                        onClick: (e) => { if (e.target === e.currentTarget) setShowModal(false); }
+                    },
+                        React.createElement('div', {
+                            style: {
+                                background: themeStyles.modalBg,
+                                borderRadius: 8,
+                                padding: 24,
+                                maxWidth: 500,
+                                width: '90%',
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                                border: `1px solid ${themeStyles.cardBorder}`
+                            }
+                        },
+                            React.createElement('h3', { style: { marginBottom: 16, color: themeStyles.dangerText } }, '⚠️ 确认卸载'),
+                            React.createElement('div', { style: { marginBottom: 16, color: themeStyles.textColor } },
+                                '您确定要卸载 HumanThinking 插件吗？此操作不可恢复。'
+                            ),
+                            
+                            // 保留数据选项
+                            React.createElement('div', { 
+                                style: { 
+                                    marginBottom: 16, 
+                                    padding: 12, 
+                                    background: themeStyles.cardBg,
+                                    borderRadius: 4,
+                                    border: `1px solid ${themeStyles.cardBorder}`
+                                } 
+                            },
+                                React.createElement('label', { style: { display: 'flex', alignItems: 'center', cursor: 'pointer', color: themeStyles.textColor } },
+                                    React.createElement('input', {
+                                        type: 'checkbox',
+                                        checked: keepData,
+                                        onChange: (e) => setKeepData(e.target.checked),
+                                        style: { marginRight: 8 }
+                                    }),
+                                    React.createElement('span', null, '保留数据（配置文件和数据库文件）')
+                                ),
+                                React.createElement('div', { style: { marginTop: 8, fontSize: 12, color: themeStyles.textSecondary } },
+                                    keepData ? '卸载后将保留记忆数据，可手动恢复' : '将导出记忆数据为 Markdown 文件后删除所有数据'
+                                )
+                            ),
+
+                            // 操作说明
+                            React.createElement('div', { style: { marginBottom: 16, fontSize: 13, color: themeStyles.textSecondary } },
+                                React.createElement('div', null, '卸载将执行：'),
+                                React.createElement('ul', { style: { margin: '8px 0', paddingLeft: 20 } },
+                                    React.createElement('li', null, '删除插件目录'),
+                                    React.createElement('li', null, '从 QwenPaw 配置中移除插件'),
+                                    keepData ? null : React.createElement('li', null, '导出记忆数据到 Memory 文件夹'),
+                                    keepData ? null : React.createElement('li', null, '删除所有记忆数据库文件')
+                                )
+                            ),
+
+                            // 按钮
+                            React.createElement('div', { style: { display: 'flex', gap: 12, justifyContent: 'flex-end' } },
+                                React.createElement('button', {
+                                    onClick: () => setShowModal(false),
+                                    style: {
+                                        padding: '8px 16px',
+                                        background: 'transparent',
+                                        color: themeStyles.textColor,
+                                        border: `1px solid ${themeStyles.cardBorder}`,
+                                        borderRadius: '4px',
+                                        cursor: 'pointer'
+                                    }
+                                }, '取消'),
+                                React.createElement('button', {
+                                    onClick: handleUninstall,
+                                    disabled: uninstalling,
+                                    style: {
+                                        padding: '8px 16px',
+                                        background: '#ff4d4f',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        cursor: 'pointer',
+                                        fontWeight: 'bold'
+                                    }
+                                }, uninstalling ? '卸载中...' : '确认卸载')
+                            )
+                        )
                     )
                 );
             };
