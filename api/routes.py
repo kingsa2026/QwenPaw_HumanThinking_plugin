@@ -715,3 +715,76 @@ async def get_sleep_insight(agent_id: Optional[str] = None):
         "suggestions": [],
         "memory_consolidation": {}
     }
+
+
+# ============ 卸载接口 ============
+
+import shutil
+import os
+from pathlib import Path
+
+@router.post("/uninstall")
+async def uninstall_plugin(request: Request):
+    """
+    一键卸载 HumanThinking 插件
+    
+    执行以下操作：
+    1. 删除插件目录
+    2. 删除所有记忆数据库文件
+    3. 删除配置文件
+    4. 从 QwenPaw 配置中移除插件
+    """
+    try:
+        logger.info("Starting HumanThinking plugin uninstallation...")
+        
+        # 1. 获取插件目录
+        plugin_dir = Path(__file__).parent.parent
+        qwenpaw_dir = plugin_dir.parent.parent
+        
+        # 2. 删除所有工作区的记忆数据
+        workspaces_dir = qwenpaw_dir / "workspaces"
+        if workspaces_dir.exists():
+            for workspace in workspaces_dir.iterdir():
+                if workspace.is_dir():
+                    # 删除记忆目录
+                    memory_dir = workspace / "memory"
+                    if memory_dir.exists():
+                        shutil.rmtree(memory_dir)
+                        logger.info(f"Deleted memory dir: {memory_dir}")
+                    
+                    # 删除配置文件
+                    config_file = workspace / "human_thinking_config.json"
+                    if config_file.exists():
+                        config_file.unlink()
+                        logger.info(f"Deleted config: {config_file}")
+        
+        # 3. 删除插件目录
+        if plugin_dir.exists():
+            shutil.rmtree(plugin_dir)
+            logger.info(f"Deleted plugin dir: {plugin_dir}")
+        
+        # 4. 从 QwenPaw 配置中移除插件
+        config_file = qwenpaw_dir / "config.json"
+        if config_file.exists():
+            import json
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            if 'plugins' in config and 'humanthinking' in config['plugins']:
+                del config['plugins']['humanthinking']
+                
+                with open(config_file, 'w', encoding='utf-8') as f:
+                    json.dump(config, f, indent=4, ensure_ascii=False)
+                logger.info("Removed plugin from QwenPaw config")
+        
+        return {
+            "success": True,
+            "message": "HumanThinking 插件已成功卸载。请刷新页面或重启 QwenPaw。"
+        }
+        
+    except Exception as e:
+        logger.error(f"Uninstallation failed: {e}")
+        return {
+            "success": False,
+            "message": f"卸载失败: {str(e)}"
+        }

@@ -874,12 +874,163 @@
                 );
             };
 
+            // 关于/卸载页面
+            const renderAbout = () => {
+                const [uninstalling, setUninstalling] = useState(false);
+                const [uninstallResult, setUninstallResult] = useState(null);
+
+                const handleUninstall = async () => {
+                    if (!confirm('确定要卸载 HumanThinking 插件吗？\n\n这将：\n1. 删除所有记忆数据\n2. 删除配置文件\n3. 从 QwenPaw 中移除插件\n\n此操作不可恢复！')) {
+                        return;
+                    }
+                    
+                    if (!confirm('最后确认：您真的确定要完全卸载 HumanThinking 插件吗？')) {
+                        return;
+                    }
+
+                    setUninstalling(true);
+                    try {
+                        const response = await fetch(`${getApiBase()}/uninstall`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${window.QwenPaw?.host?.getApiToken?.() || ''}`
+                            }
+                        });
+                        const result = await response.json();
+                        setUninstallResult(result);
+                        if (result.success) {
+                            alert('卸载成功！请刷新页面或重启 QwenPaw。');
+                        } else {
+                            alert('卸载失败：' + (result.message || '未知错误'));
+                        }
+                    } catch (e) {
+                        setUninstallResult({ success: false, message: e.message });
+                        alert('卸载失败：' + e.message);
+                    } finally {
+                        setUninstalling(false);
+                    }
+                };
+
+                return React.createElement('div', { style: { padding: 16 } },
+                    // 版本信息
+                    React.createElement('div', { style: { marginBottom: 24 } },
+                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: '2px solid #1890ff', paddingBottom: 8 } }, '📋 版本信息'),
+                        React.createElement('div', { style: { background: '#f5f5f5', padding: 16, borderRadius: 8 } },
+                            React.createElement('div', { style: { marginBottom: 8 } },
+                                React.createElement('strong', null, '插件版本：'), 'v1.4.1'
+                            ),
+                            React.createElement('div', { style: { marginBottom: 8 } },
+                                React.createElement('strong', null, '插件名称：'), 'Human Thinking Memory Manager'
+                            ),
+                            React.createElement('div', { style: { marginBottom: 8 } },
+                                React.createElement('strong', null, '作者：'), 'HumanThinking Team'
+                            ),
+                            React.createElement('div', { style: { marginBottom: 8 } },
+                                React.createElement('strong', null, '许可证：'), 'MIT'
+                            ),
+                            React.createElement('div', { style: { marginBottom: 8 } },
+                                React.createElement('strong', null, '最低 QwenPaw 版本：'), 'v1.1.4.post2'
+                            ),
+                            React.createElement('div', null,
+                                React.createElement('strong', null, 'GitHub：'),
+                                React.createElement('a', { 
+                                    href: 'https://github.com/kingsa2026/QwenPaw_HumanThinking_plugin',
+                                    target: '_blank',
+                                    style: { color: '#1890ff' }
+                                }, 'kingsa2026/QwenPaw_HumanThinking_plugin')
+                            )
+                        )
+                    ),
+
+                    // 功能说明
+                    React.createElement('div', { style: { marginBottom: 24 } },
+                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: '2px solid #52c41a', paddingBottom: 8 } }, '✨ 功能说明'),
+                        React.createElement('div', { style: { background: '#f6ffed', padding: 16, borderRadius: 8, border: '1px solid #b7eb8f' } },
+                            React.createElement('div', { style: { marginBottom: 12 } },
+                                React.createElement('h4', null, '🧠 记忆管理'),
+                                React.createElement('ul', null,
+                                    React.createElement('li', null, '跨会话记忆保持 - 在不同会话间保持记忆连续性'),
+                                    React.createElement('li', null, '记忆搜索 - 支持关键词和语义搜索'),
+                                    React.createElement('li', null, '记忆生命周期 - 自动冷藏、归档和清理'),
+                                    React.createElement('li', null, '情感状态跟踪 - 记录和分析情感变化')
+                                )
+                            ),
+                            React.createElement('div', { style: { marginBottom: 12 } },
+                                React.createElement('h4', null, '🌙 睡眠管理'),
+                                React.createElement('ul', null,
+                                    React.createElement('li', null, '智能睡眠调度 - 根据活跃度自动进入睡眠'),
+                                    React.createElement('li', null, '梦境生成 - 在睡眠期间整理和巩固记忆'),
+                                    React.createElement('li', null, '睡眠报告 - 生成睡眠质量和记忆整理报告')
+                                )
+                            ),
+                            React.createElement('div', null,
+                                React.createElement('h4', null, '⚙️ 配置管理'),
+                                React.createElement('ul', null,
+                                    React.createElement('li', null, '支持按 Agent 隔离配置'),
+                                    React.createElement('li', null, '分布式数据库支持'),
+                                    React.createElement('li', null, '可自定义记忆保留策略')
+                                )
+                            )
+                        )
+                    ),
+
+                    // 一键卸载
+                    React.createElement('div', { style: { marginBottom: 24 } },
+                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: '2px solid #ff4d4f', paddingBottom: 8 } }, '⚠️ 危险区域'),
+                        React.createElement('div', { style: { background: '#fff2f0', padding: 16, borderRadius: 8, border: '1px solid #ffccc7' } },
+                            React.createElement('div', { style: { marginBottom: 16, color: '#cf1322', fontWeight: 'bold' } },
+                                '一键卸载将完全删除所有数据和配置，此操作不可恢复！'
+                            ),
+                            React.createElement('div', { style: { marginBottom: 16, fontSize: 13, color: '#666' } },
+                                '卸载将执行以下操作：',
+                                React.createElement('ul', null,
+                                    React.createElement('li', null, '删除插件目录 /root/.qwenpaw/plugins/HumanThinking/'),
+                                    React.createElement('li', null, '删除所有记忆数据库文件'),
+                                    React.createElement('li', null, '删除配置文件 human_thinking_config.json'),
+                                    React.createElement('li', null, '从 QwenPaw 配置中移除插件'),
+                                    React.createElement('li', null, '清理所有相关的 localStorage 和 sessionStorage 数据')
+                                )
+                            ),
+                            React.createElement('button', {
+                                onClick: handleUninstall,
+                                disabled: uninstalling,
+                                style: {
+                                    padding: '8px 24px',
+                                    background: '#ff4d4f',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    fontSize: '14px',
+                                    fontWeight: 'bold'
+                                }
+                            }, uninstalling ? '卸载中...' : '⚠️ 一键卸载插件')
+                        )
+                    ),
+
+                    // 卸载结果
+                    uninstallResult && React.createElement('div', { 
+                        style: { 
+                            padding: 16, 
+                            borderRadius: 8, 
+                            background: uninstallResult.success ? '#f6ffed' : '#fff2f0',
+                            border: `1px solid ${uninstallResult.success ? '#b7eb8f' : '#ffccc7'}`
+                        } 
+                    },
+                        React.createElement('strong', null, uninstallResult.success ? '✅ 卸载成功' : '❌ 卸载失败'),
+                        React.createElement('div', null, uninstallResult.message || '')
+                    )
+                );
+            };
+
             const tabItems = [
                 { key: 'stats', label: '📊 记忆统计', children: renderStats() },
                 { key: 'search', label: '🔍 记忆搜索', children: renderSearch() },
                 { key: 'emotion', label: '💝 情感状态', children: renderEmotion() },
                 { key: 'timeline', label: '📅 时间线', children: renderTimeline() },
-                { key: 'config', label: '⚙️ 记忆配置', children: renderConfig() }
+                { key: 'config', label: '⚙️ 记忆配置', children: renderConfig() },
+                { key: 'about', label: 'ℹ️ 关于', children: renderAbout() }
             ];
 
             return React.createElement('div', { style: { height: '100%', display: 'flex', flexDirection: 'column' } },
