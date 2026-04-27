@@ -424,8 +424,17 @@ class HumanThinkingMemoryPlugin:
                         "timestamp": __import__('time').time()
                     }
                 logger.info("✓ Health endpoint registered directly to FastAPI app")
+            
+            # 注册所有 API 路由（包括 uninstall 等）
+            has_uninstall = any('humanthinking/uninstall' in p for p in existing_paths)
+            if not has_uninstall:
+                try:
+                    app.include_router(ht_router)
+                    logger.info("✓ All API routes registered via include_router")
+                except Exception as e:
+                    logger.warning(f"Failed to include router: {e}")
             else:
-                logger.info("✓ API routes already in FastAPI app")
+                logger.info("✓ All API routes already registered")
             
             # 验证所有路由是否注册成功
             new_paths = [getattr(r, 'path', '') for r in app.routes]
