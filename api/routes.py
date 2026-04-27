@@ -153,7 +153,7 @@ async def health_check():
     return {
         "status": "healthy",
         "plugin": "humanthinking",
-        "version": "1.4.1",
+        "version": "1.1.4.post2",
         "timestamp": time.time()
     }
 
@@ -844,7 +844,7 @@ async def export_memories_to_md(memory_dir: Path, export_file: Path, workspace_n
 ## 导出信息
 - **工作区**: {workspace_name}
 - **导出时间**: {date_str}
-- **插件版本**: v1.4.1
+- **插件版本**: v1.1.4.post2
 
 ## 说明
 此文件为 HumanThinking 插件卸载时自动导出的记忆数据备份。

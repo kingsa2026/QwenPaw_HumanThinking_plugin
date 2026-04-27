@@ -755,7 +755,7 @@ HumanThinking 是你的记忆管理系统，具有以下能力：
                 metadata={
                     "is_system_memory": True,
                     "category": "usage_guide",
-                    "version": "1.4.1"
+                    "version": "1.1.4.post2"
                 }
             )
             

@@ -8,7 +8,7 @@
 - Plan 模式
 - Agent配置隔离
 
-v1.4.1 - 兼容 QwenPaw v1.1.4.post2，优化Agent切换检测机制
+v1.1.4.post2 - 跟随QwenPaw版本，优化Agent切换检测机制
 """
 
 from qwenpaw.plugins.api import PluginApi
@@ -142,7 +142,7 @@ class HumanThinkingMemoryPlugin:
                         return {
                             "status": "healthy",
                             "plugin": "humanthinking",
-                            "version": "1.4.1",
+                            "version": "1.1.4.post2",
                             "timestamp": __import__('time').time()
                         }
                     logger.info("✓ Health endpoint registered in register()")
@@ -420,7 +420,7 @@ class HumanThinkingMemoryPlugin:
                     return {
                         "status": "healthy",
                         "plugin": "humanthinking",
-                        "version": "1.4.1",
+                        "version": "1.1.4.post2",
                         "timestamp": __import__('time').time()
                     }
                 logger.info("✓ Health endpoint registered directly to FastAPI app")

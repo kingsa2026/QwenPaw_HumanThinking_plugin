@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 # 当前版本
-CURRENT_VERSION = "1.0.0-beta0.1"
+CURRENT_VERSION = "1.1.4.post2"
 CURRENT_SCHEMA_VERSION = "5.0.0"
 MIN_COMPATIBLE_VERSION = "0.0.5"
 

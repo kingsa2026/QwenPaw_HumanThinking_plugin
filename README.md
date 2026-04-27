@@ -248,7 +248,7 @@ A: v1.1.0 已修复，使用原生压缩机制 + 排除最近3轮策略
 
 ## 版本
 
-**v1.4.1** - 适配 QwenPaw V1.1.4.post2
+**v1.1.4.post2** - 跟随 QwenPaw 版本
 
 - 兼容 QwenPaw V1.1.4.post2
 - Agent 配置隔离支持
