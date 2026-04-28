@@ -823,7 +823,110 @@ async def uninstall_plugin(request: Request):
                         restored_files.append(str(original_path.relative_to(qwenpaw_packages_dir)))
                         logger.info(f"Restored from backup: {original_path}")
                 
-                # 方式2：删除注入的代码块（降级方式，当备份不存在时使用）
+                # 方式2：自带原始文件交叉比对（当备份不存在时使用）
+                # 插件包中自带 QwenPaw 原始文件，通过 diff 比对找出注入的代码并删除
+                original_files_dir = plugin_dir / "original_files"
+                
+                if original_files_dir.exists():
+                    for original_file in original_files_dir.iterdir():
+                        if original_file.is_file():
+                            # 确定目标文件路径
+                            if original_file.name == "plugins.py":
+                                target_file = qwenpaw_packages_dir / "app" / "routers" / "plugins.py"
+                            elif original_file.name == "workspace.py":
+                                target_file = qwenpaw_packages_dir / "app" / "workspace" / "workspace.py"
+                            elif original_file.name == "_app.py":
+                                target_file = qwenpaw_packages_dir / "app" / "_app.py"
+                            else:
+                                continue
+                            
+                            # 检查目标文件是否存在且没有备份
+                            target_bak = target_file.with_suffix(target_file.suffix + ".humanthinking.bak")
+                            if target_file.exists() and not target_bak.exists():
+                                try:
+                                    # 读取原始文件和当前文件
+                                    with open(original_file, 'r', encoding='utf-8') as f:
+                                        original_content = f.read()
+                                    with open(target_file, 'r', encoding='utf-8') as f:
+                                        current_content = f.read()
+                                    
+                                    # 如果文件内容不同，说明被修改过
+                                    if original_content != current_content:
+                                        # 使用 difflib 找出差异
+                                        import difflib
+                                        original_lines = original_content.splitlines(keepends=True)
+                                        current_lines = current_content.splitlines(keepends=True)
+                                        
+                                        # 使用 unified_diff 找出注入的代码
+                                        diff = list(difflib.unified_diff(
+                                            original_lines, current_lines,
+                                            fromfile='original', tofile='current',
+                                            lineterm=''
+                                        ))
+                                        
+                                        # 解析 diff，找出注入的代码行
+                                        injected_lines = set()
+                                        i = 0
+                                        while i < len(diff):
+                                            line = diff[i]
+                                            if line.startswith('@@'):
+                                                # 解析 hunk 头
+                                                # 格式：@@ -start,count +start,count @@
+                                                parts = line.split()
+                                                old_range = parts[1]  # -start,count
+                                                new_range = parts[2]  # +start,count
+                                                
+                                                # 获取新增行的数量
+                                                new_count = int(new_range.split(',')[1]) if ',' in new_range else 1
+                                                
+                                                # 跳过 hunk 头
+                                                i += 1
+                                                old_line_num = 0
+                                                new_line_num = 0
+                                                
+                                                # 处理 hunk 中的行
+                                                hunk_start = i
+                                                while i < len(diff) and not diff[i].startswith('@@'):
+                                                    diff_line = diff[i]
+                                                    if diff_line.startswith('+'):
+                                                        # 新增行，标记为注入代码
+                                                        line_num_in_new = new_line_num
+                                                        injected_lines.add(line_num_in_new)
+                                                        new_line_num += 1
+                                                    elif diff_line.startswith('-'):
+                                                        old_line_num += 1
+                                                    elif diff_line.startswith(' '):
+                                                        old_line_num += 1
+                                                        new_line_num += 1
+                                                    i += 1
+                                                continue
+                                            i += 1
+                                        
+                                        # 如果找到了注入的行，删除它们
+                                        if injected_lines:
+                                            # 重新构建文件内容，跳过注入的行
+                                            new_lines = []
+                                            for idx, line in enumerate(current_lines):
+                                                if idx not in injected_lines:
+                                                    new_lines.append(line)
+                                            
+                                            new_content = ''.join(new_lines)
+                                            
+                                            # 写回文件
+                                            with open(target_file, 'w', encoding='utf-8') as f:
+                                                f.write(new_content)
+                                            
+                                            restored_files.append(f"{target_file.relative_to(qwenpaw_packages_dir)} (by diff comparison)")
+                                            logger.info(f"Removed injected code from {target_file} by diff comparison")
+                                        else:
+                                            # 没有找到注入的行，直接覆盖为原始文件
+                                            shutil.copy2(original_file, target_file)
+                                            restored_files.append(f"{target_file.relative_to(qwenpaw_packages_dir)} (replaced with original)")
+                                            logger.info(f"Replaced {target_file} with original file")
+                                except Exception as diff_err:
+                                    logger.warning(f"Failed to restore {target_file} by diff: {diff_err}")
+                
+                # 方式3：删除注入的代码块（最后降级方式）
                 # 检查 plugins.py 是否还有 humanthinking 路由且没有备份
                 plugins_py = qwenpaw_packages_dir / "app" / "routers" / "plugins.py"
                 plugins_bak = plugins_py.with_suffix(".py.humanthinking.bak")
