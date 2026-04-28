@@ -1,16 +1,16 @@
 {
   "id": "humanthinking",
   "name": "Human Thinking Memory Manager",
-  "version": "1.1.4.post2",
-    "description": "HumanThinking 记忆管理插件 - 支持跨会话记忆、情感状态、睡眠管理和记忆生命周期管理",
-    "author": "HumanThinking Team",
-    "license": "MIT",
-    "entry": {
-      "backend": "plugin.py",
-      "frontend": "frontend.js"
-    },
-    "dependencies": [],
-    "min_qwenpaw_version": "1.1.4.post2",
+  "version": "1.1.5-beta.1",
+  "description": "HumanThinking 记忆管理插件 - 支持跨会话记忆、情感状态、睡眠管理和记忆生命周期管理",
+  "author": "HumanThinking Team",
+  "license": "MIT",
+  "entry": {
+    "backend": "plugin.py",
+    "frontend": "frontend.js"
+  },
+  "dependencies": [],
+  "min_qwenpaw_version": "1.1.5b1",
   "meta": {
     "memory_manager": true,
     "has_sidebar": true,

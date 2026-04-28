@@ -989,7 +989,7 @@
                             style: { background: themeStyles.cardBg, padding: 16, borderRadius: 8, border: `1px solid ${themeStyles.cardBorder}` } 
                         },
                             React.createElement('div', { style: { marginBottom: 8 } },
-                                React.createElement('strong', null, '插件版本：'), 'v1.1.4.post2'
+                                React.createElement('strong', null, '插件版本：'), 'v1.1.5-beta.1'
                             ),
                             React.createElement('div', { style: { marginBottom: 8 } },
                                 React.createElement('strong', null, '插件名称：'), 'Human Thinking Memory Manager'
@@ -1001,7 +1001,7 @@
                                 React.createElement('strong', null, '许可证：'), 'MIT'
                             ),
                             React.createElement('div', { style: { marginBottom: 8 } },
-                                React.createElement('strong', null, '最低 QwenPaw 版本：'), 'v1.1.4.post2'
+                                React.createElement('strong', null, '最低 QwenPaw 版本：'), 'v1.1.5b1'
                             ),
                             React.createElement('div', null,
                                 React.createElement('strong', null, 'GitHub：'),
