@@ -1513,7 +1513,20 @@ async def humanthinking_uninstall(request: Request):
         # Restore QwenPaw files from backups
         restored_files = []
         try:
-            qwenpaw_packages_dir = qwenpaw_dir / "venv" / "lib" / "python3.12" / "site-packages" / "qwenpaw"
+            # 自动检测 Python 版本路径
+            venv_lib_dir = qwenpaw_dir / "venv" / "lib"
+            qwenpaw_packages_dir = None
+            if venv_lib_dir.exists():
+                for item in venv_lib_dir.iterdir():
+                    if item.is_dir() and item.name.startswith("python3."):
+                        candidate = item / "site-packages" / "qwenpaw"
+                        if candidate.exists():
+                            qwenpaw_packages_dir = candidate
+                            break
+            
+            if qwenpaw_packages_dir is None:
+                qwenpaw_packages_dir = qwenpaw_dir / "venv" / "lib" / "python3.12" / "site-packages" / "qwenpaw"
+            
             if qwenpaw_packages_dir.exists():
                 for root, dirs, files in os.walk(qwenpaw_packages_dir):
                     for f in files:
@@ -1578,7 +1591,21 @@ async def humanthinking_uninstall(request: Request):
         # 清除 Python 缓存，确保新路由立即生效
         try:
             import subprocess
-            qwenpaw_pkg_dir = os.path.join(qwenpaw_root, "venv", "lib", "python3.12", "site-packages", "qwenpaw")
+            # 自动检测 Python 版本路径
+            venv_lib_dir = os.path.join(qwenpaw_root, "venv", "lib")
+            qwenpaw_pkg_dir = None
+            if os.path.exists(venv_lib_dir):
+                for item in os.listdir(venv_lib_dir):
+                    item_path = os.path.join(venv_lib_dir, item)
+                    if os.path.isdir(item_path) and item.startswith("python3."):
+                        candidate = os.path.join(item_path, "site-packages", "qwenpaw")
+                        if os.path.exists(candidate):
+                            qwenpaw_pkg_dir = candidate
+                            break
+            
+            if qwenpaw_pkg_dir is None:
+                qwenpaw_pkg_dir = os.path.join(qwenpaw_root, "venv", "lib", "python3.12", "site-packages", "qwenpaw")
+            
             if os.path.exists(qwenpaw_pkg_dir):
                 # 删除所有 .pyc 文件
                 for root, dirs, files in os.walk(qwenpaw_pkg_dir):
