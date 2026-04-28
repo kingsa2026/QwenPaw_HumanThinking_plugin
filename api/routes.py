@@ -845,6 +845,23 @@ async def uninstall_plugin(request: Request):
         except Exception as e:
             logger.error(f"Failed to restore QwenPaw files: {e}")
         
+        # 6. 清除 Python 缓存，确保还原后的文件立即生效
+        try:
+            qwenpaw_packages_dir = qwenpaw_dir / "venv" / "lib" / "python3.12" / "site-packages" / "qwenpaw"
+            if qwenpaw_packages_dir.exists():
+                for root, dirs, files in os.walk(qwenpaw_packages_dir):
+                    for f in files:
+                        if f.endswith(".pyc"):
+                            os.remove(os.path.join(root, f))
+                for root, dirs, files in os.walk(qwenpaw_packages_dir):
+                    if "__pycache__" in dirs:
+                        pycache_dir = os.path.join(root, "__pycache__")
+                        shutil.rmtree(pycache_dir)
+                        dirs.remove("__pycache__")
+                logger.info("Cleared Python cache for qwenpaw package after uninstall")
+        except Exception as cache_err:
+            logger.warning(f"Failed to clear Python cache: {cache_err}")
+        
         # 构建返回消息
         if keep_data:
             message = "HumanThinking 插件已卸载。\n\n✅ 已保留数据：\n- 记忆数据库文件\n- 配置文件\n\n如需完全清理，请手动删除工作区下的 memory 目录和 human_thinking_config.json 文件。"

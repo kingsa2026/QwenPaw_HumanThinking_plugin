@@ -1569,6 +1569,28 @@ async def humanthinking_uninstall(request: Request):
             f.write(new_content)
         
         logger.info("[PluginsRouter] ✓ Patched plugins.py with HumanThinking routes")
+        
+        # 清除 Python 缓存，确保新路由立即生效
+        try:
+            import subprocess
+            qwenpaw_pkg_dir = os.path.join(qwenpaw_root, "venv", "lib", "python3.12", "site-packages", "qwenpaw")
+            if os.path.exists(qwenpaw_pkg_dir):
+                # 删除所有 .pyc 文件
+                for root, dirs, files in os.walk(qwenpaw_pkg_dir):
+                    for f in files:
+                        if f.endswith(".pyc"):
+                            os.remove(os.path.join(root, f))
+                # 删除所有 __pycache__ 目录
+                for root, dirs, files in os.walk(qwenpaw_pkg_dir):
+                    if "__pycache__" in dirs:
+                        pycache_dir = os.path.join(root, "__pycache__")
+                        import shutil
+                        shutil.rmtree(pycache_dir)
+                        dirs.remove("__pycache__")
+                logger.info("[PluginsRouter] ✓ Cleared Python cache for qwenpaw package")
+        except Exception as cache_err:
+            logger.warning(f"[PluginsRouter] Failed to clear Python cache: {cache_err}")
+        
         results["success"] = True
         results["patched"] = True
         
