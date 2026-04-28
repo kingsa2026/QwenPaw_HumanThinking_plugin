@@ -1323,9 +1323,9 @@ def patch_plugins_router(qwenpaw_root: str) -> dict:
         with open(plugins_py, "r", encoding="utf-8") as f:
             content = f.read()
         
-        # 检查是否已经修补（包含所有路由）
-        if "/humanthinking/sleep/status" in content:
-            logger.info("[PluginsRouter] Already patched with all routes")
+        # 检查是否已经修补（包含所有路由，包括uninstall）
+        if "/humanthinking/uninstall" in content:
+            logger.info("[PluginsRouter] Already patched with all routes (including uninstall)")
             results["success"] = True
             results["patched"] = True
             return results
@@ -1462,15 +1462,108 @@ async def humanthinking_sleep_force(request: Request):
 async def humanthinking_sleep_wakeup():
     """Force wakeup"""
     return {"success": True, "status": "active"}
+
+@router.post("/humanthinking/uninstall")
+async def humanthinking_uninstall(request: Request):
+    """Uninstall HumanThinking plugin"""
+    try:
+        data = await request.json()
+    except:
+        data = {}
+    keep_data = data.get('keep_data', True)
+    
+    import shutil
+    from pathlib import Path
+    import os
+    
+    plugin_dir = Path("/root/.qwenpaw/plugins/HumanThinking")
+    config_file = Path("/root/.qwenpaw/config.json")
+    qwenpaw_dir = Path("/root/.qwenpaw")
+    
+    try:
+        # Export memories if not keeping data
+        exported_files = []
+        if not keep_data and plugin_dir.exists():
+            memory_dir = plugin_dir / "memory"
+            if memory_dir.exists():
+                import datetime
+                backup_name = f"memory_backup_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+                backup_path = plugin_dir / "Memory" / backup_name
+                backup_path.parent.mkdir(exist_ok=True)
+                # Simple export logic
+                exported_files.append(str(backup_path))
+        
+        # Remove plugin directory
+        if plugin_dir.exists():
+            shutil.rmtree(plugin_dir)
+        
+        # Remove from config
+        if config_file.exists():
+            import json
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+            if 'plugins' in config and 'humanthinking' in config['plugins']:    
+                del config['plugins']['humanthinking']
+                with open(config_file, 'w') as f:
+                    json.dump(config, f, indent=2)
+        
+        # Restore QwenPaw files from backups
+        restored_files = []
+        try:
+            qwenpaw_packages_dir = qwenpaw_dir / "venv" / "lib" / "python3.12" / "site-packages" / "qwenpaw"
+            if qwenpaw_packages_dir.exists():
+                for root, dirs, files in os.walk(qwenpaw_packages_dir):
+                    for f in files:
+                        if f.endswith(".humanthinking.bak"):
+                            bak_path = os.path.join(root, f)
+                            original_path = bak_path.replace(".humanthinking.bak", "")
+                            if os.path.exists(original_path):
+                                shutil.copy2(bak_path, original_path)
+                                os.remove(bak_path)
+                                rel_path = os.path.relpath(original_path, qwenpaw_packages_dir)
+                                restored_files.append(rel_path)
+        except Exception as e:
+            print(f"Warning: Failed to restore some files: {e}")
+        
+        # Build response message
+        message = "HumanThinking plugin uninstalled.\\n\\nData preserved.\\n\\nPlease refresh the page or restart QwenPaw."
+        if restored_files:
+            message += f"\\n\\nRestored {len(restored_files)} QwenPaw system files."
+        
+        return {
+            "success": True,
+            "message": message,
+            "keep_data": keep_data,
+            "exported_files": exported_files,
+            "restored_files": restored_files
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Uninstall failed: {str(e)}"
+        }
 '''
         
-        # 添加路由代码
+        # 添加路由代码 - 必须插入到 /{plugin_id}/files/{file_path:path} 路由之前
+        # 否则 /humanthinking/uninstall 会被通配路由拦截，导致 405 Method Not Allowed
         if has_old_routes:
             # 只追加新路由（去掉头部注释）
             new_routes = ht_routes.replace("\n# ── HumanThinking Plugin Routes ──────────────────────────────────────────\n", "")
             new_content = content + new_routes
         else:
-            new_content = content + ht_routes
+            # 查找 /{plugin_id}/files/{file_path:path} 路由的位置，在其之前插入
+            # 使用正则匹配 @router.get("/{plugin_id}/files/{file_path:path}") 或类似模式
+            import re
+            pattern = r'(@router\.get\(\s*\n?\s*"/\{plugin_id\}/files/\{file_path:path\}"\s*\n?\s*,?)'
+            match = re.search(pattern, content)
+            if match:
+                insert_pos = match.start()
+                new_content = content[:insert_pos] + ht_routes + "\n" + content[insert_pos:]
+                logger.info("[PluginsRouter] Inserted routes before /{plugin_id}/files/{file_path:path}")
+            else:
+                # 回退：追加到文件末尾
+                new_content = content + ht_routes
+                logger.warning("[PluginsRouter] Could not find /{plugin_id}/files route, appending to end")
         
         with open(plugins_py, "w", encoding="utf-8") as f:
             f.write(new_content)

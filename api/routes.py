@@ -806,6 +806,45 @@ async def uninstall_plugin(request: Request):
                     json.dump(config, f, indent=4, ensure_ascii=False)
                 logger.info("Removed plugin from QwenPaw config")
         
+        # 5. 恢复被修改的 QwenPaw 文件（从备份恢复）
+        restored_files = []
+        try:
+            # 查找所有 .humanthinking.bak 备份文件
+            qwenpaw_packages_dir = qwenpaw_dir / "venv" / "lib" / "python3.12" / "site-packages" / "qwenpaw"
+            if qwenpaw_packages_dir.exists():
+                for bak_file in qwenpaw_packages_dir.rglob("*.humanthinking.bak"):
+                    original_file = bak_file.with_suffix("").with_suffix("").with_suffix("")
+                    # 处理双重后缀，如 .js.humanthinking.bak -> .js
+                    original_str = str(bak_file).replace(".humanthinking.bak", "")
+                    original_path = Path(original_str)
+                    
+                    if original_path.exists() and bak_file.exists():
+                        shutil.copy2(bak_file, original_path)
+                        bak_file.unlink()
+                        restored_files.append(str(original_path.relative_to(qwenpaw_packages_dir)))
+                        logger.info(f"Restored: {original_path}")
+            
+            # 同时检查 plugins.py 是否还有 humanthinking 路由，如果有则尝试从备份恢复
+            plugins_py = qwenpaw_packages_dir / "app" / "routers" / "plugins.py"
+            plugins_bak = plugins_py.with_suffix(".py.humanthinking.bak")
+            if plugins_bak.exists():
+                shutil.copy2(plugins_bak, plugins_py)
+                plugins_bak.unlink()
+                restored_files.append("app/routers/plugins.py")
+                logger.info(f"Restored plugins.py from backup")
+            
+            # 检查 workspace.py
+            workspace_py = qwenpaw_packages_dir / "app" / "workspace" / "workspace.py"
+            workspace_bak = workspace_py.with_suffix(".py.humanthinking.bak")
+            if workspace_bak.exists():
+                shutil.copy2(workspace_bak, workspace_py)
+                workspace_bak.unlink()
+                restored_files.append("app/workspace/workspace.py")
+                logger.info(f"Restored workspace.py from backup")
+                
+        except Exception as e:
+            logger.error(f"Failed to restore QwenPaw files: {e}")
+        
         # 构建返回消息
         if keep_data:
             message = "HumanThinking 插件已卸载。\n\n✅ 已保留数据：\n- 记忆数据库文件\n- 配置文件\n\n如需完全清理，请手动删除工作区下的 memory 目录和 human_thinking_config.json 文件。"
@@ -817,11 +856,18 @@ async def uninstall_plugin(request: Request):
                     message += f"  - {f}\n"
             message += "\n❌ 已删除所有数据文件。"
         
+        # 添加恢复文件信息
+        if restored_files:
+            message += f"\n\n✅ 已还原 {len(restored_files)} 个 QwenPaw 系统文件：\n"
+            for f in restored_files:
+                message += f"  - {f}\n"
+        
         return {
             "success": True,
             "message": message,
             "keep_data": keep_data,
-            "exported_files": exported_files
+            "exported_files": exported_files,
+            "restored_files": restored_files
         }
         
     except Exception as e:

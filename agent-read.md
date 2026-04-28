@@ -1,7 +1,7 @@
 # HumanThinking 记忆管理系统 - Agent 使用指南
 
 > 本文档路径：`/root/.qwenpaw/plugins/HumanThinking/agent-read.md`
-> 版本：v1.4.1
+> 版本：v1.1.4.post2
 > 首次阅读后，请将要点记入你的记忆数据库（importance=5）
 
 ---
@@ -211,5 +211,5 @@ GET /api/plugins/humanthinking/sleep/insight
 
 ---
 
-*本文档由 HumanThinking v1.4.1 生成*
+*本文档由 HumanThinking v1.1.4.post2 生成*
 *最后更新：2026-04-26*
