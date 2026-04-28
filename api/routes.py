@@ -806,15 +806,14 @@ async def uninstall_plugin(request: Request):
                     json.dump(config, f, indent=4, ensure_ascii=False)
                 logger.info("Removed plugin from QwenPaw config")
         
-        # 5. 恢复被修改的 QwenPaw 文件（从备份恢复）
+        # 5. 恢复被修改的 QwenPaw 文件
         restored_files = []
+        qwenpaw_packages_dir = qwenpaw_dir / "venv" / "lib" / "python3.12" / "site-packages" / "qwenpaw"
+        
         try:
-            # 查找所有 .humanthinking.bak 备份文件
-            qwenpaw_packages_dir = qwenpaw_dir / "venv" / "lib" / "python3.12" / "site-packages" / "qwenpaw"
             if qwenpaw_packages_dir.exists():
+                # 方式1：从备份文件恢复（主要方式，最可靠）
                 for bak_file in qwenpaw_packages_dir.rglob("*.humanthinking.bak"):
-                    original_file = bak_file.with_suffix("").with_suffix("").with_suffix("")
-                    # 处理双重后缀，如 .js.humanthinking.bak -> .js
                     original_str = str(bak_file).replace(".humanthinking.bak", "")
                     original_path = Path(original_str)
                     
@@ -822,25 +821,70 @@ async def uninstall_plugin(request: Request):
                         shutil.copy2(bak_file, original_path)
                         bak_file.unlink()
                         restored_files.append(str(original_path.relative_to(qwenpaw_packages_dir)))
-                        logger.info(f"Restored: {original_path}")
-            
-            # 同时检查 plugins.py 是否还有 humanthinking 路由，如果有则尝试从备份恢复
-            plugins_py = qwenpaw_packages_dir / "app" / "routers" / "plugins.py"
-            plugins_bak = plugins_py.with_suffix(".py.humanthinking.bak")
-            if plugins_bak.exists():
-                shutil.copy2(plugins_bak, plugins_py)
-                plugins_bak.unlink()
-                restored_files.append("app/routers/plugins.py")
-                logger.info(f"Restored plugins.py from backup")
-            
-            # 检查 workspace.py
-            workspace_py = qwenpaw_packages_dir / "app" / "workspace" / "workspace.py"
-            workspace_bak = workspace_py.with_suffix(".py.humanthinking.bak")
-            if workspace_bak.exists():
-                shutil.copy2(workspace_bak, workspace_py)
-                workspace_bak.unlink()
-                restored_files.append("app/workspace/workspace.py")
-                logger.info(f"Restored workspace.py from backup")
+                        logger.info(f"Restored from backup: {original_path}")
+                
+                # 方式2：删除注入的代码块（降级方式，当备份不存在时使用）
+                # 检查 plugins.py 是否还有 humanthinking 路由且没有备份
+                plugins_py = qwenpaw_packages_dir / "app" / "routers" / "plugins.py"
+                plugins_bak = plugins_py.with_suffix(".py.humanthinking.bak")
+                
+                if plugins_py.exists() and not plugins_bak.exists():
+                    # 尝试通过删除注入代码块来还原
+                    try:
+                        with open(plugins_py, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        
+                        # 查找 HumanThinking 注入代码块的开始和结束标记
+                        begin_marker = '# ── HumanThinking Plugin Routes [BEGIN'
+                        end_marker = '# ── HumanThinking Plugin Routes [END'
+                        
+                        if begin_marker in content:
+                            # 找到开始标记的位置
+                            begin_pos = content.find(begin_marker)
+                            # 从开始标记位置删除到文件末尾（或结束标记）
+                            if end_marker in content:
+                                end_pos = content.find(end_marker) + len(end_marker)
+                                # 删除到结束标记后的换行符
+                                while end_pos < len(content) and content[end_pos] == '\n':
+                                    end_pos += 1
+                                new_content = content[:begin_pos].rstrip('\n')
+                                if end_pos < len(content):
+                                    new_content += content[end_pos:]
+                            else:
+                                # 没有结束标记，删除从开始标记到文件末尾的所有内容
+                                new_content = content[:begin_pos].rstrip('\n')
+                            
+                            # 写回文件
+                            with open(plugins_py, 'w', encoding='utf-8') as f:
+                                f.write(new_content)
+                            
+                            restored_files.append("app/routers/plugins.py (by removing injected code)")
+                            logger.info("Removed injected HumanThinking routes from plugins.py")
+                    except Exception as remove_err:
+                        logger.warning(f"Failed to remove injected code from plugins.py: {remove_err}")
+                
+                # 检查 workspace.py 是否还有 humanthinking 代码且没有备份
+                workspace_py = qwenpaw_packages_dir / "app" / "workspace" / "workspace.py"
+                workspace_bak = workspace_py.with_suffix(".py.humanthinking.bak")
+                
+                if workspace_py.exists() and not workspace_bak.exists():
+                    # 尝试通过删除注入代码块来还原
+                    try:
+                        with open(workspace_py, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        
+                        begin_marker = '# ── HumanThinking Plugin Routes [BEGIN'
+                        if begin_marker in content:
+                            begin_pos = content.find(begin_marker)
+                            new_content = content[:begin_pos].rstrip('\n')
+                            
+                            with open(workspace_py, 'w', encoding='utf-8') as f:
+                                f.write(new_content)
+                            
+                            restored_files.append("app/workspace/workspace.py (by removing injected code)")
+                            logger.info("Removed injected HumanThinking code from workspace.py")
+                    except Exception as remove_err:
+                        logger.warning(f"Failed to remove injected code from workspace.py: {remove_err}")
                 
         except Exception as e:
             logger.error(f"Failed to restore QwenPaw files: {e}")

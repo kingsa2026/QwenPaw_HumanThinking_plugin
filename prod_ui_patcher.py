@@ -1341,7 +1341,10 @@ def patch_plugins_router(qwenpaw_root: str) -> dict:
         # 在文件末尾添加我们的路由
         ht_routes = '''
 
-# ── HumanThinking Plugin Routes ──────────────────────────────────────────
+# ── HumanThinking Plugin Routes [BEGIN v1.1.4] ───────────────────────────
+# 警告：此区块由 HumanThinking 插件自动注入
+# 卸载插件时会自动删除此区块或从备份恢复
+# 请勿手动修改此标记之间的代码
 
 @router.get("/humanthinking/stats")
 async def humanthinking_stats():
@@ -1542,13 +1545,15 @@ async def humanthinking_uninstall(request: Request):
             "success": False,
             "message": f"Uninstall failed: {str(e)}"
         }
+
+# ── HumanThinking Plugin Routes [END v1.1.4] ─────────────────────────────
 '''
         
         # 添加路由代码 - 必须插入到 /{plugin_id}/files/{file_path:path} 路由之前
         # 否则 /humanthinking/uninstall 会被通配路由拦截，导致 405 Method Not Allowed
         if has_old_routes:
             # 只追加新路由（去掉头部注释）
-            new_routes = ht_routes.replace("\n# ── HumanThinking Plugin Routes ──────────────────────────────────────────\n", "")
+            new_routes = ht_routes.replace("\n# ── HumanThinking Plugin Routes [BEGIN v1.1.4] ───────────────────────────\n# 警告：此区块由 HumanThinking 插件自动注入\n# 卸载插件时会自动删除此区块或从备份恢复\n# 请勿手动修改此标记之间的代码\n", "")
             new_content = content + new_routes
         else:
             # 查找 /{plugin_id}/files/{file_path:path} 路由的位置，在其之前插入
