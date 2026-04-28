@@ -808,7 +808,21 @@ async def uninstall_plugin(request: Request):
         
         # 5. 恢复被修改的 QwenPaw 文件
         restored_files = []
-        qwenpaw_packages_dir = qwenpaw_dir / "venv" / "lib" / "python3.12" / "site-packages" / "qwenpaw"
+        
+        # 自动检测 Python 版本路径
+        venv_lib_dir = qwenpaw_dir / "venv" / "lib"
+        qwenpaw_packages_dir = None
+        if venv_lib_dir.exists():
+            for item in venv_lib_dir.iterdir():
+                if item.is_dir() and item.name.startswith("python3."):
+                    candidate = item / "site-packages" / "qwenpaw"
+                    if candidate.exists():
+                        qwenpaw_packages_dir = candidate
+                        break
+        
+        # 回退到默认路径
+        if qwenpaw_packages_dir is None:
+            qwenpaw_packages_dir = qwenpaw_dir / "venv" / "lib" / "python3.12" / "site-packages" / "qwenpaw"
         
         try:
             if qwenpaw_packages_dir.exists():
@@ -996,7 +1010,19 @@ async def uninstall_plugin(request: Request):
         # 使用外部脚本调用，确保即使插件目录被删除后也能执行
         try:
             import subprocess
-            qwenpaw_packages_dir = qwenpaw_dir / "venv" / "lib" / "python3.12" / "site-packages" / "qwenpaw"
+            # 使用之前检测到的 qwenpaw_packages_dir，如果不可用则重新检测
+            if qwenpaw_packages_dir is None or not qwenpaw_packages_dir.exists():
+                venv_lib_dir = qwenpaw_dir / "venv" / "lib"
+                if venv_lib_dir.exists():
+                    for item in venv_lib_dir.iterdir():
+                        if item.is_dir() and item.name.startswith("python3."):
+                            candidate = item / "site-packages" / "qwenpaw"
+                            if candidate.exists():
+                                qwenpaw_packages_dir = candidate
+                                break
+                if qwenpaw_packages_dir is None:
+                    qwenpaw_packages_dir = qwenpaw_dir / "venv" / "lib" / "python3.12" / "site-packages" / "qwenpaw"
+            
             if qwenpaw_packages_dir.exists():
                 # 方式A：直接清除（当前进程内）
                 for root, dirs, files in os.walk(qwenpaw_packages_dir):
