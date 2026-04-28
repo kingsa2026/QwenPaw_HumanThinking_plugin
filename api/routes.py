@@ -993,9 +993,12 @@ async def uninstall_plugin(request: Request):
             logger.error(f"Failed to restore QwenPaw files: {e}")
         
         # 6. 清除 Python 缓存，确保还原后的文件立即生效
+        # 使用外部脚本调用，确保即使插件目录被删除后也能执行
         try:
+            import subprocess
             qwenpaw_packages_dir = qwenpaw_dir / "venv" / "lib" / "python3.12" / "site-packages" / "qwenpaw"
             if qwenpaw_packages_dir.exists():
+                # 方式A：直接清除（当前进程内）
                 for root, dirs, files in os.walk(qwenpaw_packages_dir):
                     for f in files:
                         if f.endswith(".pyc"):
@@ -1005,7 +1008,48 @@ async def uninstall_plugin(request: Request):
                         pycache_dir = os.path.join(root, "__pycache__")
                         shutil.rmtree(pycache_dir)
                         dirs.remove("__pycache__")
-                logger.info("Cleared Python cache for qwenpaw package after uninstall")
+                logger.info("Cleared Python cache for qwenpaw package after uninstall (in-process)")
+                
+                # 方式B：外部脚本调用（确保彻底清除，即使当前进程有缓存）
+                # 创建一个临时脚本来清除缓存
+                cache_clear_script = qwenpaw_dir / "clear_cache_after_uninstall.py"
+                script_content = f'''#!/usr/bin/env python3
+import os
+import shutil
+import sys
+
+qwenpaw_dir = "{qwenpaw_packages_dir}"
+if os.path.exists(qwenpaw_dir):
+    for root, dirs, files in os.walk(qwenpaw_dir):
+        for f in files:
+            if f.endswith(".pyc"):
+                try:
+                    os.remove(os.path.join(root, f))
+                except:
+                    pass
+    for root, dirs, files in os.walk(qwenpaw_dir):
+        if "__pycache__" in dirs:
+            try:
+                shutil.rmtree(os.path.join(root, "__pycache__"))
+            except:
+                pass
+print("Cache cleared by external script")
+'''
+                with open(cache_clear_script, 'w') as f:
+                    f.write(script_content)
+                
+                # 使用 subprocess 调用外部 Python 解释器执行
+                python_exe = qwenpaw_dir / "venv" / "bin" / "python"
+                if python_exe.exists():
+                    subprocess.run([str(python_exe), str(cache_clear_script)], 
+                                 capture_output=True, timeout=10)
+                    logger.info("Cleared Python cache via external script")
+                
+                # 删除临时脚本
+                try:
+                    cache_clear_script.unlink()
+                except:
+                    pass
         except Exception as cache_err:
             logger.warning(f"Failed to clear Python cache: {cache_err}")
         
