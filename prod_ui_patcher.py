@@ -4,20 +4,35 @@
 在 QwenPaw 生产部署环境中，前端已编译为打包的 JS 文件。
 本脚本通过正则匹配和替换，直接修改打包后的 JS 文件，
 将 HumanThinking 添加到记忆管理器下拉选项中。
+
+适配多环境：Docker、Windows、macOS、Linux
 """
 
 import logging
 import os
 import re
 import shutil
+import sys
+from pathlib import Path
+
+# 导入环境检测模块
+sys.path.insert(0, str(Path(__file__).parent))
+from utils.env_detector import detect_qwenpaw_env, get_qwenpaw_console_dir
 
 # Use "qwenpaw" namespace so logs are captured by QwenPaw's logging system
 logger = logging.getLogger("qwenpaw.humanthinking.patcher")
 
 
 def find_qwenpaw_console_static_dir(qwenpaw_root: str) -> str:
-    """查找 QwenPaw 打包后的 console 静态文件目录"""
-    # 方法1: 通过 Python 包查找
+    """查找 QwenPaw 打包后的 console 静态文件目录 - 使用环境检测"""
+    # 方法1: 使用环境检测模块
+    env = detect_qwenpaw_env()
+    console_dir = get_qwenpaw_console_dir(env)
+    if console_dir:
+        logger.info(f"Found console directory via env detection: {console_dir}")
+        return str(console_dir)
+    
+    # 方法2: 通过 Python 包查找
     try:
         import qwenpaw
         qwenpaw_pkg_dir = os.path.dirname(qwenpaw.__file__)
@@ -27,22 +42,30 @@ def find_qwenpaw_console_static_dir(qwenpaw_root: str) -> str:
     except (ImportError, AttributeError):
         pass
 
-    # 方法2: 常见路径（包括 venv 中的 site-packages）
+    # 方法3: 常见路径（包括 venv 中的 site-packages）
     candidates = [
         os.path.join(qwenpaw_root, "console"),
         os.path.join(qwenpaw_root, "dist", "console"),
         os.path.expanduser("~/.qwenpaw/console"),
         "/root/.qwenpaw/console",
-        # venv 中的 site-packages 路径
-        os.path.join(qwenpaw_root, "venv", "lib", "python3.12", "site-packages", "qwenpaw", "console"),
-        os.path.join(qwenpaw_root, "venv", "lib", "python3.11", "site-packages", "qwenpaw", "console"),
-        os.path.join(qwenpaw_root, "venv", "lib", "python3.10", "site-packages", "qwenpaw", "console"),
-        # 系统级安装路径
+        "/app/working/console",  # Docker默认路径
+    ]
+    
+    # 动态添加venv路径
+    env = detect_qwenpaw_env()
+    if env.venv_dir:
+        for python_dir in (env.venv_dir / "lib").glob("python3.*"):
+            candidates.append(str(python_dir / "site-packages" / "qwenpaw" / "console"))
+    
+    # 系统级安装路径
+    candidates.extend([
         "/usr/local/lib/python3.12/site-packages/qwenpaw/console",
         "/usr/local/lib/python3.11/site-packages/qwenpaw/console",
+        "/usr/local/lib/python3.10/site-packages/qwenpaw/console",
         "/usr/lib/python3.12/site-packages/qwenpaw/console",
         "/usr/lib/python3.11/site-packages/qwenpaw/console",
-    ]
+        "/usr/lib/python3.10/site-packages/qwenpaw/console",
+    ])
 
     for candidate in candidates:
         if os.path.isdir(candidate) and os.path.isfile(os.path.join(candidate, "index.html")):
@@ -1478,10 +1501,18 @@ async def humanthinking_uninstall(request: Request):
     import shutil
     from pathlib import Path
     import os
+    import sys
     
-    plugin_dir = Path("/root/.qwenpaw/plugins/HumanThinking")
-    config_file = Path("/root/.qwenpaw/config.json")
-    qwenpaw_dir = Path("/root/.qwenpaw")
+    # 导入环境检测模块
+    sys.path.insert(0, str(Path(__file__).parent))
+    from utils.env_detector import detect_qwenpaw_env
+    
+    # 自动检测环境
+    env = detect_qwenpaw_env()
+    qwenpaw_dir = env.working_dir or Path("/root/.qwenpaw")
+    plugin_dir = (env.plugins_dir or qwenpaw_dir / "plugins") / "HumanThinking"
+    config_file = qwenpaw_dir / "config.json"
+    qwenpaw_packages_dir = env.qwenpaw_package_dir
     
     try:
         # Export memories if not keeping data
@@ -1496,38 +1527,16 @@ async def humanthinking_uninstall(request: Request):
                 # Simple export logic
                 exported_files.append(str(backup_path))
         
-        # Remove plugin directory
-        if plugin_dir.exists():
-            shutil.rmtree(plugin_dir)
-        
-        # Remove from config
-        if config_file.exists():
-            import json
-            with open(config_file, 'r') as f:
-                config = json.load(f)
-            if 'plugins' in config and 'humanthinking' in config['plugins']:    
-                del config['plugins']['humanthinking']
-                with open(config_file, 'w') as f:
-                    json.dump(config, f, indent=2)
-        
-        # Restore QwenPaw files from backups
+        # Restore QwenPaw files from backups (before deleting plugin dir)
         restored_files = []
-        try:
-            # 自动检测 Python 版本路径
-            venv_lib_dir = qwenpaw_dir / "venv" / "lib"
-            qwenpaw_packages_dir = None
-            if venv_lib_dir.exists():
-                for item in venv_lib_dir.iterdir():
-                    if item.is_dir() and item.name.startswith("python3."):
-                        candidate = item / "site-packages" / "qwenpaw"
-                        if candidate.exists():
-                            qwenpaw_packages_dir = candidate
-                            break
-            
-            if qwenpaw_packages_dir is None:
-                qwenpaw_packages_dir = qwenpaw_dir / "venv" / "lib" / "python3.12" / "site-packages" / "qwenpaw"
-            
-            if qwenpaw_packages_dir.exists():
+        if qwenpaw_packages_dir and qwenpaw_packages_dir.exists():
+            try:
+                for root, dirs, files in os.walk(qwenpaw_packages_dir):
+                    for f in files:
+                        if f.endswith(".humanthinking.bak"):
+                            bak_path = os.path.join(root, f)
+                            original_path = bak_path.replace(".humanthinking.bak", "")
+                            if os.path.exists(original_path):
                 for root, dirs, files in os.walk(qwenpaw_packages_dir):
                     for f in files:
                         if f.endswith(".humanthinking.bak"):
@@ -1540,6 +1549,30 @@ async def humanthinking_uninstall(request: Request):
                                 restored_files.append(rel_path)
         except Exception as e:
             print(f"Warning: Failed to restore some files: {e}")
+        
+        # Remove plugin directory (after restoring files)
+        if plugin_dir.exists():
+            shutil.rmtree(plugin_dir)
+        
+        # Remove from config
+        if config_file.exists():
+            try:
+                import json
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                
+                # 支持多种配置结构
+                if 'plugins' in config:
+                    if isinstance(config['plugins'], dict) and 'humanthinking' in config['plugins']:
+                        del config['plugins']['humanthinking']
+                    elif isinstance(config['plugins'], list):
+                        config['plugins'] = [p for p in config['plugins'] 
+                                           if (isinstance(p, dict) and p.get('id') != 'humanthinking')]
+                
+                with open(config_file, 'w') as f:
+                    json.dump(config, f, indent=2)
+            except Exception as cfg_err:
+                print(f"Warning: Failed to update config: {cfg_err}")
         
         # Build response message
         message = "HumanThinking plugin uninstalled.\\n\\nData preserved.\\n\\nPlease refresh the page or restart QwenPaw."
@@ -1590,38 +1623,33 @@ async def humanthinking_uninstall(request: Request):
         
         # 清除 Python 缓存，确保新路由立即生效
         try:
-            import subprocess
-            # 自动检测 Python 版本路径
-            venv_lib_dir = os.path.join(qwenpaw_root, "venv", "lib")
-            qwenpaw_pkg_dir = None
-            if os.path.exists(venv_lib_dir):
-                for item in os.listdir(venv_lib_dir):
-                    item_path = os.path.join(venv_lib_dir, item)
-                    if os.path.isdir(item_path) and item.startswith("python3."):
-                        candidate = os.path.join(item_path, "site-packages", "qwenpaw")
-                        if os.path.exists(candidate):
-                            qwenpaw_pkg_dir = candidate
-                            break
+            from utils.env_detector import get_cache_dirs
             
-            if qwenpaw_pkg_dir is None:
-                qwenpaw_pkg_dir = os.path.join(qwenpaw_root, "venv", "lib", "python3.12", "site-packages", "qwenpaw")
+            env = detect_qwenpaw_env()
+            cache_dirs = get_cache_dirs(env)
             
-            if os.path.exists(qwenpaw_pkg_dir):
-                # 删除所有 .pyc 文件
-                for root, dirs, files in os.walk(qwenpaw_pkg_dir):
-                    for f in files:
-                        if f.endswith(".pyc"):
-                            os.remove(os.path.join(root, f))
-                # 删除所有 __pycache__ 目录
-                for root, dirs, files in os.walk(qwenpaw_pkg_dir):
-                    if "__pycache__" in dirs:
-                        pycache_dir = os.path.join(root, "__pycache__")
-                        import shutil
-                        shutil.rmtree(pycache_dir)
-                        dirs.remove("__pycache__")
-                logger.info("[PluginsRouter] ✓ Cleared Python cache for qwenpaw package")
+            for cache_dir in cache_dirs:
+                if os.path.exists(cache_dir):
+                    # 删除所有 .pyc 文件
+                    for root, dirs, files in os.walk(cache_dir):
+                        for f in files:
+                            if f.endswith(".pyc"):
+                                try:
+                                    os.remove(os.path.join(root, f))
+                                except:
+                                    pass
+                    # 删除所有 __pycache__ 目录
+                    for root, dirs, files in os.walk(cache_dir):
+                        if "__pycache__" in dirs:
+                            try:
+                                pycache_dir = os.path.join(root, "__pycache__")
+                                shutil.rmtree(pycache_dir)
+                                dirs.remove("__pycache__")
+                            except:
+                                pass
+                    logger.info(f"[PluginsRouter] ✓ Cleared Python cache: {cache_dir}")
         except Exception as cache_err:
-            logger.warning(f"[PluginsRouter] Failed to clear Python cache: {cache_err}")
+            logger.warning(f"[PluginsRouter] Failed to clear cache: {cache_err}")
         
         results["success"] = True
         results["patched"] = True

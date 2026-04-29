@@ -725,19 +725,27 @@ import json
 from pathlib import Path
 from datetime import datetime
 
+# 导入环境检测模块
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from utils.env_detector import detect_qwenpaw_env, get_cache_dirs
+
 @router.post("/uninstall")
 async def uninstall_plugin(request: Request):
     """
-    一键卸载 HumanThinking 插件
+    一键卸载 HumanThinking 插件 - 适配多环境（Docker/Windows/macOS/Linux）
     
     参数:
         keep_data: 是否保留数据（默认True）
         
     执行以下操作：
-    1. 导出记忆数据为 Markdown 文件（如果不保留数据）
-    2. 删除插件目录
-    3. 根据 keep_data 决定是否删除数据文件
-    4. 从 QwenPaw 配置中移除插件
+    1. 自动检测QwenPaw安装环境
+    2. 导出记忆数据为 Markdown 文件（如果不保留数据）
+    3. 恢复被修改的QwenPaw系统文件
+    4. 删除插件目录
+    5. 根据 keep_data 决定是否删除数据文件
+    6. 从 QwenPaw 配置中移除插件
+    7. 清除Python缓存
     """
     try:
         # 解析请求参数
@@ -746,9 +754,19 @@ async def uninstall_plugin(request: Request):
         
         logger.info(f"Starting HumanThinking plugin uninstallation... keep_data={keep_data}")
         
-        # 1. 获取插件目录
+        # 1. 自动检测QwenPaw安装环境
+        env = detect_qwenpaw_env()
+        
+        # 2. 获取插件目录
         plugin_dir = Path(__file__).parent.parent
-        qwenpaw_dir = plugin_dir.parent.parent
+        
+        # 使用检测到的环境信息
+        qwenpaw_dir = env.working_dir or plugin_dir.parent.parent
+        qwenpaw_packages_dir = env.qwenpaw_package_dir
+        
+        logger.info(f"Environment detected: {env.install_type}")
+        logger.info(f"Working dir: {qwenpaw_dir}")
+        logger.info(f"Package dir: {qwenpaw_packages_dir}")
         
         # 2. 获取所有工作区的记忆数据
         workspaces_dir = qwenpaw_dir / "workspaces"
@@ -788,44 +806,25 @@ async def uninstall_plugin(request: Request):
                         config_file.unlink()
                         logger.info(f"Deleted config: {config_file}")
         
-        # 3. 删除插件目录
-        if plugin_dir.exists():
-            shutil.rmtree(plugin_dir)
-            logger.info(f"Deleted plugin dir: {plugin_dir}")
-        
-        # 4. 从 QwenPaw 配置中移除插件
-        config_file = qwenpaw_dir / "config.json"
-        if config_file.exists():
-            with open(config_file, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-            
-            if 'plugins' in config and 'humanthinking' in config['plugins']:
-                del config['plugins']['humanthinking']
-                
-                with open(config_file, 'w', encoding='utf-8') as f:
-                    json.dump(config, f, indent=4, ensure_ascii=False)
-                logger.info("Removed plugin from QwenPaw config")
-        
-        # 5. 恢复被修改的 QwenPaw 文件
+        # 3. 恢复被修改的 QwenPaw 文件（在删除插件目录之前执行）
         restored_files = []
         
-        # 自动检测 Python 版本路径
-        venv_lib_dir = qwenpaw_dir / "venv" / "lib"
-        qwenpaw_packages_dir = None
-        if venv_lib_dir.exists():
-            for item in venv_lib_dir.iterdir():
-                if item.is_dir() and item.name.startswith("python3."):
-                    candidate = item / "site-packages" / "qwenpaw"
-                    if candidate.exists():
-                        qwenpaw_packages_dir = candidate
-                        break
+        # 先缓存原始文件内容（因为插件目录即将被删除）
+        original_files_cache = {}
+        original_files_dir = plugin_dir / "original_files"
+        if original_files_dir.exists():
+            for original_file in original_files_dir.iterdir():
+                if original_file.is_file():
+                    try:
+                        with open(original_file, 'r', encoding='utf-8') as f:
+                            original_files_cache[original_file.name] = f.read()
+                        logger.info(f"Cached original file: {original_file.name}")
+                    except Exception as e:
+                        logger.warning(f"Failed to cache {original_file.name}: {e}")
         
-        # 回退到默认路径
-        if qwenpaw_packages_dir is None:
-            qwenpaw_packages_dir = qwenpaw_dir / "venv" / "lib" / "python3.12" / "site-packages" / "qwenpaw"
-        
-        try:
-            if qwenpaw_packages_dir.exists():
+        # 使用检测到的qwenpaw包目录
+        if qwenpaw_packages_dir and qwenpaw_packages_dir.exists():
+            try:
                 # 方式1：从备份文件恢复（主要方式，最可靠）
                 for bak_file in qwenpaw_packages_dir.rglob("*.humanthinking.bak"):
                     original_str = str(bak_file).replace(".humanthinking.bak", "")
@@ -837,108 +836,82 @@ async def uninstall_plugin(request: Request):
                         restored_files.append(str(original_path.relative_to(qwenpaw_packages_dir)))
                         logger.info(f"Restored from backup: {original_path}")
                 
-                # 方式2：自带原始文件交叉比对（当备份不存在时使用）
-                # 插件包中自带 QwenPaw 原始文件，通过 diff 比对找出注入的代码并删除
-                original_files_dir = plugin_dir / "original_files"
-                
-                if original_files_dir.exists():
-                    for original_file in original_files_dir.iterdir():
-                        if original_file.is_file():
-                            # 确定目标文件路径
-                            if original_file.name == "plugins.py":
-                                target_file = qwenpaw_packages_dir / "app" / "routers" / "plugins.py"
-                            elif original_file.name == "workspace.py":
-                                target_file = qwenpaw_packages_dir / "app" / "workspace" / "workspace.py"
-                            elif original_file.name == "_app.py":
-                                target_file = qwenpaw_packages_dir / "app" / "_app.py"
-                            else:
-                                continue
-                            
-                            # 检查目标文件是否存在且没有备份
-                            target_bak = target_file.with_suffix(target_file.suffix + ".humanthinking.bak")
-                            if target_file.exists() and not target_bak.exists():
-                                try:
-                                    # 读取原始文件和当前文件
-                                    with open(original_file, 'r', encoding='utf-8') as f:
-                                        original_content = f.read()
-                                    with open(target_file, 'r', encoding='utf-8') as f:
-                                        current_content = f.read()
+                # 方式2：使用缓存的原始文件进行交叉比对
+                if original_files_cache:
+                    for filename, original_content in original_files_cache.items():
+                        # 确定目标文件路径
+                        if filename == "plugins.py":
+                            target_file = qwenpaw_packages_dir / "app" / "routers" / "plugins.py"
+                        elif filename == "workspace.py":
+                            target_file = qwenpaw_packages_dir / "app" / "workspace" / "workspace.py"
+                        elif filename == "_app.py":
+                            target_file = qwenpaw_packages_dir / "app" / "_app.py"
+                        else:
+                            continue
+                        
+                        # 检查目标文件是否存在且没有备份
+                        target_bak = target_file.with_suffix(target_file.suffix + ".humanthinking.bak")
+                        if target_file.exists() and not target_bak.exists():
+                            try:
+                                with open(target_file, 'r', encoding='utf-8') as f:
+                                    current_content = f.read()
+                                
+                                # 如果文件内容不同，说明被修改过
+                                if original_content != current_content:
+                                    # 使用 difflib 找出差异
+                                    import difflib
+                                    original_lines = original_content.splitlines(keepends=True)
+                                    current_lines = current_content.splitlines(keepends=True)
                                     
-                                    # 如果文件内容不同，说明被修改过
-                                    if original_content != current_content:
-                                        # 使用 difflib 找出差异
-                                        import difflib
-                                        original_lines = original_content.splitlines(keepends=True)
-                                        current_lines = current_content.splitlines(keepends=True)
-                                        
-                                        # 使用 unified_diff 找出注入的代码
-                                        diff = list(difflib.unified_diff(
-                                            original_lines, current_lines,
-                                            fromfile='original', tofile='current',
-                                            lineterm=''
-                                        ))
-                                        
-                                        # 解析 diff，找出注入的代码行
-                                        injected_lines = set()
-                                        i = 0
-                                        while i < len(diff):
-                                            line = diff[i]
-                                            if line.startswith('@@'):
-                                                # 解析 hunk 头
-                                                # 格式：@@ -start,count +start,count @@
-                                                parts = line.split()
-                                                old_range = parts[1]  # -start,count
-                                                new_range = parts[2]  # +start,count
-                                                
-                                                # 获取新增行的数量
-                                                new_count = int(new_range.split(',')[1]) if ',' in new_range else 1
-                                                
-                                                # 跳过 hunk 头
-                                                i += 1
-                                                old_line_num = 0
-                                                new_line_num = 0
-                                                
-                                                # 处理 hunk 中的行
-                                                hunk_start = i
-                                                while i < len(diff) and not diff[i].startswith('@@'):
-                                                    diff_line = diff[i]
-                                                    if diff_line.startswith('+'):
-                                                        # 新增行，标记为注入代码
-                                                        line_num_in_new = new_line_num
-                                                        injected_lines.add(line_num_in_new)
-                                                        new_line_num += 1
-                                                    elif diff_line.startswith('-'):
-                                                        old_line_num += 1
-                                                    elif diff_line.startswith(' '):
-                                                        old_line_num += 1
-                                                        new_line_num += 1
-                                                    i += 1
-                                                continue
+                                    # 使用 unified_diff 找出注入的代码
+                                    diff = list(difflib.unified_diff(
+                                        original_lines, current_lines,
+                                        fromfile='original', tofile='current',
+                                        lineterm=''
+                                    ))
+                                    
+                                    # 解析 diff，找出注入的代码行
+                                    injected_lines = set()
+                                    i = 0
+                                    while i < len(diff):
+                                        line = diff[i]
+                                        if line.startswith('@@'):
                                             i += 1
+                                            new_line_num = 0
+                                            while i < len(diff) and not diff[i].startswith('@@'):
+                                                diff_line = diff[i]
+                                                if diff_line.startswith('+'):
+                                                    injected_lines.add(new_line_num)
+                                                    new_line_num += 1
+                                                elif diff_line.startswith('-'):
+                                                    pass
+                                                elif diff_line.startswith(' '):
+                                                    new_line_num += 1
+                                                i += 1
+                                            continue
+                                        i += 1
+                                    
+                                    # 如果找到了注入的行，删除它们
+                                    if injected_lines:
+                                        new_lines = []
+                                        for idx, line in enumerate(current_lines):
+                                            if idx not in injected_lines:
+                                                new_lines.append(line)
                                         
-                                        # 如果找到了注入的行，删除它们
-                                        if injected_lines:
-                                            # 重新构建文件内容，跳过注入的行
-                                            new_lines = []
-                                            for idx, line in enumerate(current_lines):
-                                                if idx not in injected_lines:
-                                                    new_lines.append(line)
-                                            
-                                            new_content = ''.join(new_lines)
-                                            
-                                            # 写回文件
-                                            with open(target_file, 'w', encoding='utf-8') as f:
-                                                f.write(new_content)
-                                            
-                                            restored_files.append(f"{target_file.relative_to(qwenpaw_packages_dir)} (by diff comparison)")
-                                            logger.info(f"Removed injected code from {target_file} by diff comparison")
-                                        else:
-                                            # 没有找到注入的行，直接覆盖为原始文件
-                                            shutil.copy2(original_file, target_file)
-                                            restored_files.append(f"{target_file.relative_to(qwenpaw_packages_dir)} (replaced with original)")
-                                            logger.info(f"Replaced {target_file} with original file")
-                                except Exception as diff_err:
-                                    logger.warning(f"Failed to restore {target_file} by diff: {diff_err}")
+                                        new_content = ''.join(new_lines)
+                                        with open(target_file, 'w', encoding='utf-8') as f:
+                                            f.write(new_content)
+                                        
+                                        restored_files.append(f"{target_file.relative_to(qwenpaw_packages_dir)} (by diff comparison)")
+                                        logger.info(f"Removed injected code from {target_file}")
+                                    else:
+                                        # 没有找到注入的行，直接覆盖为原始文件
+                                        with open(target_file, 'w', encoding='utf-8') as f:
+                                            f.write(original_content)
+                                        restored_files.append(f"{target_file.relative_to(qwenpaw_packages_dir)} (replaced with original)")
+                                        logger.info(f"Replaced {target_file} with original file")
+                            except Exception as diff_err:
+                                logger.warning(f"Failed to restore {target_file} by diff: {diff_err}")
                 
                 # 方式3：删除注入的代码块（最后降级方式）
                 # 检查 plugins.py 是否还有 humanthinking 路由且没有备份
@@ -946,32 +919,25 @@ async def uninstall_plugin(request: Request):
                 plugins_bak = plugins_py.with_suffix(".py.humanthinking.bak")
                 
                 if plugins_py.exists() and not plugins_bak.exists():
-                    # 尝试通过删除注入代码块来还原
                     try:
                         with open(plugins_py, 'r', encoding='utf-8') as f:
                             content = f.read()
                         
-                        # 查找 HumanThinking 注入代码块的开始和结束标记
                         begin_marker = '# ── HumanThinking Plugin Routes [BEGIN'
                         end_marker = '# ── HumanThinking Plugin Routes [END'
                         
                         if begin_marker in content:
-                            # 找到开始标记的位置
                             begin_pos = content.find(begin_marker)
-                            # 从开始标记位置删除到文件末尾（或结束标记）
                             if end_marker in content:
                                 end_pos = content.find(end_marker) + len(end_marker)
-                                # 删除到结束标记后的换行符
                                 while end_pos < len(content) and content[end_pos] == '\n':
                                     end_pos += 1
                                 new_content = content[:begin_pos].rstrip('\n')
                                 if end_pos < len(content):
                                     new_content += content[end_pos:]
                             else:
-                                # 没有结束标记，删除从开始标记到文件末尾的所有内容
                                 new_content = content[:begin_pos].rstrip('\n')
                             
-                            # 写回文件
                             with open(plugins_py, 'w', encoding='utf-8') as f:
                                 f.write(new_content)
                             
@@ -985,7 +951,6 @@ async def uninstall_plugin(request: Request):
                 workspace_bak = workspace_py.with_suffix(".py.humanthinking.bak")
                 
                 if workspace_py.exists() and not workspace_bak.exists():
-                    # 尝试通过删除注入代码块来还原
                     try:
                         with open(workspace_py, 'r', encoding='utf-8') as f:
                             content = f.read()
@@ -1003,73 +968,108 @@ async def uninstall_plugin(request: Request):
                     except Exception as remove_err:
                         logger.warning(f"Failed to remove injected code from workspace.py: {remove_err}")
                 
-        except Exception as e:
-            logger.error(f"Failed to restore QwenPaw files: {e}")
+            except Exception as e:
+                logger.error(f"Failed to restore QwenPaw files: {e}")
+        
+        # 4. 删除插件目录
+        if plugin_dir.exists():
+            shutil.rmtree(plugin_dir)
+            logger.info(f"Deleted plugin dir: {plugin_dir}")
+        
+        # 5. 从 QwenPaw 配置中移除插件
+        config_file = qwenpaw_dir / "config.json"
+        if config_file.exists():
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                
+                # 支持多种配置结构
+                if 'plugins' in config:
+                    if isinstance(config['plugins'], dict) and 'humanthinking' in config['plugins']:
+                        del config['plugins']['humanthinking']
+                    elif isinstance(config['plugins'], list):
+                        config['plugins'] = [p for p in config['plugins'] 
+                                           if (isinstance(p, dict) and p.get('id') != 'humanthinking')]
+                
+                with open(config_file, 'w', encoding='utf-8') as f:
+                    json.dump(config, f, indent=4, ensure_ascii=False)
+                logger.info("Removed plugin from QwenPaw config")
+            except Exception as cfg_err:
+                logger.warning(f"Failed to update config: {cfg_err}")
         
         # 6. 清除 Python 缓存，确保还原后的文件立即生效
         # 使用外部脚本调用，确保即使插件目录被删除后也能执行
         try:
             import subprocess
-            # 使用之前检测到的 qwenpaw_packages_dir，如果不可用则重新检测
-            if qwenpaw_packages_dir is None or not qwenpaw_packages_dir.exists():
-                venv_lib_dir = qwenpaw_dir / "venv" / "lib"
-                if venv_lib_dir.exists():
-                    for item in venv_lib_dir.iterdir():
-                        if item.is_dir() and item.name.startswith("python3."):
-                            candidate = item / "site-packages" / "qwenpaw"
-                            if candidate.exists():
-                                qwenpaw_packages_dir = candidate
-                                break
-                if qwenpaw_packages_dir is None:
-                    qwenpaw_packages_dir = qwenpaw_dir / "venv" / "lib" / "python3.12" / "site-packages" / "qwenpaw"
             
-            if qwenpaw_packages_dir.exists():
-                # 方式A：直接清除（当前进程内）
-                for root, dirs, files in os.walk(qwenpaw_packages_dir):
-                    for f in files:
-                        if f.endswith(".pyc"):
-                            os.remove(os.path.join(root, f))
-                for root, dirs, files in os.walk(qwenpaw_packages_dir):
-                    if "__pycache__" in dirs:
-                        pycache_dir = os.path.join(root, "__pycache__")
-                        shutil.rmtree(pycache_dir)
-                        dirs.remove("__pycache__")
-                logger.info("Cleared Python cache for qwenpaw package after uninstall (in-process)")
-                
-                # 方式B：外部脚本调用（确保彻底清除，即使当前进程有缓存）
-                # 创建一个临时脚本来清除缓存
+            # 使用环境检测模块获取所有需要清除缓存的目录
+            cache_dirs = get_cache_dirs(env)
+            
+            # 方式A：直接清除（当前进程内）
+            for cache_dir in cache_dirs:
+                if cache_dir.exists():
+                    for root, dirs, files in os.walk(cache_dir):
+                        for f in files:
+                            if f.endswith(".pyc"):
+                                try:
+                                    os.remove(os.path.join(root, f))
+                                except:
+                                    pass
+                    for root, dirs, files in os.walk(cache_dir):
+                        if "__pycache__" in dirs:
+                            try:
+                                pycache_dir = os.path.join(root, "__pycache__")
+                                shutil.rmtree(pycache_dir)
+                                dirs.remove("__pycache__")
+                            except:
+                                pass
+                    logger.info(f"Cleared Python cache: {cache_dir}")
+            
+            # 方式B：外部脚本调用（确保彻底清除，即使当前进程有缓存）
+            # 根据环境确定Python解释器路径
+            python_exe = None
+            if env.python_executable and env.python_executable.exists():
+                python_exe = env.python_executable
+            elif env.venv_dir:
+                if env.is_windows:
+                    python_exe = env.venv_dir / "Scripts" / "python.exe"
+                else:
+                    python_exe = env.venv_dir / "bin" / "python"
+            
+            if python_exe and python_exe.exists():
+                # 创建临时脚本
                 cache_clear_script = qwenpaw_dir / "clear_cache_after_uninstall.py"
+                cache_dirs_str = ', '.join([f'"{d}"' for d in cache_dirs if d.exists()])
+                
                 script_content = f'''#!/usr/bin/env python3
 import os
 import shutil
 import sys
 
-qwenpaw_dir = "{qwenpaw_packages_dir}"
-if os.path.exists(qwenpaw_dir):
-    for root, dirs, files in os.walk(qwenpaw_dir):
-        for f in files:
-            if f.endswith(".pyc"):
+cache_dirs = [{cache_dirs_str}]
+for cache_dir in cache_dirs:
+    if os.path.exists(cache_dir):
+        for root, dirs, files in os.walk(cache_dir):
+            for f in files:
+                if f.endswith(".pyc"):
+                    try:
+                        os.remove(os.path.join(root, f))
+                    except:
+                        pass
+        for root, dirs, files in os.walk(cache_dir):
+            if "__pycache__" in dirs:
                 try:
-                    os.remove(os.path.join(root, f))
+                    shutil.rmtree(os.path.join(root, "__pycache__"))
                 except:
                     pass
-    for root, dirs, files in os.walk(qwenpaw_dir):
-        if "__pycache__" in dirs:
-            try:
-                shutil.rmtree(os.path.join(root, "__pycache__"))
-            except:
-                pass
 print("Cache cleared by external script")
 '''
                 with open(cache_clear_script, 'w') as f:
                     f.write(script_content)
                 
-                # 使用 subprocess 调用外部 Python 解释器执行
-                python_exe = qwenpaw_dir / "venv" / "bin" / "python"
-                if python_exe.exists():
-                    subprocess.run([str(python_exe), str(cache_clear_script)], 
-                                 capture_output=True, timeout=10)
-                    logger.info("Cleared Python cache via external script")
+                subprocess.run([str(python_exe), str(cache_clear_script)], 
+                             capture_output=True, timeout=10)
+                logger.info("Cleared Python cache via external script")
                 
                 # 删除临时脚本
                 try:
