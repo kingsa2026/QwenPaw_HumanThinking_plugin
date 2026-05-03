@@ -9,20 +9,20 @@
 
     const PLUGIN_ID = 'humanthinking';
 
-    // 注入原生风格CSS
+    // 注入原生风格CSS - 使用QwenPaw原生变量和类名
     const injectNativeStyles = () => {
         if (document.getElementById('humanthinking-native-styles')) return;
         const style = document.createElement('style');
         style.id = 'humanthinking-native-styles';
         style.textContent = `
-            /* HumanThinking 原生风格CSS - 参照QwenPaw Console */
+            /* HumanThinking 原生风格CSS - 与QwenPaw Console保持一致 */
             .ht-page-header {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
                 position: relative;
                 padding: 20px;
-                border-bottom: 1px solid #eae9e7;
+                border-bottom: 1px solid var(--color-border-secondary, #eae8e7);
                 flex-shrink: 0;
             }
             .dark-mode .ht-page-header {
@@ -31,7 +31,7 @@
             .ht-page-title {
                 font-size: 20px;
                 font-weight: 600;
-                color: #333;
+                color: var(--colorText, rgba(0, 0, 0, 0.88));
                 line-height: 1.4;
             }
             .dark-mode .ht-page-title {
@@ -39,7 +39,7 @@
             }
             .ht-page-subtitle {
                 font-size: 13px;
-                color: #999;
+                color: var(--colorTextSecondary, rgba(0, 0, 0, 0.45));
                 margin-top: 2px;
             }
             .dark-mode .ht-page-subtitle {
@@ -53,17 +53,18 @@
             .ht-form-actions {
                 display: flex;
                 gap: 8px;
-                border-top: 1px solid #eae9e7;
+                border-top: 1px solid var(--color-border-secondary, #eae8e7);
                 padding-top: 16px;
                 margin-top: 8px;
             }
             .dark-mode .ht-form-actions {
                 border-top-color: rgba(255, 255, 255, 0.12);
             }
+            /* 使用qwenpaw-card样式的卡片 */
             .ht-card {
-                background: #fff;
-                border-radius: 8px;
-                border: 1px solid #eae9e7;
+                background: var(--color-bg-base, #ffffff);
+                border-radius: var(--border-radius, 8px);
+                border: 1px solid var(--color-border-secondary, #eae8e7);
                 padding: 16px;
             }
             .dark-mode .ht-card {
@@ -71,22 +72,26 @@
                 border-color: rgba(255, 255, 255, 0.12);
             }
             .ht-stat-card {
-                background: #fff;
-                border-radius: 8px;
-                border: 1px solid #eae9e7;
+                background: var(--color-bg-base, #ffffff);
+                border-radius: var(--border-radius, 8px);
+                border: 1px solid var(--color-border-secondary, #eae8e7);
                 padding: 16px;
                 transition: all 0.3s;
             }
             .ht-stat-card:hover {
-                box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+                border-color: #ff7f16;
+                box-shadow: 0 12px 32px rgba(0,0,0,0.08);
             }
             .dark-mode .ht-stat-card {
                 background: rgba(255, 255, 255, 0.04);
                 border-color: rgba(255, 255, 255, 0.12);
             }
+            .dark-mode .ht-stat-card:hover {
+                border-color: #ff7f16;
+            }
             .ht-divider {
                 border: none;
-                border-top: 1px solid #eae9e7;
+                border-top: 1px solid var(--color-border-secondary, #eae8e7);
                 margin: 16px 0;
             }
             .dark-mode .ht-divider {
@@ -103,34 +108,87 @@
             .ht-status-light {
                 transition: all 0.5s ease;
             }
-            .ht-status-light.active {
-                animation: ht-pulse 2s infinite;
+            .ht-status-light img {
+                width: 100%;
+                height: 100%;
+                object-fit: contain;
             }
-            .ht-status-light.light {
-                animation: ht-breathe 3s infinite;
+            /* 统一列表项样式 - 使用原生变量 */
+            .ht-list-item {
+                background: var(--color-bg-base, #ffffff);
+                border-radius: var(--border-radius, 8px);
+                margin-bottom: 8px;
+                padding: 12px 16px;
+                border: 1px solid var(--color-border, #d9d9d9);
+                transition: all 0.3s;
             }
-            .ht-status-light.rem {
-                animation: ht-wave 2s infinite;
+            .ht-list-item:hover {
+                box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+                border-color: #ff7f16;
             }
-            .ht-status-light.deep {
-                animation: ht-flicker 4s infinite;
+            .dark-mode .ht-list-item {
+                background: rgba(255, 255, 255, 0.04);
+                border-color: rgba(255, 255, 255, 0.12);
             }
-            @keyframes ht-pulse {
-                0%, 100% { transform: scale(1); }
-                50% { transform: scale(1.05); }
+            /* 统一卡片标题样式 */
+            .ht-section-card .ant-card-head {
+                background: #fafafa;
+                border-bottom: 1px solid var(--color-border, #d9d9d9);
             }
-            @keyframes ht-breathe {
-                0%, 100% { transform: scale(1); opacity: 1; }
-                50% { transform: scale(0.95); opacity: 0.8; }
+            .dark-mode .ht-section-card .ant-card-head {
+                background: rgba(255, 255, 255, 0.04);
+                border-bottom-color: rgba(255, 255, 255, 0.12);
             }
-            @keyframes ht-wave {
-                0%, 100% { transform: translateY(0); }
-                25% { transform: translateY(-5px); }
-                75% { transform: translateY(5px); }
+            /* Tab 样式优化 - 与qwenpaw-tabs保持一致 */
+            .ht-tabs .ant-tabs-nav {
+                margin-bottom: 16px;
             }
-            @keyframes ht-flicker {
-                0%, 100% { opacity: 1; }
-                50% { opacity: 0.6; }
+            .ht-tabs .ant-tabs-tab {
+                padding: 10px 16px;
+                font-size: 13px;
+                font-weight: 500;
+            }
+            .ht-tabs .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+                color: #ff7f16 !important;
+                font-weight: 600;
+            }
+            .ht-tabs .ant-tabs-ink-bar {
+                background: #ff7f16 !important;
+                height: 3px;
+                border-radius: 2px;
+            }
+            /* 配置项标签样式 */
+            .ht-config-label {
+                font-weight: 500;
+                color: var(--colorText, rgba(0, 0, 0, 0.88));
+                font-size: 14px;
+            }
+            .dark-mode .ht-config-label {
+                color: rgba(255, 255, 255, 0.85);
+            }
+            .ht-config-desc {
+                font-size: 12px;
+                color: var(--colorTextSecondary, rgba(0, 0, 0, 0.45));
+                margin-top: 4px;
+            }
+            .dark-mode .ht-config-desc {
+                color: rgba(255, 255, 255, 0.45);
+            }
+            /* 滑块样式 */
+            .ht-slider .ant-slider-track {
+                background: #ff7f16;
+            }
+            .ht-slider .ant-slider-handle {
+                border-color: #ff7f16;
+            }
+            /* 按钮样式 - 与qwenpaw-btn保持一致 */
+            .ht-btn-primary {
+                background: #ff7f16;
+                border-color: #ff7f16;
+            }
+            .ht-btn-primary:hover {
+                background: #f07e26;
+                border-color: #f07e26;
             }
         `;
         document.head.appendChild(style);
@@ -143,6 +201,112 @@
     } else {
         injectNativeStyles();
     }
+
+    // ==================== 多语言支持（优化版） ====================
+    const getCurrentLanguage = () => {
+        // 从localStorage获取语言设置（与QwenPaw一致）
+        const lang = localStorage.getItem('language') || 'en';
+        // 支持 zh, en, ja, ru
+        if (lang.startsWith('zh')) return 'zh';
+        if (lang.startsWith('ja')) return 'ja';
+        if (lang.startsWith('ru')) return 'ru';
+        return 'en';
+    };
+
+    // 加载语言包
+    const loadTranslations = async () => {
+        const lang = getCurrentLanguage();
+        try {
+            const response = await fetch(`/api/plugins/humanthinking/files/locales/${lang}.json?v=${Date.now()}`);
+            if (response.ok) {
+                const data = await response.json();
+                console.log('[HumanThinking] Translations loaded:', lang);
+                return data;
+            }
+        } catch (e) {
+            console.warn('[HumanThinking] Failed to load translations:', e);
+        }
+        // 回退到默认语言
+        return {
+            plugin: { name: 'Human Thinking', description: 'Memory Management Plugin' },
+            nav: { memory: 'Memory', sleep: 'Sleep', stats: 'Stats', search: 'Search', emotion: 'Emotion', timeline: 'Timeline', config: 'Config', about: 'About' },
+            common: { save: 'Save', cancel: 'Cancel', confirm: 'Confirm', delete: 'Delete', edit: 'Edit', create: 'Create', refresh: 'Refresh', loading: 'Loading...', success: 'Success', error: 'Error', close: 'Close' }
+        };
+    };
+
+    // 翻译函数（支持插值 {key}）
+    let translations = null;
+    const t = (key, defaultValue = '', params = {}) => {
+        if (!translations) {
+            let result = defaultValue || key;
+            Object.keys(params).forEach(k => {
+                result = result.replace(new RegExp(`{${k}}`, 'g'), params[k]);
+            });
+            return result;
+        }
+        const keys = key.split('.');
+        let value = translations;
+        for (const k of keys) {
+            if (value && typeof value === 'object' && k in value) {
+                value = value[k];
+            } else {
+                let result = defaultValue || key;
+                Object.keys(params).forEach(pk => {
+                    result = result.replace(new RegExp(`{${pk}}`, 'g'), params[pk]);
+                });
+                return result;
+            }
+        }
+        let result = typeof value === 'string' ? value : (defaultValue || key);
+        Object.keys(params).forEach(k => {
+            result = result.replace(new RegExp(`{${k}}`, 'g'), params[k]);
+        });
+        return result;
+    };
+
+    // 全局语言状态管理
+    let currentLang = getCurrentLanguage();
+    const langListeners = new Set();
+
+    const subscribeLang = (callback) => {
+        langListeners.add(callback);
+        return () => langListeners.delete(callback);
+    };
+
+    const notifyLangChange = (newLang) => {
+        currentLang = newLang;
+        langListeners.forEach(cb => cb(newLang));
+    };
+
+    // 监听语言变化（跨标签页）
+    window.addEventListener('storage', (e) => {
+        if (e.key === 'language') {
+            const rawLang = e.newValue || 'en';
+            let newLang = 'en';
+            if (rawLang.startsWith('zh')) newLang = 'zh';
+            else if (rawLang.startsWith('ja')) newLang = 'ja';
+            else if (rawLang.startsWith('ru')) newLang = 'ru';
+            console.log('[HumanThinking] Language changed to:', newLang);
+            loadTranslations().then(data => {
+                translations = data;
+                notifyLangChange(newLang);
+                if (typeof resetHtInjectedMarkers === 'function') resetHtInjectedMarkers();
+            });
+        }
+    });
+
+    // 轮询检测语言变化（同一标签页内）
+    setInterval(() => {
+        const detectedLang = getCurrentLanguage();
+        if (detectedLang !== currentLang) {
+            console.log('[HumanThinking] Language detected change:', detectedLang);
+            loadTranslations().then(data => {
+                translations = data;
+                notifyLangChange(detectedLang);
+                if (typeof resetHtInjectedMarkers === 'function') resetHtInjectedMarkers();
+            });
+        }
+    }, 500);
 
     // 获取API基础URL
     const getApiBase = () => {
@@ -171,12 +335,34 @@
         return response.json();
     };
 
-    // 获取当前Agent信息（支持sessionStorage和localStorage）
+    // ==================== Agent 隔离支持（优化版） ====================
+    // 获取当前Agent信息（支持 qwenpaw-last-used-agent 和 storage 轮询）
     const getCurrentAgent = () => {
         try {
-            // 优先从sessionStorage读取
+            // 优先读取 qwenpaw-last-used-agent（QwenPaw 官方存储 key）
+            const qwLastUsed = localStorage.getItem('qwenpaw-last-used-agent');
+            if (qwLastUsed) {
+                // 尝试从 agent storage 获取名称
+                let agentStorage = sessionStorage.getItem('qwenpaw-agent-storage');
+                if (!agentStorage) {
+                    agentStorage = localStorage.getItem('qwenpaw-agent-storage');
+                }
+                let agentName = '';
+                if (agentStorage) {
+                    const data = JSON.parse(agentStorage);
+                    const agents = data.state?.agents;
+                    if (Array.isArray(agents)) {
+                        const found = agents.find(a => a.id === qwLastUsed || a.agent_id === qwLastUsed);
+                        agentName = found?.name || found?.agent_name || '';
+                    } else if (agents && typeof agents === 'object') {
+                        agentName = agents[qwLastUsed]?.name || agents[qwLastUsed]?.agent_name || '';
+                    }
+                }
+                return { agent_id: qwLastUsed, agent_name: agentName || '' };
+            }
+
+            // 兼容旧版读取方式
             let agentStorage = sessionStorage.getItem('qwenpaw-agent-storage');
-            // 如果sessionStorage没有，尝试从localStorage读取
             if (!agentStorage) {
                 agentStorage = localStorage.getItem('qwenpaw-agent-storage');
             }
@@ -184,8 +370,6 @@
                 const data = JSON.parse(agentStorage);
                 const agentId = data.state?.selectedAgent;
                 const agents = data.state?.agents;
-                
-                // 支持数组格式和对象格式
                 let agentName = '';
                 if (Array.isArray(agents)) {
                     const found = agents.find(a => a.id === agentId || a.agent_id === agentId);
@@ -193,17 +377,45 @@
                 } else if (agents && typeof agents === 'object') {
                     agentName = agents[agentId]?.name || agents[agentId]?.agent_name || '';
                 }
-                
-                return {
-                    agent_id: agentId,
-                    agent_name: agentName || ''
-                };
+                return { agent_id: agentId, agent_name: agentName || '' };
             }
         } catch (e) {
             console.error('[HumanThinking] 获取Agent信息失败:', e);
         }
-        return { agent_id: '', agent_name: '未选择Agent' };
+        return { agent_id: '', agent_name: t('agent.selectAgent', 'No Agent Selected') };
     };
+
+    // 全局 Agent 状态管理
+    let currentAgentId = getCurrentAgent().agent_id;
+    const agentListeners = new Set();
+
+    const subscribeAgent = (callback) => {
+        agentListeners.add(callback);
+        return () => agentListeners.delete(callback);
+    };
+
+    const notifyAgentChange = (newAgentId) => {
+        currentAgentId = newAgentId;
+        agentListeners.forEach(cb => cb(newAgentId));
+    };
+
+    // 监听 Agent 切换（跨标签页）
+    window.addEventListener('storage', (e) => {
+        if (e.key === 'qwenpaw-last-used-agent') {
+            const newAgentId = e.newValue || 'default';
+            console.log('[HumanThinking] Agent changed to:', newAgentId);
+            notifyAgentChange(newAgentId);
+        }
+    });
+
+    // 轮询检测 Agent 切换（同一标签页内）
+    setInterval(() => {
+        const detectedAgent = getCurrentAgent().agent_id || 'default';
+        if (detectedAgent !== currentAgentId) {
+            console.log('[HumanThinking] Agent detected change:', detectedAgent);
+            notifyAgentChange(detectedAgent);
+        }
+    }, 500);
 
     // 等待依赖
     const waitForDependencies = () => {
@@ -225,79 +437,64 @@
         const { useState, useEffect, useCallback } = React;
         const { Card, Tabs, Button, List, Statistic, Row, Col, Progress, message, Input, Space, Tag, Timeline, Switch, Slider, Form, Select, Popconfirm, Modal, Empty, Checkbox, Radio, Divider } = window.QwenPaw.host.antd;
 
-        // 智能体信息栏 - 使用原生CSS类
-        const AgentInfoBar = () => {
-            const [agent, setAgent] = useState({ agent_id: '', agent_name: '加载中...' });
+        // useTranslation Hook - 响应式翻译
+        const useTranslation = () => {
+            const [lang, setLang] = useState(() => currentLang);
+
+            useEffect(() => {
+                // 立即同步当前语言（处理组件挂载时语言已变化的情况）
+                setLang(currentLang);
+                return subscribeLang((newLang) => {
+                    setLang(newLang);
+                });
+            }, []);
+
+            // 强制重新渲染的辅助函数
+            const forceUpdate = () => {
+                setLang(getCurrentLanguage());
+            };
+
+            return { t, lang, forceUpdate };
+        };
+
+        // useAgent Hook - 响应式 Agent
+        const useAgent = () => {
+            const [agent, setAgent] = useState(getCurrentAgent());
 
             useEffect(() => {
                 const updateAgent = () => {
                     setAgent(getCurrentAgent());
                 };
                 updateAgent();
-                const interval = setInterval(updateAgent, 1000);
-                return () => clearInterval(interval);
+                return subscribeAgent((newAgentId) => {
+                    updateAgent();
+                });
             }, []);
+
+            return agent;
+        };
+
+        // 智能体信息栏 - 使用原生CSS类
+        const AgentInfoBar = () => {
+            const { t } = useTranslation();
+            const agent = useAgent();
 
             return React.createElement('div', { className: 'ht-agent-bar' },
                 React.createElement('span', { style: { fontSize: '14px' } }, '🤖'),
-                React.createElement('span', null, '当前智能体：'),
-                React.createElement('span', { style: { fontWeight: 600 } }, agent.agent_name || '未选择')
+                React.createElement('span', null, t('agent.current', 'Current Agent') + '：'),
+                React.createElement('span', { style: { fontWeight: 600 } }, agent.agent_name || t('agent.notSelected', 'Not Selected'))
             );
         };
 
         // 记忆管理侧边栏
         const MemoryManagementSidebar = () => {
+            const { t } = useTranslation();
+            const agent = useAgent();
             const [activeTab, setActiveTab] = useState('stats');
             const [stats, setStats] = useState(null);
             const [sessions, setSessions] = useState([]);
 
-            useEffect(() => {
-                const fetchData = async () => {
-                    try {
-                        const [statsRes, sessionsRes] = await Promise.all([
-                            apiRequest('/stats'),
-                            apiRequest('/sessions')
-                        ]);
-                        setStats(statsRes);
-                        setSessions(Array.isArray(sessionsRes) ? sessionsRes : []);
-                    } catch (e) {
-                        console.error('[HumanThinking] 获取数据失败:', e);
-                    }
-                };
-                fetchData();
-                const interval = setInterval(fetchData, 5000);
-                return () => clearInterval(interval);
-            }, []);
-
-            const renderStats = () => {
-                if (!stats) return React.createElement(Empty, { description: '加载中...' });
-                return React.createElement('div', { style: { padding: 16 } },
-                    React.createElement(Row, { gutter: [16, 16] },
-                        React.createElement(Col, { span: 12 },
-                            React.createElement(Card, { size: 'small' },
-                                React.createElement(Statistic, { title: '总记忆', value: stats.total_memories || 0, valueStyle: { color: '#1890ff' } })
-                            )
-                        ),
-                        React.createElement(Col, { span: 12 },
-                            React.createElement(Card, { size: 'small' },
-                                React.createElement(Statistic, { title: '跨会话', value: stats.cross_session_memories || 0, valueStyle: { color: '#52c41a' } })
-                            )
-                        ),
-                        React.createElement(Col, { span: 12 },
-                            React.createElement(Card, { size: 'small' },
-                                React.createElement(Statistic, { title: '冷藏', value: stats.frozen_memories || 0, valueStyle: { color: '#faad14' } })
-                            )
-                        ),
-                        React.createElement(Col, { span: 12 },
-                            React.createElement(Card, { size: 'small' },
-                                React.createElement(Statistic, { title: '活跃会话', value: stats.active_sessions || 0, valueStyle: { color: '#722ed1' } })
-                            )
-                        )
-                    )
-                );
-            };
-
-            // 记忆搜索
+            // 记忆搜索状态
             const [searchQuery, setSearchQuery] = useState('');
             const [searchResults, setSearchResults] = useState([]);
             const [searchLoading, setSearchLoading] = useState(false);
@@ -308,11 +505,102 @@
             const [editImportance, setEditImportance] = useState(3);
             const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
 
+            // 情感状态
+            const [emotion, setEmotion] = useState(null);
+
+            // 配置面板
+            const [config, setConfig] = useState(null);
+            const currentAgentIdRef = React.useRef('');
+
+            // 时间线
+            const [timelineData, setTimelineData] = useState([]);
+            const [timeFilter, setTimeFilter] = useState('all');
+
+            // Agent 切换时重置状态
+            useEffect(() => {
+                setStats(null);
+                setSessions([]);
+                setSearchResults([]);
+                setSelectedMemories([]);
+                setEmotion(null);
+                setConfig(null);
+                setTimelineData([]);
+            }, [agent.agent_id]);
+
+            useEffect(() => {
+                const fetchData = async () => {
+                    try {
+                        const queryParam = agent.agent_id ? '?agent_id=' + agent.agent_id : '';
+                        const [statsRes, sessionsRes] = await Promise.all([
+                            apiRequest('/stats' + queryParam),
+                            apiRequest('/sessions' + queryParam)
+                        ]);
+                        setStats(statsRes);
+                        setSessions(Array.isArray(sessionsRes) ? sessionsRes : []);
+                    } catch (e) {
+                        console.warn('[HumanThinking] API 暂不可用，使用离线模式:', e.message || e);
+                        setStats({
+                            total_memories: 0,
+                            cross_session_memories: 0,
+                            frozen_memories: 0,
+                            active_sessions: 0
+                        });
+                        setSessions([]);
+                    }
+                };
+                fetchData();
+                const interval = setInterval(fetchData, 5000);
+                return () => clearInterval(interval);
+            }, [agent.agent_id]);
+
+            const renderStats = () => {
+                if (!stats) return React.createElement(Empty, { description: t('common.loading', 'Loading...') });
+
+                const statItems = [
+                    { title: t('stats.totalMemories', 'Total Memories'), value: stats.total_memories || 0, color: '#1890ff', icon: '📊' },
+                    { title: t('stats.crossSession', 'Cross-Session'), value: stats.cross_session_memories || 0, color: '#52c41a', icon: '🔗' },
+                    { title: t('stats.frozen', 'Frozen'), value: stats.frozen_memories || 0, color: '#faad14', icon: '❄️' },
+                    { title: t('stats.activeSessions', 'Active Sessions'), value: stats.active_sessions || 0, color: '#722ed1', icon: '🔌' }
+                ];
+
+                return React.createElement('div', { style: { padding: 16 } },
+                    React.createElement(Row, { gutter: [12, 12] },
+                        statItems.map((item, index) =>
+                            React.createElement(Col, { span: 12, key: index },
+                                React.createElement('div', { className: 'ht-stat-card' },
+                                    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
+                                        React.createElement('div', {
+                                            style: {
+                                                width: 40,
+                                                height: 40,
+                                                borderRadius: 8,
+                                                background: item.color + '15',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                fontSize: 20
+                                            }
+                                        }, item.icon),
+                                        React.createElement(Statistic, {
+                                            title: item.title,
+                                            value: item.value,
+                                            valueStyle: { color: item.color, fontSize: 24, fontWeight: 'bold' },
+                                            style: { marginBottom: 0 }
+                                        })
+                                    )
+                                )
+                            )
+                        )
+                    )
+                );
+            };
+
             const handleSearch = async () => {
                 if (!searchQuery.trim()) return;
                 setSearchLoading(true);
                 try {
-                    const data = await apiRequest('/search', {
+                    const queryParam = agent.agent_id ? '?agent_id=' + agent.agent_id : '';
+                    const data = await apiRequest('/search' + queryParam, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ query: searchQuery, limit: 10 })
@@ -320,7 +608,7 @@
                     setSearchResults(data.memories || []);
                     setSelectedMemories([]);
                 } catch (e) {
-                    message.error('搜索失败');
+                    message.error(t('common.searchError', 'Search failed'));
                 } finally {
                     setSearchLoading(false);
                 }
@@ -348,17 +636,22 @@
 
             const handleConfirmDelete = async () => {
                 try {
-                    await apiRequest('/memories/batch', {
+                    const queryParam = agent.agent_id ? '?agent_id=' + agent.agent_id : '';
+                    const result = await apiRequest('/memories/batch' + queryParam, {
                         method: 'DELETE',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ memory_ids: selectedMemories })
                     });
-                    message.success('已删除 ' + selectedMemories.length + ' 条记忆');
-                    setSearchResults(prev => prev.filter(m => !selectedMemories.includes(m.id)));
-                    setSelectedMemories([]);
+                    if (result && result.success === false) {
+                        message.error(result.error || t('common.deleteError', 'Delete failed'));
+                    } else {
+                        message.success(t('common.deleteSuccess', 'Deleted {count} memories', { count: selectedMemories.length }));
+                        setSearchResults(prev => prev.filter(m => !selectedMemories.includes(m.id)));
+                        setSelectedMemories([]);
+                    }
                     setDeleteConfirmVisible(false);
                 } catch (e) {
-                    message.error('删除失败');
+                    message.error(t('common.deleteError', 'Delete failed'));
                 }
             };
 
@@ -371,7 +664,8 @@
 
             const handleSaveEdit = async () => {
                 try {
-                    await apiRequest('/memories/' + editingMemory.id, {
+                    const queryParam = agent.agent_id ? '?agent_id=' + agent.agent_id : '';
+                    const result = await apiRequest('/memories/' + editingMemory.id + queryParam, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -380,75 +674,119 @@
                             importance: editImportance
                         })
                     });
-                    message.success('保存成功');
-                    setSearchResults(prev => prev.map(m =>
-                        m.id === editingMemory.id
-                            ? { ...m, content: editContent, memory_type: editType, importance: editImportance }
-                            : m
-                    ));
-                    setEditingMemory(null);
+                    if (result && result.success === false) {
+                        message.error(result.error || t('common.saveError', 'Save failed'));
+                    } else {
+                        message.success(t('common.saveSuccess', 'Save successful'));
+                        setSearchResults(prev => prev.map(m =>
+                            m.id === editingMemory.id
+                                ? { ...m, content: editContent, memory_type: editType, importance: editImportance }
+                                : m
+                        ));
+                        setEditingMemory(null);
+                    }
                 } catch (e) {
-                    message.error('保存失败');
+                    message.error(t('common.saveError', 'Save failed'));
                 }
             };
 
             const renderSearch = () => {
                 return React.createElement('div', { style: { padding: 16 } },
-                    React.createElement(Input.Search, {
-                        placeholder: '输入关键词搜索记忆...',
-                        value: searchQuery,
-                        onChange: e => setSearchQuery(e.target.value),
-                        onSearch: handleSearch,
-                        loading: searchLoading,
-                        enterButton: '搜索',
-                        style: { marginBottom: 16 }
-                    }),
+                    React.createElement(Card, {
+                        size: 'small',
+                        style: { marginBottom: 16 },
+                        bodyStyle: { padding: '16px 20px' }
+                    },
+                        React.createElement(Input.Search, {
+                            placeholder: t('memory.searchPlaceholder', 'Search memories...'),
+                            value: searchQuery,
+                            onChange: e => setSearchQuery(e.target.value),
+                            onSearch: handleSearch,
+                            loading: searchLoading,
+                            enterButton: t('memory.search', 'Search'),
+                            size: 'large'
+                        })
+                    ),
                     searchResults.length > 0 && React.createElement('div', { style: { marginBottom: 16, padding: '8px 0' } },
                         React.createElement(Space, null,
                             React.createElement(Checkbox, {
                                 checked: selectedMemories.length === searchResults.length && searchResults.length > 0,
                                 indeterminate: selectedMemories.length > 0 && selectedMemories.length < searchResults.length,
                                 onChange: handleSelectAll
-                            }, '全选 (' + selectedMemories.length + '/' + searchResults.length + ')'),
-                            selectedMemories.length > 0 && React.createElement(Button, { danger: true, size: 'small', onClick: handleBatchDelete }, '批量删除(' + selectedMemories.length + ')')
+                            }, t('memory.selectAll', 'Select All') + ' (' + selectedMemories.length + '/' + searchResults.length + ')'),
+                            selectedMemories.length > 0 && React.createElement(Button, { danger: true, size: 'small', onClick: handleBatchDelete }, t('memory.batchDelete', 'Batch Delete') + '(' + selectedMemories.length + ')')
                         )
                     ),
                     searchResults.length > 0 && React.createElement(List, {
                         size: 'small',
                         dataSource: searchResults,
-                        renderItem: (item) => React.createElement(List.Item, {
-                            actions: [
-                                React.createElement(Button, { type: 'primary', size: 'small', onClick: () => handleEdit(item) }, '编辑')
-                            ]
-                        },
-                            React.createElement('div', { style: { width: '100%' } },
-                                React.createElement('div', { style: { display: 'flex', alignItems: 'flex-start', gap: 8 } },
-                                    React.createElement(Checkbox, {
-                                        checked: selectedMemories.includes(item.id),
-                                        onChange: () => handleSelectMemory(item.id)
-                                    }),
-                                    React.createElement('div', { style: { flex: 1 } },
-                                        React.createElement('div', { style: { marginBottom: 4 } }, item.content || '无内容'),
-                                        React.createElement('div', null,
-                                            React.createElement(Tag, { size: 'small', color: 'blue' }, item.memory_type || '记忆'),
-                                            React.createElement(Tag, { size: 'small' }, '重要性: ' + (item.importance || 3)),
-                                            React.createElement('span', { style: { fontSize: 12, color: '#999', marginLeft: 8 } },
-                                                item.timestamp ? new Date(item.timestamp).toLocaleString() : ''
+                        style: { background: 'transparent' },
+                        renderItem: (item) => {
+                            const typeColors = {
+                                fact: 'blue',
+                                emotion: 'magenta',
+                                preference: 'gold',
+                                order: 'cyan',
+                                address: 'geekblue',
+                                contact: 'purple',
+                                other: 'default'
+                            };
+                            return React.createElement(List.Item, {
+                                className: 'ht-list-item',
+                                actions: [
+                                    React.createElement(Button, {
+                                        type: 'text',
+                                        size: 'small',
+                                        icon: React.createElement('span', null, '✏️'),
+                                        onClick: () => handleEdit(item)
+                                    }, t('common.edit', 'Edit'))
+                                ]
+                            },
+                                React.createElement('div', { style: { width: '100%' } },
+                                    React.createElement('div', { style: { display: 'flex', alignItems: 'flex-start', gap: 12 } },
+                                        React.createElement(Checkbox, {
+                                            checked: selectedMemories.includes(item.id),
+                                            onChange: () => handleSelectMemory(item.id),
+                                            style: { marginTop: 4 }
+                                        }),
+                                        React.createElement('div', { style: { flex: 1, minWidth: 0 } },
+                                            React.createElement('div', {
+                                                style: {
+                                                    marginBottom: 8,
+                                                    fontSize: 14,
+                                                    lineHeight: 1.6,
+                                                    color: '#262626',
+                                                    wordBreak: 'break-word'
+                                                }
+                                            }, item.content || t('memory.noContent', 'No content')),
+                                            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+                                                React.createElement(Tag, {
+                                                    size: 'small',
+                                                    color: typeColors[item.memory_type] || 'default',
+                                                    style: { borderRadius: 4 }
+                                                }, item.memory_type || t('memory.memoryType', 'Memory')),
+                                                React.createElement(Tag, {
+                                                    size: 'small',
+                                                    style: { borderRadius: 4, background: '#f5f5f5', borderColor: '#d9d9d9', color: '#595959' }
+                                                }, '⭐ ' + (item.importance || 3)),
+                                                React.createElement('span', { style: { fontSize: 12, color: '#8c8c8c' } },
+                                                    item.timestamp ? new Date(item.timestamp).toLocaleString() : ''
+                                                )
                                             )
                                         )
                                     )
                                 )
-                            )
-                        )
+                            );
+                        }
                     }),
                     React.createElement(Modal, {
-                        title: '编辑记忆',
+                        title: t('memory.edit', 'Edit Memory'),
                         open: !!editingMemory,
                         onOk: handleSaveEdit,
                         onCancel: () => setEditingMemory(null)
                     },
                         React.createElement('div', { style: { marginBottom: 16 } },
-                            React.createElement('label', null, '记忆内容'),
+                            React.createElement('label', null, t('memory.content', 'Content')),
                             React.createElement(Input.TextArea, {
                                 value: editContent,
                                 onChange: e => setEditContent(e.target.value),
@@ -456,24 +794,24 @@
                             })
                         ),
                         React.createElement('div', { style: { marginBottom: 16 } },
-                            React.createElement('label', null, '记忆类型'),
+                            React.createElement('label', null, t('memory.memoryType', 'Memory Type')),
                             React.createElement(Select, {
                                 value: editType,
                                 onChange: value => setEditType(value),
                                 style: { width: '100%' },
                                 options: [
-                                    { value: 'fact', label: '📋 事实' },
-                                    { value: 'emotion', label: '💝 情感' },
-                                    { value: 'preference', label: '⭐ 偏好' },
-                                    { value: 'order', label: '🛒 订单' },
-                                    { value: 'address', label: '📍 地址' },
-                                    { value: 'contact', label: '📞 联系' },
-                                    { value: 'other', label: '📦 其他' }
+                                    { value: 'fact', label: t('memory.types.fact', '📋 Fact') },
+                                    { value: 'emotion', label: t('memory.types.emotion', '💝 Emotion') },
+                                    { value: 'preference', label: t('memory.types.preference', '⭐ Preference') },
+                                    { value: 'order', label: t('memory.types.order', '🛒 Order') },
+                                    { value: 'address', label: t('memory.types.address', '📍 Address') },
+                                    { value: 'contact', label: t('memory.types.contact', '📞 Contact') },
+                                    { value: 'other', label: t('memory.types.other', '📦 Other') }
                                 ]
                             })
                         ),
                         React.createElement('div', null,
-                            React.createElement('label', null, '重要性'),
+                            React.createElement('label', null, t('memory.importance', 'Importance')),
                             React.createElement(Radio.Group, {
                                 value: editImportance,
                                 onChange: e => setEditImportance(e.target.value)
@@ -483,18 +821,16 @@
                         )
                     ),
                     React.createElement(Modal, {
-                        title: '⚠️ 确认批量删除',
+                        title: '⚠️ ' + t('memory.batchDeleteConfirm', 'Confirm Batch Delete'),
                         open: deleteConfirmVisible,
                         onOk: handleConfirmDelete,
                         onCancel: () => setDeleteConfirmVisible(false),
-                        okText: '确认删除',
-                        cancelText: '取消',
+                        okText: t('common.confirm', 'Confirm'),
+                        cancelText: t('common.cancel', 'Cancel'),
                         okButtonProps: { danger: true }
                     },
                         React.createElement('div', { style: { marginBottom: 16 } },
-                            '确定要删除以下 ',
-                            selectedMemories.length,
-                            ' 条记忆吗？此操作不可恢复！'
+                            t('memory.deleteWarning', 'Are you sure you want to delete {count} memories? This action cannot be undone!', { count: selectedMemories.length })
                         ),
                         React.createElement('div', {
                             style: {
@@ -515,15 +851,12 @@
                                             fontSize: 13,
                                             color: '#666'
                                         }
-                                    }, '• ' + (m.content || '无内容').substring(0, 50) + ((m.content || '').length > 50 ? '...' : ''))
+                                    }, '• ' + (m.content || t('memory.noContent', 'No content')).substring(0, 50) + ((m.content || '').length > 50 ? '...' : ''))
                                 )
                         )
                     )
                 );
             };
-
-            // 情感状态
-            const [emotion, setEmotion] = useState(null);
 
             useEffect(() => {
                 const fetchEmotion = async () => {
@@ -541,17 +874,21 @@
 
             const renderEmotion = () => {
                 const emotionConfig = {
-                    happy: { icon: '😊', label: '开心', color: '#52c41a' },
-                    sad: { icon: '😢', label: '伤心', color: '#1890ff' },
-                    angry: { icon: '😠', label: '生气', color: '#ff4d4f' },
-                    neutral: { icon: '😐', label: '中性', color: '#999' },
-                    surprised: { icon: '😮', label: '惊讶', color: '#faad14' }
+                    happy: { icon: '😊', label: t('emotion.happy', 'Happy'), color: '#52c41a' },
+                    sad: { icon: '😢', label: t('emotion.sad', 'Sad'), color: '#1890ff' },
+                    angry: { icon: '😠', label: t('emotion.angry', 'Angry'), color: '#ff4d4f' },
+                    neutral: { icon: '😐', label: t('emotion.neutral', 'Neutral'), color: '#999' },
+                    surprised: { icon: '😮', label: t('emotion.surprised', 'Surprised'), color: '#faad14' }
                 };
                 const current = emotionConfig[emotion?.current_emotion] || emotionConfig.neutral;
                 const history = (emotion?.history || []).slice().reverse();
 
                 return React.createElement('div', { style: { padding: 16 } },
-                    React.createElement('div', { style: { textAlign: 'center', padding: '24px 0', borderBottom: '1px solid #eae9e7', marginBottom: 16 } },
+                    React.createElement(Card, {
+                        size: 'small',
+                        style: { marginBottom: 16, textAlign: 'center' },
+                        bodyStyle: { padding: '32px 24px' }
+                    },
                         React.createElement('div', {
                             style: {
                                 width: 120,
@@ -569,39 +906,58 @@
                             current.label
                         ),
                         React.createElement('div', { style: { fontSize: 14, color: '#666', marginTop: 8 } },
-                            '强度: ' + ((emotion?.intensity || 0) * 100).toFixed(0) + '%'
+                            t('emotion.intensity', 'Intensity') + ': ' + ((emotion?.intensity || 0) * 100).toFixed(0) + '%'
                         )
                     ),
-                    React.createElement('h4', { style: { marginBottom: 12 } }, '最近情感变化'),
-                    history.length === 0
-                        ? React.createElement(Empty, { description: '暂无情感历史' })
-                        : React.createElement(List, {
-                            size: 'small',
-                            dataSource: history,
-                            renderItem: (item) => {
-                                const cfg = emotionConfig[item.emotion] || emotionConfig.neutral;
-                                return React.createElement(List.Item, null,
-                                    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 12, width: '100%' } },
-                                        React.createElement('span', { style: { fontSize: 20 } }, cfg.icon),
-                                        React.createElement('div', { style: { flex: 1 } },
-                                            React.createElement('div', { style: { fontWeight: 'bold', color: cfg.color } }, cfg.label),
-                                            React.createElement('div', { style: { fontSize: 12, color: '#999' } },
-                                                item.timestamp ? new Date(item.timestamp).toLocaleString() : ''
+                    React.createElement(Card, {
+                        size: 'small',
+                        title: React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+                            React.createElement('span', null, '📈'),
+                            React.createElement('span', { style: { fontWeight: 600 } }, t('emotion.history', 'Recent Emotion Changes'))
+                        ),
+                        headStyle: { background: '#fafafa', borderBottom: '1px solid #f0f0f0' }
+                    },
+                        history.length === 0
+                            ? React.createElement(Empty, { description: t('emotion.noHistory', 'No emotion history') })
+                            : React.createElement(List, {
+                                size: 'small',
+                                dataSource: history,
+                                style: { background: 'transparent' },
+                                renderItem: (item) => {
+                                    const cfg = emotionConfig[item.emotion] || emotionConfig.neutral;
+                                    return React.createElement(List.Item, {
+                                        className: 'ht-list-item',
+                                        style: { padding: '10px 16px' }
+                                    },
+                                        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 12, width: '100%' } },
+                                            React.createElement('div', {
+                                                style: {
+                                                    width: 32,
+                                                    height: 32,
+                                                    borderRadius: 6,
+                                                    background: cfg.color + '15',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    fontSize: 16
+                                                }
+                                            }, cfg.icon),
+                                            React.createElement('div', { style: { flex: 1 } },
+                                                React.createElement('div', { style: { fontWeight: 'bold', color: cfg.color, fontSize: 14 } }, cfg.label),
+                                                React.createElement('div', { style: { fontSize: 12, color: '#8c8c8c' } },
+                                                    item.timestamp ? new Date(item.timestamp).toLocaleString() : ''
+                                                )
+                                            ),
+                                            React.createElement('div', { style: { color: cfg.color, fontWeight: 'bold', fontSize: 14 } },
+                                                ((item.intensity || 0) * 100).toFixed(0) + '%'
                                             )
-                                        ),
-                                        React.createElement('div', { style: { color: cfg.color, fontWeight: 'bold' } },
-                                            ((item.intensity || 0) * 100).toFixed(0) + '%'
                                         )
-                                    )
-                                );
-                            }
-                        })
+                                    );
+                                }
+                            })
+                    )
                 );
             };
-
-            // 配置面板
-            const [config, setConfig] = useState(null);
-            const currentAgentIdRef = React.useRef('');
 
             useEffect(() => {
                 const fetchConfig = async () => {
@@ -671,134 +1027,177 @@
                     const agent = getCurrentAgent();
                     // 只在有agent_id时传入，避免空字符串
                     const queryParam = agent.agent_id ? '?agent_id=' + agent.agent_id : '';
-                    await apiRequest('/config' + queryParam, {
+                    const result = await apiRequest('/config' + queryParam, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(config)
                     });
-                    message.success('配置已保存');
+                    if (result && result.success === false) {
+                        message.error(result.error || t('common.saveError', 'Save failed'));
+                    } else {
+                        message.success(t('common.saveSuccess', 'Save successful'));
+                    }
                 } catch (e) {
-                    message.error('保存失败');
+                    message.error(t('common.saveError', 'Save failed'));
                 }
             };
 
             const renderConfig = () => {
-                if (!config) return React.createElement(Empty, { description: '加载中...' });
+                if (!config) return React.createElement(Empty, { description: t('common.loading', 'Loading...') });
+
+                const ConfigSection = ({ title, icon, children }) => React.createElement(Card, {
+                    size: 'small',
+                    title: React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+                        React.createElement('span', null, icon),
+                        React.createElement('span', { style: { fontWeight: 600 } }, title)
+                    ),
+                    style: { marginBottom: 16 },
+                    headStyle: { background: '#fafafa', borderBottom: '1px solid #f0f0f0' }
+                }, children);
+
+                const ConfigItem = ({ label, description, children }) => React.createElement('div', { style: { marginBottom: 20 } },
+                    React.createElement('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 } },
+                        React.createElement('label', { className: 'ht-config-label' }, label),
+                        children && children.type === Switch && React.createElement('div', null, children)
+                    ),
+                    children && children.type !== Switch && React.createElement('div', { style: { marginBottom: 4 } }, children),
+                    description && React.createElement('div', { className: 'ht-config-desc' }, description)
+                );
 
                 return React.createElement('div', { style: { padding: 16 } },
-                    React.createElement('div', { style: { marginBottom: 16 } },
-                        React.createElement('label', { style: { display: 'block', marginBottom: 8 } }, '跨会话记忆'),
-                        React.createElement(Switch, {
-                            checked: config.enable_cross_session,
-                            onChange: checked => setConfig({ ...config, enable_cross_session: checked }),
-                            checkedChildren: '开启',
-                            unCheckedChildren: '关闭'
-                        })
-                    ),
-                    React.createElement('div', { style: { marginBottom: 16 } },
-                        React.createElement('label', { style: { display: 'block', marginBottom: 8 } }, '情感跟踪'),
-                        React.createElement(Switch, {
-                            checked: config.enable_emotion,
-                            onChange: checked => setConfig({ ...config, enable_emotion: checked }),
-                            checkedChildren: '开启',
-                            unCheckedChildren: '关闭'
-                        })
-                    ),
-                    // 分布式数据库开关 - 默认关闭，开启后无法关闭
-                    React.createElement('div', { style: { marginBottom: 16 } },
-                        React.createElement('label', { style: { display: 'block', marginBottom: 8 } }, '分布式数据库'),
-                        React.createElement(Switch, {
-                            checked: config.enable_distributed_db || false,
-                            disabled: config.enable_distributed_db || false,
-                            onChange: checked => {
-                                if (!config.enable_distributed_db) {
-                                    setConfig({ ...config, enable_distributed_db: checked });
-                                }
-                            },
-                            checkedChildren: '已启用',
-                            unCheckedChildren: '已禁用'
-                        }),
-                        React.createElement('div', { style: { fontSize: 12, color: '#999', marginTop: 4 } }, 
-                            config.enable_distributed_db ? '分布式数据库已启用，不可关闭' : '开启后将启用分布式数据库（开启后不可关闭）'
+                    React.createElement(ConfigSection, { title: t('config.basicFeatures', 'Basic Features'), icon: '⚙️' },
+                        React.createElement(ConfigItem, {
+                            label: t('config.crossSession', 'Cross-Session Memory'),
+                            description: t('config.crossSessionDesc', 'Enable memory sharing across sessions')
+                        },
+                            React.createElement(Switch, {
+                                checked: config.enable_cross_session,
+                                onChange: checked => setConfig({ ...config, enable_cross_session: checked }),
+                                checkedChildren: t('config.on', 'On'),
+                                unCheckedChildren: t('config.off', 'Off')
+                            })
+                        ),
+                        React.createElement(ConfigItem, {
+                            label: t('config.emotion', 'Emotion Tracking'),
+                            description: t('config.emotionDesc', 'Track and analyze emotional changes')
+                        },
+                            React.createElement(Switch, {
+                                checked: config.enable_emotion,
+                                onChange: checked => setConfig({ ...config, enable_emotion: checked }),
+                                checkedChildren: t('config.on', 'On'),
+                                unCheckedChildren: t('config.off', 'Off')
+                            })
+                        ),
+                        React.createElement(ConfigItem, {
+                            label: t('config.distributedDb', 'Distributed Database'),
+                            description: config.enable_distributed_db
+                                ? t('config.distributedDbEnabled', 'Distributed database is enabled and cannot be disabled')
+                                : t('config.distributedDbDisabled', 'Enable distributed database (cannot be disabled after enabling)')
+                        },
+                            React.createElement(Switch, {
+                                checked: config.enable_distributed_db || false,
+                                disabled: config.enable_distributed_db || false,
+                                onChange: checked => {
+                                    if (!config.enable_distributed_db) {
+                                        setConfig({ ...config, enable_distributed_db: checked });
+                                    }
+                                },
+                                checkedChildren: t('config.enabled', 'Enabled'),
+                                unCheckedChildren: t('config.disabled', 'Disabled')
+                            })
                         )
                     ),
-                    React.createElement(Divider, null),
-                    React.createElement('div', { style: { marginBottom: 16 } },
-                        React.createElement('label', { style: { display: 'block', marginBottom: 8 } }, '会话空闲超时（秒）'),
-                        React.createElement(Slider, {
-                            min: 60,
-                            max: 600,
-                            value: config.session_idle_timeout || 300,
-                            onChange: value => setConfig({ ...config, session_idle_timeout: value }),
-                            marks: { 60: '60s', 300: '300s', 600: '600s' }
-                        })
+
+                    React.createElement(ConfigSection, { title: t('config.sessionSettings', 'Session Settings'), icon: '⏱️' },
+                        React.createElement(ConfigItem, {
+                            label: t('config.sessionIdleTimeout', 'Session Idle Timeout'),
+                            description: t('config.sessionIdleTimeoutDesc', 'Time before session becomes idle')
+                        },
+                            React.createElement(Slider, {
+                                min: 60,
+                                max: 600,
+                                value: config.session_idle_timeout || 300,
+                                onChange: value => setConfig({ ...config, session_idle_timeout: value }),
+                                marks: { 60: '60' + t('common.secondUnit', 's'), 300: '300' + t('common.secondUnit', 's'), 600: '600' + t('common.secondUnit', 's') }
+                            })
+                        ),
+                        React.createElement(ConfigItem, {
+                            label: t('config.maxMemoryChars', 'Max Memory Characters'),
+                            description: t('config.maxMemoryCharsDesc', 'Maximum characters per memory entry')
+                        },
+                            React.createElement(Slider, {
+                                min: 100,
+                                max: 500,
+                                value: config.max_memory_chars || 300,
+                                onChange: value => setConfig({ ...config, max_memory_chars: value }),
+                                marks: { 100: '100', 300: '300', 500: '500' }
+                            })
+                        ),
+                        React.createElement(ConfigItem, {
+                            label: t('config.maxResults', 'Search Limit'),
+                            description: t('config.maxResultsDesc', 'Maximum search results to return')
+                        },
+                            React.createElement(Slider, {
+                                min: 5,
+                                max: 50,
+                                value: config.max_results || 10,
+                                onChange: value => setConfig({ ...config, max_results: value }),
+                                marks: { 5: '5', 25: '25', 50: '50' }
+                            })
+                        )
                     ),
-                    React.createElement('div', { style: { marginBottom: 16 } },
-                        React.createElement('label', { style: { display: 'block', marginBottom: 8 } }, '单条记忆最大字符数'),
-                        React.createElement(Slider, {
-                            min: 100,
-                            max: 500,
-                            value: config.max_memory_chars || 300,
-                            onChange: value => setConfig({ ...config, max_memory_chars: value }),
-                            marks: { 100: '100', 300: '300', 500: '500' }
-                        })
+
+                    React.createElement(ConfigSection, { title: t('config.lifecycleSettings', 'Lifecycle Settings'), icon: '📅' },
+                        React.createElement(ConfigItem, {
+                            label: t('config.frozenDays', 'Frozen Days'),
+                            description: t('config.frozenDaysDesc', 'Days before memories are frozen')
+                        },
+                            React.createElement(Slider, {
+                                min: 7,
+                                max: 90,
+                                value: config.frozen_days || 30,
+                                onChange: value => setConfig({ ...config, frozen_days: value }),
+                                marks: { 7: '7' + t('common.day', 'days'), 30: '30' + t('common.day', 'days'), 90: '90' + t('common.day', 'days') }
+                            })
+                        ),
+                        React.createElement(ConfigItem, {
+                            label: t('config.archiveDays', 'Archive Days'),
+                            description: t('config.archiveDaysDesc', 'Days before memories are archived')
+                        },
+                            React.createElement(Slider, {
+                                min: 30,
+                                max: 365,
+                                value: config.archive_days || 180,
+                                onChange: value => setConfig({ ...config, archive_days: value }),
+                                marks: { 30: '30' + t('common.day', 'days'), 180: '180' + t('common.day', 'days'), 365: '365' + t('common.day', 'days') }
+                            })
+                        ),
+                        React.createElement(ConfigItem, {
+                            label: t('config.deleteDays', 'Delete Days'),
+                            description: t('config.deleteDaysDesc', 'Days before memories are deleted')
+                        },
+                            React.createElement(Slider, {
+                                min: 90,
+                                max: 730,
+                                value: config.delete_days || 365,
+                                onChange: value => setConfig({ ...config, delete_days: value }),
+                                marks: { 90: '90' + t('common.day', 'days'), 365: '1' + t('common.year', 'year'), 730: '2' + t('common.year', 'year') }
+                            })
+                        )
                     ),
-                    React.createElement('div', { style: { marginBottom: 16 } },
-                        React.createElement('label', { style: { display: 'block', marginBottom: 8 } }, '搜索限制（条）'),
-                        React.createElement(Slider, {
-                            min: 5,
-                            max: 50,
-                            value: config.max_results || 10,
-                            onChange: value => setConfig({ ...config, max_results: value }),
-                            marks: { 5: '5', 25: '25', 50: '50' }
-                        })
-                    ),
-                    React.createElement(Divider, null),
-                    React.createElement('div', { style: { marginBottom: 16 } },
-                        React.createElement('label', { style: { display: 'block', marginBottom: 8 } }, '冷藏天数'),
-                        React.createElement(Slider, {
-                            min: 7,
-                            max: 90,
-                            value: config.frozen_days || 30,
-                            onChange: value => setConfig({ ...config, frozen_days: value }),
-                            marks: { 7: '7天', 30: '30天', 90: '90天' }
-                        })
-                    ),
-                    React.createElement('div', { style: { marginBottom: 16 } },
-                        React.createElement('label', { style: { display: 'block', marginBottom: 8 } }, '归档天数'),
-                        React.createElement(Slider, {
-                            min: 30,
-                            max: 365,
-                            value: config.archive_days || 180,
-                            onChange: value => setConfig({ ...config, archive_days: value }),
-                            marks: { 30: '30天', 180: '180天', 365: '365天' }
-                        })
-                    ),
-                    React.createElement('div', { style: { marginBottom: 16 } },
-                        React.createElement('label', { style: { display: 'block', marginBottom: 8 } }, '删除天数'),
-                        React.createElement(Slider, {
-                            min: 90,
-                            max: 730,
-                            value: config.delete_days || 365,
-                            onChange: value => setConfig({ ...config, delete_days: value }),
-                            marks: { 90: '90天', 365: '1年', 730: '2年' }
-                        })
-                    ),
+
                     // 保存按钮区域 - 使用原生CSS类
                     React.createElement('div', { className: 'ht-form-actions' },
-                        React.createElement(Button, { type: 'primary', size: 'large', onClick: handleSaveConfig }, '保存配置')
+                        React.createElement(Button, { type: 'primary', size: 'large', onClick: handleSaveConfig }, t('config.save', 'Save Config'))
                     )
                 );
             };
 
-            // 时间线
-            const [timelineData, setTimelineData] = useState([]);
-            const [timeFilter, setTimeFilter] = useState('all');
-
             useEffect(() => {
                 const fetchTimeline = async () => {
                     try {
-                        const data = await apiRequest('/memories/timeline');
+                        const queryParam = agent.agent_id ? '?agent_id=' + agent.agent_id : '';
+                        const data = await apiRequest('/memories/timeline' + queryParam);
                         setTimelineData(Array.isArray(data) ? data : []);
                     } catch (e) {
                         console.error('[HumanThinking] 获取时间线失败:', e);
@@ -829,14 +1228,18 @@
             const renderTimeline = () => {
                 const filtered = getFilteredTimeline();
                 const filterButtons = [
-                    { key: 'all', label: '全部' },
-                    { key: 'today', label: '今天' },
-                    { key: 'week', label: '本周' },
-                    { key: 'month', label: '本月' }
+                    { key: 'all', label: t('timeline.all', 'All') },
+                    { key: 'today', label: t('timeline.today', 'Today') },
+                    { key: 'week', label: t('timeline.week', 'This Week') },
+                    { key: 'month', label: t('timeline.month', 'This Month') }
                 ];
 
                 return React.createElement('div', { style: { padding: 16 } },
-                    React.createElement('div', { style: { marginBottom: 16 } },
+                    React.createElement(Card, {
+                        size: 'small',
+                        style: { marginBottom: 16 },
+                        bodyStyle: { padding: '12px 20px' }
+                    },
                         React.createElement(Space, null,
                             filterButtons.map(btn =>
                                 React.createElement(Button, {
@@ -849,23 +1252,29 @@
                         )
                     ),
                     filtered.length === 0
-                        ? React.createElement(Empty, { description: '该时间段暂无记忆事件' })
+                        ? React.createElement(Empty, { description: t('timeline.noEvents', 'No memory events in this period') })
                         : React.createElement(Timeline, null,
                             filtered.map((item, index) =>
                                 React.createElement(Timeline.Item, {
                                     key: index,
                                     color: item.count > 5 ? 'red' : item.count > 2 ? 'blue' : 'green'
                                 },
-                                    React.createElement('div', { style: { fontWeight: 'bold', marginBottom: 4 } },
-                                        item.date,
-                                        React.createElement(Tag, { color: 'blue', style: { marginLeft: 8 } }, item.count + ' 条')
-                                    ),
-                                    React.createElement('div', null,
-                                        (item.events || []).map((evt, i) =>
-                                            React.createElement('div', {
-                                                key: i,
-                                                style: { fontSize: 13, color: '#666', marginBottom: 2 }
-                                            }, '• ' + evt)
+                                    React.createElement(Card, {
+                                        size: 'small',
+                                        style: { marginBottom: 8 },
+                                        bodyStyle: { padding: '12px 16px' }
+                                    },
+                                        React.createElement('div', { style: { fontWeight: 'bold', marginBottom: 8, fontSize: 14 } },
+                                            item.date,
+                                            React.createElement(Tag, { color: 'blue', size: 'small', style: { marginLeft: 8 } }, item.count + ' ' + t('timeline.count', 'items'))
+                                        ),
+                                        React.createElement('div', null,
+                                            (item.events || []).map((evt, i) =>
+                                                React.createElement('div', {
+                                                    key: i,
+                                                    style: { fontSize: 13, color: '#595959', marginBottom: 4, lineHeight: 1.5 }
+                                                }, '• ' + evt)
+                                            )
                                         )
                                     )
                                 )
@@ -903,37 +1312,37 @@
                     const modalHtml = `
                         <div id="${modalId}" style="position:fixed;top:0;left:0;right:0;bottom:0;background:${themeStyles.modalOverlay};display:flex;align-items:center;justify-content:center;z-index:1000;" onclick="if(event.target===this)document.getElementById('${modalId}').remove()">
                             <div style="background:${themeStyles.modalBg};border-radius:8px;padding:24px;max-width:500px;width:90%;box-shadow:0 4px 12px rgba(0,0,0,0.15);border:1px solid ${themeStyles.cardBorder};color:${themeStyles.textColor};">
-                                <h3 style="margin-bottom:16px;color:${themeStyles.dangerText};">⚠️ 确认卸载</h3>
-                                <div style="margin-bottom:16px;">您确定要卸载 HumanThinking 插件吗？此操作不可恢复。</div>
+                                <h3 style="margin-bottom:16px;color:${themeStyles.dangerText};">${t('about.uninstall.warning', '⚠️ Confirm Uninstall')}</h3>
+                                <div style="margin-bottom:16px;">${t('about.uninstall.confirmMessage', 'Are you sure you want to uninstall the HumanThinking plugin? This action cannot be undone.')}</div>
                                 
                                 <div style="margin-bottom:16px;padding:12px;background:${themeStyles.cardBg};border-radius:4px;border:1px solid ${themeStyles.cardBorder};">
                                     <label style="display:flex;align-items:center;cursor:pointer;">
                                         <input type="checkbox" id="${keepDataId}" checked style="margin-right:8px;">
-                                        <span>保留数据（配置文件和数据库文件）</span>
+                                        <span>${t('about.uninstall.keepData', 'Keep data (config and database files)')}</span>
                                     </label>
-                                    <div style="margin-top:8px;font-size:12px;color:${themeStyles.textSecondary};">卸载后将保留记忆数据，可手动恢复</div>
+                                    <div style="margin-top:8px;font-size:12px;color:${themeStyles.textSecondary};">${t('about.uninstall.keepDataDesc', 'Memory data will be retained after uninstallation, can be manually restored')}</div>
                                 </div>
 
                                 <div style="margin-bottom:16px;font-size:13px;color:${themeStyles.textSecondary};">
-                                    <div style="font-weight:bold;margin-bottom:8px;color:${themeStyles.textColor};">📦 保留数据选项</div>
+                                    <div style="font-weight:bold;margin-bottom:8px;color:${themeStyles.textColor};">📦 ${t('about.uninstall.keepDataOptions', 'Data Retention Options')}</div>
                                     <ul style="margin:4px 0;padding-left:20px;">
-                                        <li>默认勾选"保留数据（配置文件和数据库文件）"</li>
-                                        <li>勾选时：卸载插件但保留所有记忆数据</li>
-                                        <li>不勾选时：导出记忆后删除所有数据</li>
+                                        <li>${t('about.uninstall.keepDataOption1', 'Default checked "Keep data (config and database files)"')}</li>
+                                        <li>${t('about.uninstall.keepDataOption2', 'When checked: Uninstall plugin but keep all memory data')}</li>
+                                        <li>${t('about.uninstall.keepDataOption3', 'When unchecked: Export memories then delete all data')}</li>
                                     </ul>
                                 </div>
 
                                 <div style="margin-bottom:16px;font-size:13px;color:${themeStyles.textSecondary};">
-                                    <div style="font-weight:bold;margin-bottom:8px;color:${themeStyles.textColor};">⚡ 卸载将执行：</div>
+                                    <div style="font-weight:bold;margin-bottom:8px;color:${themeStyles.textColor};">⚡ ${t('about.uninstall.uninstallActions', 'Uninstall will perform')}</div>
                                     <ul style="margin:4px 0;padding-left:20px;">
-                                        <li>删除插件目录</li>
-                                        <li>从 QwenPaw 配置中移除插件</li>
+                                        <li>${t('about.uninstall.action1', 'Delete plugin directory')}</li>
+                                        <li>${t('about.uninstall.action2', 'Remove plugin from QwenPaw config')}</li>
                                     </ul>
                                 </div>
 
                                 <div style="display:flex;gap:12px;justify-content:flex-end;">
-                                    <button onclick="document.getElementById('${modalId}').remove()" style="padding:8px 16px;background:transparent;color:${themeStyles.textColor};border:1px solid ${themeStyles.cardBorder};border-radius:4px;cursor:pointer;">取消</button>
-                                    <button id="${modalId}-confirm" style="padding:8px 16px;background:${themeStyles.btnDanger};color:white;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">确认卸载</button>
+                                    <button onclick="document.getElementById('${modalId}').remove()" style="padding:8px 16px;background:transparent;color:${themeStyles.textColor};border:1px solid ${themeStyles.cardBorder};border-radius:4px;cursor:pointer;">${t('common.cancel', 'Cancel')}</button>
+                                    <button id="${modalId}-confirm" style="padding:8px 16px;background:${themeStyles.btnDanger};color:white;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">${t('about.uninstall.confirm', 'Confirm Uninstall')}</button>
                                 </div>
                             </div>
                         </div>
@@ -947,7 +1356,7 @@
                     document.getElementById(modalId + '-confirm').onclick = async () => {
                         const keepData = document.getElementById(keepDataId).checked;
                         const btn = document.getElementById(modalId + '-confirm');
-                        btn.textContent = '卸载中...';
+                        btn.textContent = t('about.uninstall.uninstalling', 'Uninstalling...');
                         btn.disabled = true;
                         
                         try {
@@ -969,14 +1378,14 @@
                             document.getElementById(modalId).remove();
                             
                             if (result.success) {
-                                alert('✅ 卸载完成！\n\n' + result.message + '\n\n⚠️ 重要提示：\n卸载完成后，请重启两次 QwenPaw 以确保完全清理。');
+                                alert(t('about.uninstall.success', '✅ Uninstall Complete!\n\n{message}\n\n⚠️ Important:\nPlease restart QwenPaw twice to ensure complete cleanup.', { message: result.message }));
                             } else {
-                                alert('❌ 卸载失败：' + (result.message || '未知错误'));
+                                alert(t('about.uninstall.error', '❌ Uninstall Failed: {message}', { message: result.message || t('about.uninstall.unknownError', 'Unknown error') }));
                             }
                         } catch (e) {
                             console.error('[HumanThinking] 卸载请求异常:', e);
                             document.getElementById(modalId).remove();
-                            alert('❌ 卸载失败：' + e.message);
+                            alert(t('about.uninstall.error', '❌ Uninstall Failed: {message}', { message: e.message }));
                         }
                     };
                 };
@@ -984,28 +1393,28 @@
                 return React.createElement('div', { style: { padding: 16, color: themeStyles.textColor } },
                     // 版本信息
                     React.createElement('div', { style: { marginBottom: 24 } },
-                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: `2px solid ${themeStyles.linkColor}`, paddingBottom: 8, color: themeStyles.textColor } }, '📋 版本信息'),
-                        React.createElement('div', { 
-                            style: { background: themeStyles.cardBg, padding: 16, borderRadius: 8, border: `1px solid ${themeStyles.cardBorder}` } 
+                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: `2px solid ${themeStyles.linkColor}`, paddingBottom: 8, color: themeStyles.textColor } }, '📋 ' + t('about.versionInfo', 'Version Info')),
+                        React.createElement('div', {
+                            style: { background: themeStyles.cardBg, padding: 16, borderRadius: 8, border: `1px solid ${themeStyles.cardBorder}` }
                         },
                             React.createElement('div', { style: { marginBottom: 8 } },
-                                React.createElement('strong', null, '插件版本：'), 'v1.1.5-beta.1'
+                                React.createElement('strong', null, t('about.version', 'Version') + '：'), 'v1.1.5.post1'
                             ),
                             React.createElement('div', { style: { marginBottom: 8 } },
-                                React.createElement('strong', null, '插件名称：'), 'Human Thinking Memory Manager'
+                                React.createElement('strong', null, t('about.pluginName', 'Plugin Name') + '：'), 'Human Thinking Memory Manager'
                             ),
                             React.createElement('div', { style: { marginBottom: 8 } },
-                                React.createElement('strong', null, '作者：'), 'HumanThinking Team'
+                                React.createElement('strong', null, t('about.author', 'Author') + '：'), 'HumanThinking Team'
                             ),
                             React.createElement('div', { style: { marginBottom: 8 } },
-                                React.createElement('strong', null, '许可证：'), 'MIT'
+                                React.createElement('strong', null, t('about.license', 'License') + '：'), 'MIT'
                             ),
                             React.createElement('div', { style: { marginBottom: 8 } },
-                                React.createElement('strong', null, '最低 QwenPaw 版本：'), 'v1.1.5b1'
+                                React.createElement('strong', null, t('about.minQwenPawVersion', 'Minimum QwenPaw Version') + '：'), 'v1.1.5b1'
                             ),
                             React.createElement('div', null,
-                                React.createElement('strong', null, 'GitHub：'),
-                                React.createElement('a', { 
+                                React.createElement('strong', null, t('about.github', 'GitHub') + '：'),
+                                React.createElement('a', {
                                     href: 'https://github.com/kingsa2026/QwenPaw_HumanThinking_plugin',
                                     target: '_blank',
                                     style: { color: themeStyles.linkColor }
@@ -1016,33 +1425,33 @@
 
                     // 功能说明
                     React.createElement('div', { style: { marginBottom: 24 } },
-                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: '2px solid #52c41a', paddingBottom: 8, color: themeStyles.textColor } }, '✨ 功能说明'),
-                        React.createElement('div', { 
-                            style: { background: themeStyles.featureBg, padding: 16, borderRadius: 8, border: `1px solid ${themeStyles.featureBorder}` } 
+                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: '2px solid #52c41a', paddingBottom: 8, color: themeStyles.textColor } }, '✨ ' + t('about.features.title', 'Features')),
+                        React.createElement('div', {
+                            style: { background: themeStyles.featureBg, padding: 16, borderRadius: 8, border: `1px solid ${themeStyles.featureBorder}` }
                         },
                             React.createElement('div', { style: { marginBottom: 12 } },
-                                React.createElement('h4', { style: { color: themeStyles.textColor } }, '🧠 记忆管理'),
+                                React.createElement('h4', { style: { color: themeStyles.textColor } }, t('about.features.memory', '🧠 Memory Management')),
                                 React.createElement('ul', null,
-                                    React.createElement('li', null, '跨会话记忆保持 - 在不同会话间保持记忆连续性'),
-                                    React.createElement('li', null, '记忆搜索 - 支持关键词和语义搜索'),
-                                    React.createElement('li', null, '记忆生命周期 - 自动冷藏、归档和清理'),
-                                    React.createElement('li', null, '情感状态跟踪 - 记录和分析情感变化')
+                                    React.createElement('li', null, t('about.features.memoryDesc.0', 'Cross-session memory persistence')),
+                                    React.createElement('li', null, t('about.features.memoryDesc.1', 'Memory search - Support keyword and semantic search')),
+                                    React.createElement('li', null, t('about.features.memoryDesc.2', 'Memory lifecycle - Automatic freezing, archiving and cleanup')),
+                                    React.createElement('li', null, t('about.features.memoryDesc.3', 'Emotion state tracking - Record and analyze emotional changes'))
                                 )
                             ),
                             React.createElement('div', { style: { marginBottom: 12 } },
-                                React.createElement('h4', { style: { color: themeStyles.textColor } }, '🌙 睡眠管理'),
+                                React.createElement('h4', { style: { color: themeStyles.textColor } }, t('about.features.sleep', '🌙 Sleep Management')),
                                 React.createElement('ul', null,
-                                    React.createElement('li', null, '智能睡眠调度 - 根据活跃度自动进入睡眠'),
-                                    React.createElement('li', null, '梦境生成 - 在睡眠期间整理和巩固记忆'),
-                                    React.createElement('li', null, '睡眠报告 - 生成睡眠质量和记忆整理报告')
+                                    React.createElement('li', null, t('about.features.sleepDesc.0', 'Smart sleep scheduling')),
+                                    React.createElement('li', null, t('about.features.sleepDesc.1', 'Dream generation - Organize and consolidate memories during sleep')),
+                                    React.createElement('li', null, t('about.features.sleepDesc.2', 'Sleep reports - Generate sleep quality and memory consolidation reports'))
                                 )
                             ),
                             React.createElement('div', null,
-                                React.createElement('h4', { style: { color: themeStyles.textColor } }, '⚙️ 配置管理'),
+                                React.createElement('h4', { style: { color: themeStyles.textColor } }, t('about.features.config', '⚙️ Configuration')),
                                 React.createElement('ul', null,
-                                    React.createElement('li', null, '支持按 Agent 隔离配置'),
-                                    React.createElement('li', null, '分布式数据库支持'),
-                                    React.createElement('li', null, '可自定义记忆保留策略')
+                                    React.createElement('li', null, t('about.features.configDesc.0', 'Support Agent-isolated configuration')),
+                                    React.createElement('li', null, t('about.features.configDesc.1', 'Distributed database support')),
+                                    React.createElement('li', null, t('about.features.configDesc.2', 'Customizable memory retention policies'))
                                 )
                             )
                         )
@@ -1050,12 +1459,12 @@
 
                     // 一键卸载
                     React.createElement('div', { style: { marginBottom: 24 } },
-                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: '2px solid #ff4d4f', paddingBottom: 8, color: themeStyles.textColor } }, '⚠️ 危险区域'),
-                        React.createElement('div', { 
-                            style: { background: themeStyles.dangerBg, padding: 16, borderRadius: 8, border: `1px solid ${themeStyles.dangerBorder}` } 
+                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: '2px solid #ff4d4f', paddingBottom: 8, color: themeStyles.textColor } }, '⚠️ ' + t('about.dangerZone', 'Danger Zone')),
+                        React.createElement('div', {
+                            style: { background: themeStyles.dangerBg, padding: 16, borderRadius: 8, border: `1px solid ${themeStyles.dangerBorder}` }
                         },
                             React.createElement('div', { style: { marginBottom: 16, color: themeStyles.dangerText, fontWeight: 'bold' } },
-                                '一键卸载将删除插件，可选择是否保留数据。'
+                                t('about.uninstall.description', 'Uninstalling will remove the plugin directory and remove the plugin from QwenPaw config.')
                             ),
                             React.createElement('button', {
                                 onClick: showUninstallModal,
@@ -1069,19 +1478,19 @@
                                     fontSize: '14px',
                                     fontWeight: 'bold'
                                 }
-                            }, '⚠️ 卸载插件')
+                            }, '⚠️ ' + t('about.uninstall.button', 'Uninstall Plugin'))
                         )
                     )
                 );
             };
 
             const tabItems = [
-                { key: 'stats', label: '📊 记忆统计', children: renderStats() },
-                { key: 'search', label: '🔍 记忆搜索', children: renderSearch() },
-                { key: 'emotion', label: '💝 情感状态', children: renderEmotion() },
-                { key: 'timeline', label: '📅 时间线', children: renderTimeline() },
-                { key: 'config', label: '⚙️ 记忆配置', children: renderConfig() },
-                { key: 'about', label: 'ℹ️ 关于', children: renderAbout() }
+                { key: 'stats', label: '📊 ' + t('nav.stats', 'Memory Stats'), children: renderStats() },
+                { key: 'search', label: '🔍 ' + t('nav.search', 'Memory Search'), children: renderSearch() },
+                { key: 'emotion', label: '💝 ' + t('nav.emotion', 'Emotion Status'), children: renderEmotion() },
+                { key: 'timeline', label: '📅 ' + t('nav.timeline', 'Timeline'), children: renderTimeline() },
+                { key: 'config', label: '⚙️ ' + t('nav.config', 'Memory Config'), children: renderConfig() },
+                { key: 'about', label: 'ℹ️ ' + t('nav.about', 'About'), children: renderAbout() }
             ];
 
             return React.createElement('div', { style: { height: '100%', display: 'flex', flexDirection: 'column' } },
@@ -1090,8 +1499,8 @@
                     React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
                         React.createElement('span', { style: { fontSize: '20px' } }, '🧠'),
                         React.createElement('div', null,
-                            React.createElement('div', { className: 'ht-page-title' }, 'HumanThinking 记忆管理'),
-                            React.createElement('div', { className: 'ht-page-subtitle' }, '跨会话记忆保持与情感计算')
+                            React.createElement('div', { className: 'ht-page-title' }, 'HumanThinking ' + t('memory.title', 'Memory Management')),
+                            React.createElement('div', { className: 'ht-page-subtitle' }, t('plugin.description', 'Memory Management Plugin'))
                         )
                     ),
                     React.createElement(AgentInfoBar)
@@ -1099,6 +1508,7 @@
                 // 内容区域 - 使用原生CSS类
                 React.createElement('div', { className: 'ht-content' },
                     React.createElement(Tabs, {
+                        className: 'ht-tabs',
                         items: tabItems,
                         activeKey: activeTab,
                         onChange: setActiveTab
@@ -1109,95 +1519,152 @@
 
         // 睡眠管理侧边栏 - 简化版
         const SleepManagementSidebar = () => {
+            const { t } = useTranslation();
+            const agent = useAgent();
             const [activeTab, setActiveTab] = useState('status');
             const [sleepStatus, setSleepStatus] = useState(null);
 
+            const fetchSleepStatus = async () => {
+                try {
+                    const currentAgent = getCurrentAgent();
+                    const aid = agent.agent_id || currentAgent.agent_id || 'default';
+                    const data = await apiRequest('/sleep/status?agent_id=' + aid);
+                    setSleepStatus(data);
+                } catch (e) {
+                    console.error('[HumanThinking] 获取睡眠状态失败:', e);
+                }
+            };
+
             useEffect(() => {
-                const fetchStatus = async () => {
-                    try {
-                        const data = await apiRequest('/sleep/status');
-                        setSleepStatus(data);
-                    } catch (e) {
-                        console.error('[HumanThinking] 获取睡眠状态失败:', e);
-                    }
-                };
-                fetchStatus();
-                const interval = setInterval(fetchStatus, 5000);
+                setSleepStatus(null);
+            }, [agent.agent_id]);
+
+            useEffect(() => {
+                fetchSleepStatus();
+                const interval = setInterval(fetchSleepStatus, 5000);
                 return () => clearInterval(interval);
-            }, []);
+            }, [agent.agent_id]);
 
             const handleSleepAction = async (action) => {
                 try {
-                    const endpoint = action === 'wakeup' ? '/sleep/wakeup' : '/sleep/force';
+                    const currentAgent = getCurrentAgent();
+                    const aid = agent.agent_id || currentAgent.agent_id || 'default';
+                    const queryParam = '?agent_id=' + aid;
+                    const endpoint = action === 'wakeup' ? '/sleep/wakeup' + queryParam : '/sleep/force' + queryParam;
                     const body = action === 'wakeup' ? {} : { sleep_type: action };
-                    await apiRequest(endpoint, {
+                    console.log('[HumanThinking] Sleep action:', action, 'agent_id:', aid, 'endpoint:', endpoint);
+                    const result = await apiRequest(endpoint, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(body)
                     });
-                    message.success('操作成功');
+                    console.log('[HumanThinking] Sleep action result:', result);
+                    if (result && result.success === false) {
+                        message.error(result.error || t('common.error', 'Error'));
+                    } else {
+                        message.success(t('common.success', 'Success'));
+                    }
+                    fetchSleepStatus();
                 } catch (e) {
-                    message.error('操作失败');
+                    console.error('[HumanThinking] Sleep action failed:', e);
+                    message.error(t('common.error', 'Error') + ': ' + (e.message || 'Unknown'));
                 }
             };
 
             const statusConfig = {
-                active: { icon: '☀️', label: '活跃', color: '#52c41a' },
-                light: { icon: '⭐', label: '浅层睡眠', color: '#faad14' },
-                rem: { icon: '💭', label: 'REM睡眠', color: '#1890ff' },
-                deep: { icon: '🌙', label: '深层睡眠', color: '#722ed1' }
+                active: { icon: '☀️', label: t('sleep.status.awake', 'Active'), color: '#52c41a' },
+                light_sleep: { icon: '⭐', label: t('sleep.status.light', 'Light Sleep'), color: '#faad14' },
+                rem: { icon: '💭', label: t('sleep.status.rem', 'REM Sleep'), color: '#1890ff' },
+                deep_sleep: { icon: '🌙', label: t('sleep.status.deep', 'Deep Sleep'), color: '#722ed1' }
             };
 
-            const current = statusConfig[sleepStatus?.sleep_type] || statusConfig.active;
+            const current = statusConfig[sleepStatus?.status] || statusConfig.active;
+            const gifMap = {
+                'active': '/api/plugins/humanthinking/files/img/dance.gif',
+                'light_sleep': '/api/plugins/humanthinking/files/img/sleep1.gif',
+                'rem': '/api/plugins/humanthinking/files/img/sleep2.gif',
+                'deep_sleep': '/api/plugins/humanthinking/files/img/sleep3.gif'
+            };
 
-            // 状态灯样式 - 使用原生CSS类
             const getStatusLightClass = () => {
-                const type = sleepStatus?.sleep_type || 'active';
-                return 'ht-status-light ' + type;
+                const type = sleepStatus?.status || 'active';
+                const classMap = {
+                    'active': 'active',
+                    'light_sleep': 'light',
+                    'rem': 'rem',
+                    'deep_sleep': 'deep'
+                };
+                return 'ht-status-light ' + (classMap[type] || 'active');
             };
 
-            const getStatusLightStyle = () => {
-                const baseStyle = {
+            const getGifStyle = () => {
+                const style = {
                     width: 140,
                     height: 140,
-                    borderRadius: '50%',
-                    background: current.color + '20',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
+                    borderRadius: 16,
+                    display: 'block',
                     margin: '0 auto 20px',
-                    fontSize: 72,
-                    border: '4px solid ' + current.color + '40',
                     transition: 'all 0.5s ease'
                 };
-                
-                // 根据状态添加阴影
-                if (sleepStatus?.sleep_type === 'active') {
-                    baseStyle.boxShadow = `0 0 20px ${current.color}60, 0 0 40px ${current.color}40`;
-                } else if (sleepStatus?.sleep_type === 'light') {
-                    baseStyle.boxShadow = `0 0 15px ${current.color}50`;
-                } else if (sleepStatus?.sleep_type === 'rem') {
-                    baseStyle.boxShadow = `0 0 20px ${current.color}60`;
-                } else if (sleepStatus?.sleep_type === 'deep') {
-                    baseStyle.boxShadow = `0 0 10px ${current.color}40`;
+                if (sleepStatus?.status === 'active') {
+                    style.boxShadow = `0 0 20px ${current.color}60, 0 0 40px ${current.color}40`;
+                } else if (sleepStatus?.status === 'light_sleep') {
+                    style.boxShadow = `0 0 15px ${current.color}50`;
+                } else if (sleepStatus?.status === 'rem') {
+                    style.boxShadow = `0 0 20px ${current.color}60`;
+                } else if (sleepStatus?.status === 'deep_sleep') {
+                    style.boxShadow = `0 0 10px ${current.color}40`;
                 }
-                
-                return baseStyle;
+                return style;
             };
 
             const renderStatus = () => {
-                return React.createElement('div', { style: { padding: 24, textAlign: 'center' } },
-                    React.createElement('div', {
-                        className: getStatusLightClass(),
-                        style: getStatusLightStyle()
-                    }, current.icon),
-                    React.createElement('div', { style: { fontSize: 24, fontWeight: 'bold', color: current.color } },
-                        current.label
+                const currentStatus = sleepStatus?.status || 'active';
+                const btnBase = { height: 48, transition: 'all 0.3s' };
+                const sleepButtons = [
+                    { key: 'light', action: 'light', icon: '⭐', label: t('sleep.lightSleep', 'Light Sleep'), activeStatus: 'light_sleep', activeColor: '#faad14', activeBg: '#fffbe6' },
+                    { key: 'rem', action: 'rem', icon: '💭', label: t('sleep.remSleep', 'REM Sleep'), activeStatus: 'rem', activeColor: '#1890ff', activeBg: '#e6f7ff' },
+                    { key: 'deep', action: 'deep', icon: '🌙', label: t('sleep.deepSleep', 'Deep Sleep'), activeStatus: 'deep_sleep', activeColor: '#722ed1', activeBg: '#f9f0ff' },
+                    { key: 'wakeup', action: 'wakeup', icon: '☀️', label: t('sleep.wakeUp', 'Wake Up'), activeStatus: 'active', activeColor: '#52c41a', activeBg: '#f6ffed' }
+                ];
+
+                return React.createElement('div', { style: { padding: 16 } },
+                    React.createElement(Row, { gutter: [16, 16] },
+                        React.createElement(Col, { span: 24 },
+                            React.createElement(Card, {
+                                size: 'small',
+                                style: { textAlign: 'center', padding: '32px 0' }
+                            },
+                                React.createElement('img', {
+                                    className: getStatusLightClass(),
+                                    src: gifMap[currentStatus] || gifMap.active,
+                                    alt: current.label,
+                                    style: getGifStyle()
+                                }),
+                                React.createElement('div', { style: { fontSize: 28, fontWeight: 'bold', color: current.color, marginTop: 16 } },
+                                    current.label
+                                ),
+                                React.createElement('div', { style: { fontSize: 13, color: '#8c8c8c', marginTop: 8 } },
+                                    t('sleep.statusDesc', 'Current sleep state of the agent')
+                                )
+                            )
+                        )
                     ),
-                    React.createElement('div', { style: { marginTop: 24 } },
-                        React.createElement(Button, { size: 'large', onClick: () => handleSleepAction('light') }, '⭐ 浅睡'),
-                        React.createElement(Button, { size: 'large', onClick: () => handleSleepAction('deep'), style: { marginLeft: 8 } }, '🌙 深睡'),
-                        React.createElement(Button, { type: 'primary', size: 'large', onClick: () => handleSleepAction('wakeup'), style: { marginLeft: 8 } }, '☀️ 唤醒')
+                    React.createElement(Row, { gutter: [12, 12], style: { marginTop: 16 } },
+                        ...sleepButtons.map(btn => {
+                            const isActive = currentStatus === btn.activeStatus;
+                            return React.createElement(Col, { span: 12, key: btn.key },
+                                React.createElement(Button, {
+                                    size: 'large',
+                                    block: true,
+                                    type: isActive ? 'primary' : 'default',
+                                    onClick: () => handleSleepAction(btn.action),
+                                    style: isActive
+                                        ? { ...btnBase, borderColor: btn.activeColor, backgroundColor: btn.activeBg, color: btn.activeColor, fontWeight: 'bold', boxShadow: `0 2px 8px ${btn.activeColor}33` }
+                                        : btnBase
+                                }, React.createElement('span', { style: { fontSize: 18, marginRight: 8 } }, btn.icon), btn.label)
+                            );
+                        })
                     )
                 );
             };
@@ -1270,109 +1737,288 @@
                 try {
                     const agent = getCurrentAgent();
                     const queryParam = agent.agent_id ? '?agent_id=' + agent.agent_id : '';
-                    await apiRequest('/sleep/config' + queryParam, {
+                    const result = await apiRequest('/sleep/config' + queryParam, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(values)
                     });
-                    message.success('配置已保存');
+                    if (result && result.success === false) {
+                        message.error(result.error || t('common.saveError', 'Save failed'));
+                    } else {
+                        message.success(t('common.saveSuccess', 'Save successful'));
+                    }
                 } catch (e) {
-                    message.error('保存失败');
+                    message.error(t('common.saveError', 'Save failed'));
                 }
             };
 
             const renderConfig = () => {
-                if (!sleepConfig) return React.createElement(Empty, { description: '加载中...' });
+                if (!sleepConfig) return React.createElement(Empty, { description: t('common.loading', 'Loading...') });
+
+                // 获取当前Agent名称，用于动态替换显示文本
+                const currentAgent = getCurrentAgent();
+                let agentName = currentAgent.agent_name || currentAgent.agent_id || '';
+                // 如果无法获取agent名称，尝试从页面元素读取
+                if (!agentName) {
+                    const agentSelect = document.querySelector('[class*="agent-select"]');
+                    if (agentSelect) {
+                        const selected = agentSelect.querySelector('.ant-select-selection-item') || agentSelect.querySelector('.ant-select-selection-selected-value');
+                        if (selected) agentName = selected.textContent.trim();
+                    }
+                }
+                // 最终fallback - 使用默认名称确保替换能工作
+                if (!agentName) agentName = 'Agent';
+                console.log('[HumanThinking] Current agent name for sleep config:', agentName);
+
+                const ConfigSection = ({ title, icon, children }) => React.createElement(Card, {
+                    size: 'small',
+                    title: React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+                        React.createElement('span', null, icon),
+                        React.createElement('span', { style: { fontWeight: 600 } }, title)
+                    ),
+                    style: { marginBottom: 16 },
+                    headStyle: { background: '#fafafa', borderBottom: '1px solid #f0f0f0' }
+                }, children);
+
+                const ConfigItem = ({ label, description, children }) => React.createElement('div', { style: { marginBottom: 20 } },
+                    React.createElement('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 } },
+                        React.createElement('label', { className: 'ht-config-label' }, label),
+                        children && children.type === Switch && React.createElement('div', null, children)
+                    ),
+                    children && children.type !== Switch && React.createElement('div', { style: { marginBottom: 4 } }, children),
+                    description && React.createElement('div', { className: 'ht-config-desc' }, description)
+                );
+
+                // 动态替换Agent名称到描述文本中
+                const rawDesc = t('sleep.enableAgentSleepDesc', 'Allow {agent} to enter sleep states');
+                const enableSleepDesc = rawDesc.replace('{agent}', agentName);
 
                 return React.createElement('div', { style: { padding: 16 } },
-                    React.createElement('div', { style: { marginBottom: 16 } },
-                        React.createElement('label', { style: { display: 'block', marginBottom: 8 } }, '启用Agent睡眠'),
-                        React.createElement(Switch, {
-                            checked: sleepConfig.enable_agent_sleep,
-                            onChange: checked => setSleepConfig({ ...sleepConfig, enable_agent_sleep: checked }),
-                            checkedChildren: '开启',
-                            unCheckedChildren: '关闭'
-                        })
+                    React.createElement(ConfigSection, { title: t('sleep.basicSettings', 'Basic Settings'), icon: '⚙️' },
+                        React.createElement(ConfigItem, {
+                            label: t('sleep.enableAgentSleep', 'Enable {agent} Sleep').replace('{agent}', agentName),
+                            description: enableSleepDesc
+                        },
+                            React.createElement(Switch, {
+                                checked: sleepConfig.enable_agent_sleep,
+                                onChange: checked => setSleepConfig({ ...sleepConfig, enable_agent_sleep: checked }),
+                                checkedChildren: t('config.on', 'On'),
+                                unCheckedChildren: t('config.off', 'Off')
+                            })
+                        ),
+                        React.createElement(ConfigItem, {
+                            label: t('sleep.lightSleepMinutes', 'Enter Sleep (minutes)'),
+                            description: t('sleep.lightSleepMinutesDesc', 'Time before entering light sleep')
+                        },
+                            React.createElement(Slider, {
+                                min: 5,
+                                max: 120,
+                                value: sleepConfig.light_sleep_minutes || 30,
+                                onChange: value => setSleepConfig({ ...sleepConfig, light_sleep_minutes: value }),
+                                marks: { 5: '5' + t('common.minute', 'min'), 30: '30' + t('common.minute', 'min'), 120: '120' + t('common.minute', 'min') }
+                            })
+                        ),
+                        React.createElement(ConfigItem, {
+                            label: t('sleep.remMinutes', 'Light Sleep Duration (minutes)'),
+                            description: t('sleep.remMinutesDesc', 'Duration of light sleep stage')
+                        },
+                            React.createElement(Slider, {
+                                min: 15,
+                                max: 180,
+                                value: sleepConfig.rem_minutes || 60,
+                                onChange: value => setSleepConfig({ ...sleepConfig, rem_minutes: value }),
+                                marks: { 15: '15' + t('common.minute', 'min'), 60: '60' + t('common.minute', 'min'), 180: '180' + t('common.minute', 'min') }
+                            })
+                        ),
+                        React.createElement(ConfigItem, {
+                            label: t('sleep.deepSleepMinutes', 'Deep Sleep Entry (minutes)'),
+                            description: t('sleep.deepSleepMinutesDesc', 'Time before entering deep sleep')
+                        },
+                            React.createElement(Slider, {
+                                min: 30,
+                                max: 240,
+                                value: sleepConfig.deep_sleep_minutes || 120,
+                                onChange: value => setSleepConfig({ ...sleepConfig, deep_sleep_minutes: value }),
+                                marks: { 30: '30' + t('common.minute', 'min'), 120: '120' + t('common.minute', 'min'), 240: '240' + t('common.minute', 'min') }
+                            })
+                        )
                     ),
-                    React.createElement(Divider, null),
-                    React.createElement('div', { style: { marginBottom: 16 } },
-                        React.createElement('label', { style: { display: 'block', marginBottom: 8 } }, '进入睡眠（分钟）'),
-                        React.createElement(Slider, {
-                            min: 5,
-                            max: 120,
-                            value: sleepConfig.light_sleep_minutes || 30,
-                            onChange: value => setSleepConfig({ ...sleepConfig, light_sleep_minutes: value }),
-                            marks: { 5: '5分', 30: '30分', 120: '120分' }
-                        })
+
+                    React.createElement(ConfigSection, { title: t('sleep.consolidationSettings', 'Consolidation Settings'), icon: '🧠' },
+                        React.createElement(ConfigItem, {
+                            label: t('sleep.enableInsight', 'Auto Consolidation'),
+                            description: t('sleep.enableInsightDesc', 'Automatically consolidate memories, scan N days')
+                        },
+                            React.createElement(Switch, {
+                                checked: sleepConfig.enable_insight,
+                                onChange: checked => setSleepConfig({ ...sleepConfig, enable_insight: checked }),
+                                checkedChildren: t('config.on', 'On'),
+                                unCheckedChildren: t('config.off', 'Off')
+                            })
+                        ),
+                        React.createElement(ConfigItem, {
+                            label: t('sleep.enableDreamLog', 'Dream Log'),
+                            description: t('sleep.enableDreamLogDesc', 'Record processing logs for each sleep stage')
+                        },
+                            React.createElement(Switch, {
+                                checked: sleepConfig.enable_dream_log,
+                                onChange: checked => setSleepConfig({ ...sleepConfig, enable_dream_log: checked }),
+                                checkedChildren: t('config.on', 'On'),
+                                unCheckedChildren: t('config.off', 'Off')
+                            })
+                        ),
+                        React.createElement(ConfigItem, {
+                            label: t('sleep.consolidateDays', 'Memory Consolidation Days'),
+                            description: t('sleep.consolidateDaysDesc', 'Number of days to scan for consolidation')
+                        },
+                            React.createElement(Slider, {
+                                min: 1,
+                                max: 30,
+                                value: sleepConfig.consolidate_days || 7,
+                                onChange: value => setSleepConfig({ ...sleepConfig, consolidate_days: value }),
+                                marks: { 1: '1' + t('common.day', 'days'), 7: '7' + t('common.day', 'days'), 30: '30' + t('common.day', 'days') }
+                            })
+                        )
                     ),
-                    React.createElement('div', { style: { marginBottom: 16 } },
-                        React.createElement('label', { style: { display: 'block', marginBottom: 8 } }, '浅睡持续（分钟）'),
-                        React.createElement(Slider, {
-                            min: 15,
-                            max: 180,
-                            value: sleepConfig.rem_minutes || 60,
-                            onChange: value => setSleepConfig({ ...sleepConfig, rem_minutes: value }),
-                            marks: { 15: '15分', 60: '60分', 180: '180分' }
-                        })
+
+                    React.createElement(ConfigSection, { title: t('sleep.mergeSettings', 'Memory Merge'), icon: '🔗' },
+                        React.createElement(ConfigItem, {
+                            label: t('sleep.enableMerge', 'Auto Merge Similar Memories'),
+                            description: t('sleep.enableMergeDesc', 'Automatically merge similar memories during sleep')
+                        },
+                            React.createElement(Switch, {
+                                checked: sleepConfig.enable_merge !== false,
+                                onChange: checked => setSleepConfig({ ...sleepConfig, enable_merge: checked }),
+                                checkedChildren: t('config.on', 'On'),
+                                unCheckedChildren: t('config.off', 'Off')
+                            })
+                        ),
+                        sleepConfig.enable_merge !== false && React.createElement(ConfigItem, {
+                            label: t('sleep.mergeThreshold', 'Merge Similarity Threshold'),
+                            description: t('sleep.mergeThresholdDesc', 'Higher threshold = stricter matching, fewer merges')
+                        },
+                            React.createElement(Slider, {
+                                min: 0.5,
+                                max: 0.95,
+                                step: 0.05,
+                                value: sleepConfig.merge_similarity_threshold || 0.8,
+                                onChange: value => setSleepConfig({ ...sleepConfig, merge_similarity_threshold: value }),
+                                marks: { 0.5: '0.5', 0.7: '0.7', 0.8: '0.8', 0.9: '0.9', 0.95: '0.95' }
+                            })
+                        ),
+                        sleepConfig.enable_merge !== false && React.createElement(ConfigItem, {
+                            label: t('sleep.mergeMaxDistance', 'Max Merge Time Distance (hours)'),
+                            description: t('sleep.mergeMaxDistanceDesc', 'Only merge memories within this time window')
+                        },
+                            React.createElement(Slider, {
+                                min: 1,
+                                max: 168,
+                                value: sleepConfig.merge_max_distance_hours || 72,
+                                onChange: value => setSleepConfig({ ...sleepConfig, merge_max_distance_hours: value }),
+                                marks: { 1: '1h', 24: '24h', 72: '72h', 168: '168h' }
+                            })
+                        )
                     ),
-                    React.createElement('div', { style: { marginBottom: 16 } },
-                        React.createElement('label', { style: { display: 'block', marginBottom: 8 } }, '深睡进入（分钟）'),
-                        React.createElement(Slider, {
-                            min: 30,
-                            max: 240,
-                            value: sleepConfig.deep_sleep_minutes || 120,
-                            onChange: value => setSleepConfig({ ...sleepConfig, deep_sleep_minutes: value }),
-                            marks: { 30: '30分', 120: '120分', 240: '240分' }
-                        })
+
+                    React.createElement(ConfigSection, { title: t('sleep.contradictionSettings', 'Contradiction Detection'), icon: '⚡' },
+                        React.createElement(ConfigItem, {
+                            label: t('sleep.enableContradictionDetection', 'Contradiction Detection'),
+                            description: t('sleep.enableContradictionDetectionDesc', 'Automatically detect and handle conflicting memories during sleep')
+                        },
+                            React.createElement(Switch, {
+                                checked: sleepConfig.enable_contradiction_detection !== false,
+                                onChange: checked => setSleepConfig({ ...sleepConfig, enable_contradiction_detection: checked }),
+                                checkedChildren: t('config.on', 'On'),
+                                unCheckedChildren: t('config.off', 'Off')
+                            })
+                        ),
+                        sleepConfig.enable_contradiction_detection !== false && React.createElement(React.Fragment, null,
+                            React.createElement(ConfigItem, {
+                                label: t('sleep.contradictionThreshold', 'Contradiction Detection Threshold'),
+                                description: t('sleep.contradictionThresholdDesc', 'Higher threshold = stricter detection, fewer false positives')
+                            },
+                                React.createElement(Slider, {
+                                    min: 0.3,
+                                    max: 0.99,
+                                    step: 0.05,
+                                    value: sleepConfig.contradiction_threshold || 0.7,
+                                    onChange: value => setSleepConfig({ ...sleepConfig, contradiction_threshold: value }),
+                                    marks: { 0.3: '0.3', 0.5: '0.5', 0.7: '0.7', 0.85: '0.85', 0.99: '0.99' }
+                                })
+                            ),
+                            React.createElement(ConfigItem, {
+                                label: t('sleep.contradictionStrategy', 'Contradiction Resolution Strategy'),
+                                description: t('sleep.contradictionStrategyDesc', 'How to resolve detected contradictions')
+                            },
+                                React.createElement(Select, {
+                                    value: sleepConfig.contradiction_resolution_strategy || 'keep_latest',
+                                    onChange: value => setSleepConfig({ ...sleepConfig, contradiction_resolution_strategy: value }),
+                                    style: { width: '100%' },
+                                    options: [
+                                        { value: 'keep_latest', label: t('sleep.strategy.keepLatest', 'Keep Latest') },
+                                        { value: 'keep_frequent', label: t('sleep.strategy.keepFrequent', 'Keep Most Frequent') },
+                                        { value: 'keep_high_confidence', label: t('sleep.strategy.keepHighConfidence', 'Keep High Confidence') },
+                                        { value: 'mark_for_review', label: t('sleep.strategy.markForReview', 'Mark for Review') },
+                                        { value: 'keep_both', label: t('sleep.strategy.keepBoth', 'Keep Both') },
+                                    ]
+                                })
+                            ),
+                            React.createElement(ConfigItem, {
+                                label: t('sleep.autoResolveContradiction', 'Auto Resolve Contradictions'),
+                                description: t('sleep.autoResolveContradictionDesc', 'Automatically resolve contradictions without human review')
+                            },
+                                React.createElement(Switch, {
+                                    checked: sleepConfig.auto_resolve_contradiction !== false,
+                                    onChange: checked => setSleepConfig({ ...sleepConfig, auto_resolve_contradiction: checked }),
+                                    checkedChildren: t('config.on', 'On'),
+                                    unCheckedChildren: t('config.off', 'Off')
+                                })
+                            ),
+                            sleepConfig.auto_resolve_contradiction !== false && React.createElement(ConfigItem, {
+                                label: t('sleep.minConfidenceForAutoResolve', 'Min Confidence for Auto Resolve'),
+                                description: t('sleep.minConfidenceForAutoResolveDesc', 'Only auto-resolve contradictions above this confidence level')
+                            },
+                                React.createElement(Slider, {
+                                    min: 0.5,
+                                    max: 0.99,
+                                    step: 0.05,
+                                    value: sleepConfig.min_confidence_for_auto_resolve || 0.85,
+                                    onChange: value => setSleepConfig({ ...sleepConfig, min_confidence_for_auto_resolve: value }),
+                                    marks: { 0.5: '0.5', 0.7: '0.7', 0.85: '0.85', 0.99: '0.99' }
+                                })
+                            ),
+                            React.createElement(ConfigItem, {
+                                label: t('sleep.enableSemanticCheck', 'Semantic Contradiction Check'),
+                                description: t('sleep.enableSemanticCheckDesc', 'Detect semantic contradictions (sentiment polarity reversal)')
+                            },
+                                React.createElement(Switch, {
+                                    checked: sleepConfig.enable_semantic_contradiction_check !== false,
+                                    onChange: checked => setSleepConfig({ ...sleepConfig, enable_semantic_contradiction_check: checked }),
+                                    checkedChildren: t('config.on', 'On'),
+                                    unCheckedChildren: t('config.off', 'Off')
+                                })
+                            ),
+                            React.createElement(ConfigItem, {
+                                label: t('sleep.enableTemporalCheck', 'Temporal Contradiction Check'),
+                                description: t('sleep.enableTemporalCheckDesc', 'Detect temporal contradictions (past vs present)')
+                            },
+                                React.createElement(Switch, {
+                                    checked: sleepConfig.enable_temporal_contradiction_check !== false,
+                                    onChange: checked => setSleepConfig({ ...sleepConfig, enable_temporal_contradiction_check: checked }),
+                                    checkedChildren: t('config.on', 'On'),
+                                    unCheckedChildren: t('config.off', 'Off')
+                                })
+                            )
+                        )
                     ),
-                    React.createElement(Divider, null),
-                    React.createElement('div', { style: { marginBottom: 16 } },
-                        React.createElement('label', { style: { display: 'block', marginBottom: 8 } }, '自动整合记忆'),
-                        React.createElement(Switch, {
-                            checked: sleepConfig.enable_insight,
-                            onChange: checked => setSleepConfig({ ...sleepConfig, enable_insight: checked }),
-                            checkedChildren: '开启',
-                            unCheckedChildren: '关闭'
-                        }),
-                        React.createElement('div', { style: { fontSize: 12, color: '#999', marginTop: 4 } }, '开启后自动整合记忆，扫描N天内记忆')
-                    ),
-                    React.createElement('div', { style: { marginBottom: 16 } },
-                        React.createElement('label', { style: { display: 'block', marginBottom: 8 } }, '洞察灯'),
-                        React.createElement(Switch, {
-                            checked: sleepConfig.enable_insight_light !== false,
-                            onChange: checked => setSleepConfig({ ...sleepConfig, enable_insight_light: checked }),
-                            checkedChildren: '开启',
-                            unCheckedChildren: '关闭'
-                        }),
-                        React.createElement('div', { style: { fontSize: 12, color: '#999', marginTop: 4 } }, '开启后生成记忆洞察和反思摘要')
-                    ),
-                    React.createElement('div', { style: { marginBottom: 16 } },
-                        React.createElement('label', { style: { display: 'block', marginBottom: 8 } }, '梦境日志'),
-                        React.createElement(Switch, {
-                            checked: sleepConfig.enable_dream_log,
-                            onChange: checked => setSleepConfig({ ...sleepConfig, enable_dream_log: checked }),
-                            checkedChildren: '开启',
-                            unCheckedChildren: '关闭'
-                        }),
-                        React.createElement('div', { style: { fontSize: 12, color: '#999', marginTop: 4 } }, '记录睡眠各阶段处理日志')
-                    ),
-                    React.createElement('div', { style: { marginBottom: 16 } },
-                        React.createElement('label', { style: { display: 'block', marginBottom: 8 } }, '记忆整合天数'),
-                        React.createElement(Slider, {
-                            min: 1,
-                            max: 30,
-                            value: sleepConfig.consolidate_days || 7,
-                            onChange: value => setSleepConfig({ ...sleepConfig, consolidate_days: value }),
-                            marks: { 1: '1天', 7: '7天', 30: '30天' }
-                        })
-                    ),
+
                     // 保存按钮区域 - 使用原生CSS类
                     React.createElement('div', { className: 'ht-form-actions' },
                         React.createElement(Button, {
                             type: 'primary',
                             size: 'large',
                             onClick: () => handleSaveConfig(sleepConfig)
-                        }, '保存配置')
+                        }, t('config.save', 'Save Config'))
                     )
                 );
             };
@@ -1380,44 +2026,76 @@
             // 功能说明
             const renderEnergy = () => {
                 const sleepStates = [
-                    { icon: '☀️', name: '活跃状态', energy: '高', color: '#52c41a', desc: 'Agent处于完全活跃状态，正常响应用户请求。' },
-                    { icon: '⭐', name: '浅层睡眠', energy: '中-高', color: '#faad14', desc: 'Agent进入轻度休息状态，降低功耗但仍保持基本响应能力。' },
-                    { icon: '💭', name: 'REM阶段', energy: '中', color: '#1890ff', desc: '模拟人类的REM睡眠，进行记忆重组和模式识别。' },
-                    { icon: '🌙', name: '深层睡眠', energy: '低', color: '#722ed1', desc: 'Agent进入深度整合状态，对候选记忆进行六维加权评分，执行遗忘曲线算法。' }
+                    { icon: '☀️', name: t('sleep.states.active.name', 'Active State'), energy: t('sleep.states.active.energy', 'High'), color: '#52c41a', desc: t('sleep.states.active.desc', 'Agent is fully active, responding to user requests normally.') },
+                    { icon: '⭐', name: t('sleep.states.light.name', 'Light Sleep'), energy: t('sleep.states.light.energy', 'Med-High'), color: '#faad14', desc: t('sleep.states.light.desc', 'Agent enters light rest state, reducing power but maintaining basic responsiveness.') },
+                    { icon: '💭', name: t('sleep.states.rem.name', 'REM Stage'), energy: t('sleep.states.rem.energy', 'Medium'), color: '#1890ff', desc: t('sleep.states.rem.desc', 'Simulate human REM sleep, performing memory reorganization and pattern recognition.') },
+                    { icon: '🌙', name: t('sleep.states.deep.name', 'Deep Sleep'), energy: t('sleep.states.deep.energy', 'Low'), color: '#722ed1', desc: t('sleep.states.deep.desc', 'Agent enters deep consolidation state, performing six-dimensional weighted scoring on candidate memories, executing forgetting curve algorithm.') }
                 ];
 
                 return React.createElement('div', { style: { padding: 16 } },
-                    React.createElement('h4', { style: { marginBottom: 16 } }, '睡眠状态功能说明'),
-                    React.createElement(List, {
-                        dataSource: sleepStates,
-                        renderItem: (item) => React.createElement(List.Item, null,
-                            React.createElement('div', { style: { width: '100%' } },
-                                React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 } },
-                                    React.createElement('span', { style: { fontSize: 32 } }, item.icon),
-                                    React.createElement('div', null,
-                                        React.createElement('div', { style: { fontWeight: 'bold', color: item.color } }, item.name)
+                    React.createElement(Card, {
+                        size: 'small',
+                        title: React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+                            React.createElement('span', null, '📖'),
+                            React.createElement('span', { style: { fontWeight: 600 } }, t('sleep.energyTitle', 'Features'))
+                        ),
+                        style: { marginBottom: 16 },
+                        headStyle: { background: '#fafafa', borderBottom: '1px solid #f0f0f0' }
+                    },
+                        React.createElement(List, {
+                            size: 'small',
+                            dataSource: sleepStates,
+                            style: { background: 'transparent' },
+                            renderItem: (item) => React.createElement(List.Item, {
+                                className: 'ht-list-item'
+                            },
+                                React.createElement('div', { style: { width: '100%' } },
+                                    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 } },
+                                        React.createElement('div', {
+                                            style: {
+                                                width: 40,
+                                                height: 40,
+                                                borderRadius: 8,
+                                                background: item.color + '15',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                fontSize: 20
+                                            }
+                                        }, item.icon),
+                                        React.createElement('div', { style: { flex: 1 } },
+                                            React.createElement('div', { style: { fontWeight: 'bold', color: item.color, fontSize: 14 } }, item.name)
+                                        ),
+                                        React.createElement(Tag, { color: item.color, size: 'small' }, t('sleep.scoring.energy', 'Energy') + ': ' + item.energy)
                                     ),
-                                    React.createElement(Tag, { color: item.color }, '能量: ' + item.energy)
-                                ),
-                                React.createElement('div', { style: { fontSize: 13, color: '#666', paddingLeft: 44 } }, item.desc)
+                                    React.createElement('div', { style: { fontSize: 13, color: '#666', paddingLeft: 52, lineHeight: 1.6 } }, item.desc)
+                                )
                             )
-                        )
-                    }),
-                    React.createElement(Divider, null),
-                    React.createElement('h4', { style: { marginBottom: 16 } }, '六维评分系统'),
-                    React.createElement(Row, { gutter: [8, 8] },
-                        [
-                            { name: '相关性', weight: '30%', color: '#1890ff' },
-                            { name: '频率', weight: '24%', color: '#52c41a' },
-                            { name: '时效性', weight: '15%', color: '#faad14' },
-                            { name: '多样性', weight: '15%', color: '#722ed1' },
-                            { name: '整合度', weight: '10%', color: '#eb2f96' },
-                            { name: '概念丰富度', weight: '6%', color: '#13c2c2' }
-                        ].map(item =>
-                            React.createElement(Col, { span: 8, key: item.name },
-                                React.createElement(Card, { size: 'small', style: { textAlign: 'center' } },
-                                    React.createElement('div', { style: { color: item.color, fontWeight: 'bold' } }, item.weight),
-                                    React.createElement('div', { style: { fontSize: 12 } }, item.name)
+                        })
+                    ),
+
+                    React.createElement(Card, {
+                        size: 'small',
+                        title: React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+                            React.createElement('span', null, '📊'),
+                            React.createElement('span', { style: { fontWeight: 600 } }, t('sleep.scoring.title', 'Six-Dimensional Scoring System'))
+                        ),
+                        headStyle: { background: '#fafafa', borderBottom: '1px solid #f0f0f0' }
+                    },
+                        React.createElement(Row, { gutter: [12, 12] },
+                            [
+                                { name: t('sleep.scoring.relevance', 'Relevance'), weight: '30%', color: '#1890ff' },
+                                { name: t('sleep.scoring.frequency', 'Frequency'), weight: '24%', color: '#52c41a' },
+                                { name: t('sleep.scoring.timeliness', 'Timeliness'), weight: '15%', color: '#faad14' },
+                                { name: t('sleep.scoring.diversity', 'Diversity'), weight: '15%', color: '#722ed1' },
+                                { name: t('sleep.scoring.integration', 'Integration'), weight: '10%', color: '#eb2f96' },
+                                { name: t('sleep.scoring.richness', 'Concept Richness'), weight: '6%', color: '#13c2c2' }
+                            ].map(item =>
+                                React.createElement(Col, { span: 8, key: item.name },
+                                    React.createElement(Card, { size: 'small', style: { textAlign: 'center', border: '1px solid ' + item.color + '30' } },
+                                        React.createElement('div', { style: { color: item.color, fontWeight: 'bold', fontSize: 16 } }, item.weight),
+                                        React.createElement('div', { style: { fontSize: 12, color: '#595959' } }, item.name)
+                                    )
                                 )
                             )
                         )
@@ -1426,9 +2104,9 @@
             };
 
             const tabItems = [
-                { key: 'status', label: '🌙 睡眠状态', children: renderStatus() },
-                { key: 'config', label: '⚙️ 参数配置', children: renderConfig() },
-                { key: 'energy', label: '📖 功能说明', children: renderEnergy() }
+                { key: 'status', label: '🌙 ' + t('sleep.statusTitle', 'Sleep Status'), children: renderStatus() },
+                { key: 'config', label: '⚙️ ' + t('sleep.configTitle', 'Parameters'), children: renderConfig() },
+                { key: 'energy', label: '📖 ' + t('sleep.energyTitle', 'Features'), children: renderEnergy() }
             ];
 
             return React.createElement('div', { style: { height: '100%', display: 'flex', flexDirection: 'column' } },
@@ -1437,8 +2115,8 @@
                     React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
                         React.createElement('span', { style: { fontSize: '20px' } }, '🌙'),
                         React.createElement('div', null,
-                            React.createElement('div', { className: 'ht-page-title' }, 'HumanThinking 睡眠管理'),
-                            React.createElement('div', { className: 'ht-page-subtitle' }, 'Agent睡眠周期与记忆整合')
+                            React.createElement('div', { className: 'ht-page-title' }, 'HumanThinking ' + t('sleep.title', 'Sleep Management')),
+                            React.createElement('div', { className: 'ht-page-subtitle' }, t('sleep.title', 'Sleep Management'))
                         )
                     ),
                     React.createElement(AgentInfoBar)
@@ -1446,6 +2124,7 @@
                 // 内容区域 - 使用原生CSS类
                 React.createElement('div', { className: 'ht-content' },
                     React.createElement(Tabs, {
+                        className: 'ht-tabs',
                         items: tabItems,
                         activeKey: activeTab,
                         onChange: setActiveTab
@@ -1458,31 +2137,72 @@
     };
 
     // 初始化
+    let sidebarComponents = null;
+
+    const resetHtInjectedMarkers = () => {
+        try {
+            document.querySelectorAll('.ant-select[data-ht-injected]').forEach(el => {
+                delete el.dataset.htInjected;
+            });
+            document.querySelectorAll('[data-ht-tab-injected]').forEach(el => {
+                delete el.dataset.htTabInjected;
+            });
+        } catch(e) {}
+    };
+
+    const createTranslatableLabel = (key, fallback) => {
+        const React = window.QwenPaw.host.React;
+        const LabelComponent = () => {
+            const [label, setLabel] = React.useState(t(key, fallback));
+            React.useEffect(() => {
+                const unsub = subscribeLang(() => {
+                    setLabel(t(key, fallback));
+                });
+                return unsub;
+            }, []);
+            return label;
+        };
+        return React.createElement(LabelComponent);
+    };
+
+    const registerSidebarRoutes = () => {
+        if (!sidebarComponents || !window.QwenPaw?.registerRoutes) return;
+        if (window._htRoutesRegistered) return;
+        const React = window.QwenPaw.host.React;
+
+        window.QwenPaw.registerRoutes(PLUGIN_ID, [
+            {
+                path: '/humanthinking/memory',
+                component: sidebarComponents.MemoryManagementSidebar,
+                label: createTranslatableLabel('nav.memory', 'Memory Management'),
+                icon: React.createElement('span', { style: { fontSize: '12px', lineHeight: '12px' } }, '\u270e'),
+                priority: 10
+            },
+            {
+                path: '/humanthinking/sleep',
+                component: sidebarComponents.SleepManagementSidebar,
+                label: createTranslatableLabel('nav.sleep', 'Sleep Management'),
+                icon: React.createElement('span', { style: { fontSize: '12px', lineHeight: '12px' } }, '\u262a'),
+                priority: 20
+            }
+        ]);
+        window._htRoutesRegistered = true;
+        console.log('[HumanThinking] \u2713 \u4fa7\u8fb9\u680f\u8def\u7531\u5df2\u6ce8\u518c:', getCurrentLanguage());
+    };
+
     const init = async () => {
         try {
+            // 加载多语言翻译
+            translations = await loadTranslations();
+            console.log('[HumanThinking] 翻译加载完成:', getCurrentLanguage());
+
             await waitForDependencies();
             console.log('[HumanThinking] 依赖已加载，开始注册...');
 
-            const { MemoryManagementSidebar, SleepManagementSidebar } = createComponents();
+            sidebarComponents = createComponents();
 
             if (window.QwenPaw?.registerRoutes) {
-                window.QwenPaw.registerRoutes(PLUGIN_ID, [
-                    {
-                        path: '/humanthinking/memory',
-                        component: MemoryManagementSidebar,
-                        label: '记忆管理',
-                        icon: '🧠',
-                        priority: 10
-                    },
-                    {
-                        path: '/humanthinking/sleep',
-                        component: SleepManagementSidebar,
-                        label: '睡眠管理',
-                        icon: '🌙',
-                        priority: 20
-                    }
-                ]);
-                console.log('[HumanThinking] ✓ 路由注册成功');
+                registerSidebarRoutes();
             } else {
                 console.error('[HumanThinking] ✗ window.QwenPaw.registerRoutes 不可用');
             }
@@ -1541,6 +2261,8 @@
 
     // HT 记忆配置组件
     function HTMemoryConfigComponent() {
+        const React = window.QwenPaw?.host?.React;
+        if (!React) { console.error('[HumanThinking] React not available'); var el = document.createElement('div'); el.textContent = 'React not loaded'; return el; }
         const baseUrl = getApiBase();
         const token = window.QwenPaw?.host?.getApiToken?.() || '';
         const [config, setConfig] = React.useState({
@@ -1582,14 +2304,18 @@
                 body: JSON.stringify(config)
             })
             .then(res => res.json())
-            .then(() => {
+            .then((result) => {
                 setSaving(false);
-                alert('配置保存成功');
+                if (result && result.success === false) {
+                    alert(t('config.errorSaving', 'Save failed: {error}', { error: result.error || t('common.unknownError', 'Unknown error') }));
+                } else {
+                    alert(t('common.saveSuccess', 'Save successful'));
+                }
             })
             .catch(err => {
                 console.error('[HumanThinking] Failed to save config:', err);
                 setSaving(false);
-                alert('配置保存失败');
+                alert(t('common.saveError', 'Save failed'));
             });
         };
 
@@ -1598,43 +2324,43 @@
         };
 
         if (loading) {
-            return React.createElement('div', { style: { padding: '40px', textAlign: 'center' } }, '加载中...');
+            return React.createElement('div', { style: { padding: '40px', textAlign: 'center' } }, t('common.loading', 'Loading...'));
         }
 
         return React.createElement('div', { style: { padding: '16px' } },
-            React.createElement('h3', { style: { marginBottom: '16px' } }, '🧠 HumanThinking 记忆配置'),
+            React.createElement('h3', { style: { marginBottom: '16px' } }, t('htConfig.title', '🧠 HumanThinking Memory Config')),
             React.createElement('div', { style: { marginBottom: '16px' } },
-                React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, '跨会话记忆'),
+                React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, t('htConfig.crossSession', 'Cross-Session Memory')),
                 React.createElement('input', {
                     type: 'checkbox',
                     checked: config.enable_cross_session,
                     onChange: (e) => updateConfig('enable_cross_session', e.target.checked),
                     style: { marginRight: '8px' }
                 }),
-                React.createElement('span', null, '启用跨会话记忆保持')
+                React.createElement('span', null, t('htConfig.crossSessionDesc', 'Enable cross-session memory persistence'))
             ),
             React.createElement('div', { style: { marginBottom: '16px' } },
-                React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, '情感跟踪'),
+                React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, t('htConfig.emotion', 'Emotion Tracking')),
                 React.createElement('input', {
                     type: 'checkbox',
                     checked: config.enable_emotion,
                     onChange: (e) => updateConfig('enable_emotion', e.target.checked),
                     style: { marginRight: '8px' }
                 }),
-                React.createElement('span', null, '启用情感状态计算')
+                React.createElement('span', null, t('htConfig.emotionDesc', 'Enable emotion state calculation'))
             ),
             React.createElement('div', { style: { marginBottom: '16px' } },
-                React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, '分布式数据库'),
+                React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, t('htConfig.distributedDb', 'Distributed Database')),
                 React.createElement('input', {
                     type: 'checkbox',
                     checked: config.distributed_db || false,
                     onChange: (e) => updateConfig('distributed_db', e.target.checked),
                     style: { marginRight: '8px' }
                 }),
-                React.createElement('span', null, '启用分布式数据库（开启后不可关闭）')
+                React.createElement('span', null, t('htConfig.distributedDbDesc', 'Enable distributed database (cannot be disabled after enabling)'))
             ),
             React.createElement('div', { style: { marginBottom: '16px' } },
-                React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, `会话空闲超时: ${config.session_idle_timeout}秒`),
+                React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, t('htConfig.sessionIdleTimeout', 'Session Idle Timeout (seconds)') + `: ${config.session_idle_timeout}` + t('common.secondUnit', 's')),
                 React.createElement('input', {
                     type: 'range',
                     min: 60,
@@ -1645,7 +2371,7 @@
                 })
             ),
             React.createElement('div', { style: { marginBottom: '16px' } },
-                React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, `单条记忆最大字符数: ${config.max_memory_chars}字符`),
+                React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, t('htConfig.maxMemoryChars', 'Max Memory Characters') + `: ${config.max_memory_chars}` + t('common.char', 'chars')),
                 React.createElement('input', {
                     type: 'range',
                     min: 100,
@@ -1656,7 +2382,7 @@
                 })
             ),
             React.createElement('div', { style: { marginBottom: '16px' } },
-                React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, `搜索限制: ${config.max_results}条记录`),
+                React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, t('htConfig.maxResults', 'Search Limit (items)') + `: ${config.max_results}` + t('common.record', 'items')),
                 React.createElement('input', {
                     type: 'range',
                     min: 5,
@@ -1667,9 +2393,9 @@
                 })
             ),
             React.createElement('div', { style: { marginBottom: '16px', borderTop: '1px solid #eae9e7', paddingTop: '16px' } },
-                React.createElement('h4', { style: { marginBottom: '12px' } }, '记忆生命周期'),
+                React.createElement('h4', { style: { marginBottom: '12px' } }, t('htConfig.lifecycle', 'Memory Lifecycle')),
                 React.createElement('div', { style: { marginBottom: '12px' } },
-                    React.createElement('label', { style: { display: 'block', marginBottom: '4px' } }, `冷藏天数: ${config.frozen_days}天`),
+                    React.createElement('label', { style: { display: 'block', marginBottom: '4px' } }, t('htConfig.frozenDays', 'Frozen Days') + `: ${config.frozen_days}` + t('common.day', 'days')),
                     React.createElement('input', {
                         type: 'range',
                         min: 7,
@@ -1680,7 +2406,7 @@
                     })
                 ),
                 React.createElement('div', { style: { marginBottom: '12px' } },
-                    React.createElement('label', { style: { display: 'block', marginBottom: '4px' } }, `归档天数: ${config.archive_days}天`),
+                    React.createElement('label', { style: { display: 'block', marginBottom: '4px' } }, t('htConfig.archiveDays', 'Archive Days') + `: ${config.archive_days}` + t('common.day', 'days')),
                     React.createElement('input', {
                         type: 'range',
                         min: 30,
@@ -1691,7 +2417,7 @@
                     })
                 ),
                 React.createElement('div', { style: { marginBottom: '12px' } },
-                    React.createElement('label', { style: { display: 'block', marginBottom: '4px' } }, `删除天数: ${config.delete_days}天`),
+                    React.createElement('label', { style: { display: 'block', marginBottom: '4px' } }, t('htConfig.deleteDays', 'Delete Days') + `: ${config.delete_days}` + t('common.day', 'days')),
                     React.createElement('input', {
                         type: 'range',
                         min: 90,
@@ -1714,7 +2440,7 @@
                         borderRadius: '4px',
                         cursor: 'pointer'
                     }
-                }, saving ? '保存中...' : '保存配置')
+                }, saving ? t('htConfig.saving', 'Saving...') : t('htConfig.save', 'Save Config'))
             )
         );
     }
@@ -1759,7 +2485,7 @@
                 const parent = select.closest('.ant-form-item');
                 if (parent) {
                     const label = parent.textContent || '';
-                    if (label.includes('记忆管理') || label.includes('Memory Manager') || label.includes('memory_manager_backend')) {
+                    if (label.includes(t('nav.memory', 'Memory Management')) || label.includes('Memory Manager') || label.includes('memory_manager_backend')) {
                         targetSelect = select;
                         break;
                     }
@@ -1838,7 +2564,7 @@
                     const parent = select.closest('.ant-form-item');
                     if (parent) {
                         const label = parent.textContent || '';
-                        if (label.includes('记忆管理') || label.includes('Memory Manager')) {
+                        if (label.includes(t('nav.memory', 'Memory Management')) || label.includes('Memory Manager')) {
                             targetSelect = select;
                             break;
                         }
@@ -1934,7 +2660,7 @@
                     const parent = select.closest('.ant-form-item');
                     if (parent) {
                         const label = parent.textContent || '';
-                        if (label.includes('记忆管理') || label.includes('Memory Manager')) {
+                        if (label.includes(t('nav.memory', 'Memory Management')) || label.includes('Memory Manager')) {
                             const title = select.querySelector('.ant-select-selection-item');
                             if (title) {
                                 const text = title.textContent.trim();
@@ -1955,7 +2681,7 @@
                     const parent = select.closest('.ant-form-item');
                     if (parent) {
                         const label = parent.textContent || '';
-                        if (label.includes('记忆管理') || label.includes('Memory Manager')) {
+                        if (label.includes(t('nav.memory', 'Memory Management')) || label.includes('Memory Manager')) {
                             const title = select.querySelector('.ant-select-selection-item');
                             if (title) {
                                 const text = title.getAttribute('title') || title.textContent.trim();
@@ -2009,7 +2735,7 @@
             htTabBtn = document.createElement('div');
             htTabBtn.className = 'ant-tabs-tab';
             htTabBtn.setAttribute('data-node-key', 'htMemoryConfig');
-            htTabBtn.innerHTML = '<div class="ant-tabs-tab-btn" role="tab" aria-selected="false" tabindex="-1">HT记忆配置</div>';
+            htTabBtn.innerHTML = '<div class="ant-tabs-tab-btn" role="tab" aria-selected="false" tabindex="-1">HT' + t('nav.config', 'Config') + '</div>';
 
             // 添加到tab列表（在"长期记忆"tab之后）
             const tabList = tabsNav.querySelector('.ant-tabs-nav-list');
@@ -2019,11 +2745,11 @@
             let inserted = false;
             for (let i = 0; i < allTabs.length; i++) {
                 const tabText = allTabs[i].textContent || '';
-                if (tabText.includes('长期记忆')) {
+                if (tabText.includes(t('nav.memory', 'Memory')) || tabText.includes('Memory')) {
                     if (allTabs[i + 1] && tabList) {
                         tabList.insertBefore(htTabBtn, allTabs[i + 1]);
                         inserted = true;
-                        console.log('[HumanThinking] ✓ HT tab inserted after 长期记忆');
+                        console.log('[HumanThinking] ✓ HT tab inserted after Memory');
                         break;
                     }
                 }
@@ -2068,7 +2794,7 @@
                 htTabBtn.setAttribute('aria-selected', 'true');
             });
 
-            console.log('[HumanThinking] ✓ HT记忆配置tab已创建');
+            console.log('[HumanThinking] ✓ HT Memory Config tab created');
         } catch (err) {
             console.error('[HumanThinking] showHTConfigTab error:', err);
         }
@@ -2091,54 +2817,54 @@
 
         container.innerHTML = `
             <div style="padding: 16px;">
-                <h3 style="margin-bottom: 16px;">🧠 HumanThinking 记忆配置</h3>
+                <h3 style="margin-bottom: 16px;">${t('htConfig.title', '🧠 HumanThinking Memory Config')}</h3>
                 <div id="ht-config-loading" style="text-align: center; padding: 40px;">
-                    加载中...
+                    ${t('common.loading', 'Loading...')}
                 </div>
                 <div id="ht-config-content" style="display: none;">
                     <div style="margin-bottom: 16px;">
-                        <label style="display: block; margin-bottom: 8px;">跨会话记忆</label>
+                        <label style="display: block; margin-bottom: 8px;">${t('htConfig.crossSession', 'Cross-Session Memory')}</label>
                         <input type="checkbox" id="ht-cross-session" checked style="margin-right: 8px;">
-                        <span>启用跨会话记忆保持</span>
+                        <span>${t('htConfig.crossSessionDesc', 'Enable cross-session memory persistence')}</span>
                     </div>
                     <div style="margin-bottom: 16px;">
-                        <label style="display: block; margin-bottom: 8px;">情感跟踪</label>
+                        <label style="display: block; margin-bottom: 8px;">${t('htConfig.emotion', 'Emotion Tracking')}</label>
                         <input type="checkbox" id="ht-emotion" checked style="margin-right: 8px;">
-                        <span>启用情感状态计算</span>
+                        <span>${t('htConfig.emotionDesc', 'Enable emotion state calculation')}</span>
                     </div>
                     <div style="margin-bottom: 16px;">
-                        <label style="display: block; margin-bottom: 8px;">会话空闲超时（秒）</label>
+                        <label style="display: block; margin-bottom: 8px;">${t('htConfig.sessionIdleTimeout', 'Session Idle Timeout (seconds)')}</label>
                         <input type="range" id="ht-timeout" min="60" max="600" value="180" style="width: 100%;">
-                        <span id="ht-timeout-value">180</span>秒
+                        <span id="ht-timeout-value">180</span>${t('common.secondUnit', 's')}
                     </div>
                     <div style="margin-bottom: 16px;">
-                        <label style="display: block; margin-bottom: 8px;">单条记忆最大字符数</label>
+                        <label style="display: block; margin-bottom: 8px;">${t('htConfig.maxMemoryChars', 'Max Memory Characters')}</label>
                         <input type="range" id="ht-max-chars" min="100" max="500" value="150" style="width: 100%;">
-                        <span id="ht-max-chars-value">150</span>字符
+                        <span id="ht-max-chars-value">150</span>${t('common.char', 'chars')}
                     </div>
                     <div style="margin-bottom: 16px;">
-                        <label style="display: block; margin-bottom: 8px;">搜索限制（条）</label>
+                        <label style="display: block; margin-bottom: 8px;">${t('htConfig.maxResults', 'Search Limit (items)')}</label>
                         <input type="range" id="ht-max-results" min="5" max="50" value="5" style="width: 100%;">
-                        <span id="ht-max-results-value">5</span>条
+                        <span id="ht-max-results-value">5</span>${t('common.record', 'items')}
                     </div>
                     <div style="margin-bottom: 16px;">
-                        <label style="display: block; margin-bottom: 8px;">冷藏天数</label>
+                        <label style="display: block; margin-bottom: 8px;">${t('htConfig.frozenDays', 'Frozen Days')}</label>
                         <input type="range" id="ht-frozen-days" min="7" max="90" value="30" style="width: 100%;">
-                        <span id="ht-frozen-days-value">30</span>天
+                        <span id="ht-frozen-days-value">30</span>${t('common.day', 'days')}
                     </div>
                     <div style="margin-bottom: 16px;">
-                        <label style="display: block; margin-bottom: 8px;">归档天数</label>
+                        <label style="display: block; margin-bottom: 8px;">${t('htConfig.archiveDays', 'Archive Days')}</label>
                         <input type="range" id="ht-archive-days" min="30" max="365" value="90" style="width: 100%;">
-                        <span id="ht-archive-days-value">90</span>天
+                        <span id="ht-archive-days-value">90</span>${t('common.day', 'days')}
                     </div>
                     <div style="margin-bottom: 16px;">
-                        <label style="display: block; margin-bottom: 8px;">删除天数</label>
+                        <label style="display: block; margin-bottom: 8px;">${t('htConfig.deleteDays', 'Delete Days')}</label>
                         <input type="range" id="ht-delete-days" min="90" max="730" value="180" style="width: 100%;">
-                        <span id="ht-delete-days-value">180</span>天
+                        <span id="ht-delete-days-value">180</span>${t('common.day', 'days')}
                     </div>
                     <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #eae9e7;">
                         <button id="ht-save-config" style="padding: 8px 24px; background: #1890ff; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                            保存配置
+                            ${t('htConfig.save', 'Save Config')}
                         </button>
                         <span id="ht-save-status" style="margin-left: 16px; color: #52c41a;"></span>
                     </div>
@@ -2204,7 +2930,7 @@
         .catch(err => {
             console.error('[HumanThinking] 加载配置失败:', err);
             const loadingDiv = container.querySelector('#ht-config-loading');
-            if (loadingDiv) loadingDiv.innerHTML = '加载失败，使用默认配置';
+            if (loadingDiv) loadingDiv.innerHTML = t('htConfig.loadFailed', 'Load failed, using default config');
             const contentDiv = container.querySelector('#ht-config-content');
             if (contentDiv) contentDiv.style.display = 'block';
         });
@@ -2235,7 +2961,7 @@
         .then(data => {
             const status = container.querySelector('#ht-save-status');
             if (status) {
-                status.textContent = '✓ 保存成功';
+                status.textContent = t('htConfig.saveSuccess', '✓ Save successful');
                 setTimeout(() => { status.textContent = ''; }, 3000);
             }
         })
@@ -2243,7 +2969,7 @@
             console.error('[HumanThinking] 保存配置失败:', err);
             const status = container.querySelector('#ht-save-status');
             if (status) {
-                status.textContent = '✗ 保存失败';
+                status.textContent = t('htConfig.saveError', '✗ Save failed');
                 status.style.color = '#ff4d4f';
                 setTimeout(() => { status.textContent = ''; status.style.color = '#52c41a'; }, 3000);
             }

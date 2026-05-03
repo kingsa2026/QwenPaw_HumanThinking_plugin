@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 # 当前版本
-CURRENT_VERSION = "1.1.4.post2"
+CURRENT_VERSION = "1.1.5.post1"
 CURRENT_SCHEMA_VERSION = "5.0.0"
 MIN_COMPATIBLE_VERSION = "0.0.5"
 
@@ -39,9 +39,9 @@ class VersionManager:
             prerelease = ""
         
         parts = main_part.split(".")
-        major = int(parts[0]) if len(parts) > 0 else 0
-        minor = int(parts[1]) if len(parts) > 1 else 0
-        patch = int(parts[2]) if len(parts) > 2 else 0
+        major = int(parts[0]) if len(parts) > 0 and parts[0] else 0
+        minor = int(parts[1]) if len(parts) > 1 and parts[1] else 0
+        patch = int(parts[2]) if len(parts) > 2 and parts[2] else 0
         
         return (major, minor, patch, prerelease)
 

@@ -66,7 +66,7 @@ class ChannelAwareMemoryManager:
         self.enable_cross_channel_bridge = enable_cross_channel_bridge
 
         # 缓存池：按 agent_id 隔离
-        self.cache_pool = AgentCachePool(agent_id)
+        self.cache_pool = AgentCachePool(agent_id=agent_id, db=self.db)
 
         # 会话桥接：负责新 Session 的记忆继承
         self.session_bridge = SessionBridgeEngine(self.db)
@@ -138,10 +138,9 @@ class ChannelAwareMemoryManager:
         """
         # 构建记忆键
         memory_key = build_memory_key(
-            channel_id=context.channel_id,
-            user_id=context.user_id,
-            session_id=context.session_id,
             agent_id=self.agent_id,
+            target_id=context.user_id,
+            user_id=context.user_id,
         )
 
         # 写入数据库
@@ -195,13 +194,6 @@ class ChannelAwareMemoryManager:
             return cached
 
         # 缓存未命中，查询数据库
-        memory_key_pattern = build_memory_key(
-            channel_id=context.channel_id,
-            user_id=context.user_id,
-            session_id=context.session_id,
-            agent_id=self.agent_id,
-        )
-
         memories = await self.db.query_memories(
             agent_id=self.agent_id,
             user_id=context.user_id,

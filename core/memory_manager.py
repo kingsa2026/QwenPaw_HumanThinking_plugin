@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from qwenpaw.agents.memory.base_memory_manager import BaseMemoryManager
+from qwenpaw.agents.memory.base_memory_manager import BaseMemoryManager, memory_registry
 from agentscope.message import Msg
 from agentscope.tool import ToolResponse
 from agentscope.memory import InMemoryMemory
@@ -20,7 +20,6 @@ from .cache_pool import AgentCachePool
 from .session_buffer import MemoryItem
 from .session_bridge import SessionBridgeEngine
 from .emotional_engine import EmotionalContinuityEngine
-from ..search.vector import TFIDFSearchEngine
 
 logger = logging.getLogger(__name__)
 
@@ -232,16 +231,13 @@ class ContextLoadingInMemory(InMemoryMemory):
     - 一次性加载：会话开始时加载一次，之后由 Agent 自动标记重要记忆
     """
     
-    # 对齐 ReMeLight 标准的上下文加载参数
-    MAX_RESULTS_DB_MISS = 5    # 缓存未命中时 DB 查询数量（同 ReMeLight max_results=5）
-    MAX_RESULTS_DB_HIT = 3     # 缓存命中时 DB 补充数量
-    MAX_RESULTS_FINAL = 5      # 最终注入上下文的最大记忆数
-    MAX_MEMORY_CHARS = 150     # 单条记忆最大字符数（对齐 ReMeLight 摘要压缩机制）
-    
-    # 排除最近N轮对话的记忆，防止与QwenPaw压缩摘要重复
-    # QwenPaw压缩后保留最近3轮，所以排除最近3轮
+    MAX_RESULTS_DB_MISS = 5
+    MAX_RESULTS_DB_HIT = 3
+    MAX_RESULTS_FINAL = 5
+    MAX_MEMORY_CHARS = 300
+    MAX_CONTEXT_CHARS = 3000
     EXCLUDE_RECENT_ROUNDS = 3
-    ROUND_DURATION_SECONDS = 300  # 每轮约5分钟
+    ROUND_DURATION_SECONDS = 300
     
     def __init__(self):
         super().__init__()
@@ -319,116 +315,29 @@ class ContextLoadingInMemory(InMemoryMemory):
 
 【重要】请使用 store_memory() 存储重要信息，禁止写入外部文件！
 
-### store_memory() 参数说明
+### store_memory(content, importance, memory_type)
+- content: 要记忆的内容（必填）
+- importance: 重要程度 1-5（必填，4-5自动提升长期记忆）
+- memory_type: fact|preference|emotion|general（必填）
 
-**调用方式**：在思考过程中直接调用 store_memory() 函数，无需额外配置
+### 示例
+store_memory("用户喜欢简洁风格", 4, "preference")
+store_memory("订单号12345", 5, "fact")
+store_memory("用户表示满意", 4, "emotion")
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| content | string | ✅ | 要记忆的内容 |
-| importance | int | ✅ | 重要程度 1-5（4-5会自动提升为长期记忆）|
-| memory_type | string | ✅ | 记忆类型（见下方分类表） |
-| session_id | string | - | 会话ID（自动使用当前会话）|
-
-### memory_type（记忆类型）- 必填参数
-
-**正确分类示例**：
-
-| 场景 | memory_type | importance | 示例 |
-|------|-------------|------------|------|
-| 用户说"我喜欢..." | preference | 4-5 | store_memory("用户喜欢简洁风格", 4, "preference") |
-| 用户说"我的订单是..." | fact | 4-5 | store_memory("订单号12345", 5, "fact") |
-| 用户说"谢谢/不满意" | emotion | 3-4 | store_memory("用户表示满意", 4, "emotion") |
-| 普通对话内容 | general | 1-3 | store_memory("对话摘要...", 2, "general") |
-
-### importance（重要程度）
-
-| 分数 | 含义 | 使用场景 |
-|------|------|----------|
-| 5 | 关键信息 | 身份证、密码、重大决策 |
-| 4 | 重要信息 | 偏好、订单、承诺 |
-| 3 | 一般信息 | 普通对话内容 |
-| 2 | 临时信息 | 可遗忘的细节 |
-| 1 | 噪音 | 客套话、无意义内容 |
-
-### 存储示例
-
-```python
-# 记住用户偏好
-store_memory(
-    content="用户喜欢简洁专业的回答风格，不喜欢太长的解释",
-    importance=4,
-    memory_type="preference"
-)
-
-# 记住订单信息
-store_memory(
-    content="订单号 #12345，商品：iPhone 15 Pro Max，金额：9999元",
-    importance=5,
-    memory_type="fact"
-)
-
-# 记住情感反馈
-store_memory(
-    content="用户对服务很满意，感谢",
-    importance=4,
-    memory_type="emotion"
-)
-```
-
-### 自动处理
-
-- **会话首次**：系统自动检索相关历史记忆注入上下文
-- **对话过程中**：请主动识别重要信息并使用 store_memory() 存储
-- **长期记忆**：importance >= 4 或 六维评分 >= 0.5 → 自动进入 long_term 层
-- **遗忘流程**（可在设置中自定义）：
-  - {frozen_days}天无访问 → 进入冷藏（暂停衰减）
-  - 冷藏{archive_days}天 → 归档到独立存储
-  - 归档{delete_days}天 → 彻底删除
-- 访问冷藏记忆会自动唤醒
-
-### 记忆层级
-
-| 层级 | 说明 |
-|------|------|
-| working | 当前会话工作记忆 |
-| short_term | 短期记忆（{frozen_days}天内）|
-| long_term | 长期记忆（重要信息）|
-| frozen | 冷藏（{frozen_days}天无访问）|
-| archived | 归档（冷藏{archive_days}天）|
+### 遗忘流程
+{frozen_days}天无访问→冷藏→冷藏{archive_days}天归档→归档{delete_days}天删除
 
 ### 🌙 睡眠机制
-
-Agent 会在空闲时自动进入睡眠模式进行记忆整理：
-
-#### 睡眠阶段
-
-| 阶段 | 触发条件 | 功能 |
-|------|----------|------|
-| 浅层睡眠 | 空闲30分钟 | 扫描7天日志，去重/过滤，标记重要信息 |
-| REM | 空闲60分钟 | 提取主题，发现跨对话模式，识别持久真理 |
-| 深层睡眠 | 空闲120分钟 | 六维评分，高分写入长期记忆 |
-
-#### 睡眠触发条件
-
-- **心跳活动不会唤醒**：日常心跳不会触发唤醒
-- **定时任务不会唤醒**：后台任务不会触发唤醒
-- **新会话唤醒**：只有新用户消息才会唤醒深层睡眠的 Agent
-
-#### 注意事项
-
-- Agent 在睡眠期间不会响应，但不会丢失任何记忆
-- 睡眠整理是后台自动进行，Agent 无需干预
-- 重要信息建议主动使用 store_memory() 存储，确保被保留
-
+空闲30分钟→浅睡(去重)→60分钟→REM(提取主题)→120分钟→深睡(评分归档)
 """
         
         # 检查是否已有肌肉记忆（importance=5 且包含关键词）
         has_muscle_memory = False
         if memories:
             for m in memories:
-                content = m.get("content", "")
-                importance = m.get("importance", 0)
+                content = m.content if hasattr(m, 'content') else m.get("content", "")
+                importance = m.importance if hasattr(m, 'importance') else m.get("importance", 0)
                 if importance >= 5 and ("记忆系统" in content or "store_memory" in content or "肌肉记忆" in content):
                     has_muscle_memory = True
                     break
@@ -438,33 +347,108 @@ Agent 会在空闲时自动进入睡眠模式进行记忆整理：
             return
         
         # 按重要性排序
-        memories.sort(key=lambda m: m.importance, reverse=True)
+        memories.sort(key=lambda m: m.importance if hasattr(m, 'importance') else m.get("importance", 0), reverse=True)
         top_memories = memories[:self.MAX_RESULTS_FINAL]
         
-        # 构建格式化的记忆字符串
         memory_parts = []
         for m in top_memories:
-            role_prefix = "用户" if m.role == "user" else "助手"
-            channel_name = self._extract_channel_name(m.session_id)
-            channel_tag = f" ({channel_name})" if channel_name else ""
-            type_tag = f" [{m.memory_type}]" if m.memory_type else ""
+            role = m.role if hasattr(m, 'role') else m.get("role", "assistant")
+            session_id = m.session_id if hasattr(m, 'session_id') else m.get("session_id", "")
+            memory_type = m.memory_type if hasattr(m, 'memory_type') else m.get("memory_type", "")
+            content = m.content if hasattr(m, 'content') else m.get("content", "")
             
-            # 格式: [角色 (渠道)]: 内容 [类型]
-            memory_parts.append(f"[{role_prefix}{channel_tag}]: {m.content[:self.MAX_MEMORY_CHARS]}{type_tag}")
+            role_prefix = "用户" if role == "user" else "助手"
+            channel_name = self._extract_channel_name(session_id)
+            channel_tag = f" ({channel_name})" if channel_name else ""
+            type_tag = f" [{memory_type}]" if memory_type else ""
+            
+            summarized = self._summarize_content(content, self.MAX_MEMORY_CHARS)
+            memory_parts.append(f"[{role_prefix}{channel_tag}]: {summarized}{type_tag}")
         
         if memory_parts:
-            # 有肌肉记忆后，只显示历史记忆，不显示提示词
             if has_muscle_memory:
-                self._long_term_memory = "## 📋 相关历史记忆\n\n" + "\n\n".join(memory_parts)
+                result = "## 📋 相关历史记忆\n\n" + "\n\n".join(memory_parts)
             else:
-                # 首次：显示完整提示词 + 任务
-                memory_guide += """
-
-**【任务】请将以上记忆系统的使用方法，用你自己的理解，写成 3-5 条最重要的规则，存储到数据库中（importance=5, memory_type="general"）。这是你的"肌肉记忆"，会让你永远记住如何使用记忆系统。**
-"""
-                self._long_term_memory = memory_guide + "## 📋 相关历史记忆\n\n" + "\n\n".join(memory_parts)
-            logger.debug(f"Loaded {len(memory_parts)} relevant memories into context")
+                memory_guide += "\n\n**【任务】请将以上记忆系统的使用方法，用你自己的理解，写成 3-5 条最重要的规则，存储到数据库中（importance=5, memory_type=\"general\"）。这是你的\"肌肉记忆\"，会让你永远记住如何使用记忆系统。**\n"
+                result = memory_guide + "## 📋 相关历史记忆\n\n" + "\n\n".join(memory_parts)
+            
+            if len(result) > self.MAX_CONTEXT_CHARS:
+                while len(result) > self.MAX_CONTEXT_CHARS and memory_parts:
+                    memory_parts.pop()
+                    if has_muscle_memory:
+                        result = "## 📋 相关历史记忆\n\n" + "\n\n".join(memory_parts)
+                    else:
+                        result = memory_guide + "## 📋 相关历史记忆\n\n" + "\n\n".join(memory_parts)
+                if len(result) > self.MAX_CONTEXT_CHARS:
+                    result = result[:self.MAX_CONTEXT_CHARS - 3] + "..."
+            
+            self._long_term_memory = result
+            logger.debug(f"Loaded {len(memory_parts)} relevant memories into context ({len(result)} chars)")
     
+    @staticmethod
+    def _summarize_content(content: str, max_chars: int) -> str:
+        """智能摘要提取，保留关键信息而非简单截断
+        
+        策略：
+        1. 短内容直接返回
+        2. 按句子分割，优先保留包含关键信息的句子
+        3. 关键信息指标：含数字、专有名词、否定词、情感词
+        """
+        if not content or len(content) <= max_chars:
+            return content
+        
+        if max_chars <= 20:
+            return content[:max_chars - 3] + "..."
+        
+        sentences = []
+        current = ""
+        for ch in content:
+            current += ch
+            if ch in '。！？；\n.!?;':
+                sentences.append(current.strip())
+                current = ""
+        if current.strip():
+            sentences.append(current.strip())
+        
+        if not sentences:
+            return content[:max_chars - 3] + "..."
+        
+        def sentence_score(s: str) -> float:
+            score = 0.0
+            has_digits = any(c.isdigit() for c in s)
+            if has_digits:
+                score += 2.0
+            negation_words = ['不', '没', '无', '别', '非', '未', '否', '勿', '莫']
+            if any(w in s for w in negation_words):
+                score += 1.5
+            key_patterns = ['喜欢', '讨厌', '偏好', '重要', '必须', '禁止', '需要', '过敏', '订单', '账号', '密码', '地址', '电话']
+            for p in key_patterns:
+                if p in s:
+                    score += 1.0
+            score += len(s) * 0.01
+            return score
+        
+        scored = [(s, sentence_score(s)) for s in sentences]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        
+        selected = []
+        total_len = 0
+        for s, _ in scored:
+            if total_len + len(s) + 1 <= max_chars - 3:
+                selected.append(s)
+                total_len += len(s) + 1
+        
+        if not selected and sentences:
+            selected = [sentences[0][:max_chars - 6]]
+        
+        original_order = [s for s in sentences if s in selected]
+        
+        result = "".join(original_order)
+        if len(result) > max_chars - 3:
+            result = result[:max_chars - 3]
+        
+        return result + "..." if len(content) > len(result) else result
+
     def _extract_channel_name(self, session_id: str) -> str:
         """从 session_id 中提取渠道名称
         
@@ -497,13 +481,12 @@ Agent 会在空闲时自动进入睡眠模式进行记忆整理：
     
     def _build_query_from_context(self) -> str:
         """从当前对话内容中提取查询词"""
-        # 从 content 中获取最近的对话内容
         if not self.content:
             return ""
         
-        # 取最近 3 条对话的内容作为查询
         recent_messages = []
-        for msg, marks in reversed(self.content):
+        for item in reversed(self.content):
+            msg = item[0] if isinstance(item, (tuple, list)) else item
             if hasattr(msg, "content"):
                 content = msg.content if isinstance(msg.content, str) else str(msg.content)
                 recent_messages.append(content)
@@ -513,9 +496,7 @@ Agent 会在空闲时自动进入睡眠模式进行记忆整理：
         if not recent_messages:
             return ""
         
-        # 拼接作为查询词
         query = " ".join(recent_messages[::-1])
-        # 截断到 500 字符
         return query[:500]
     
     async def clear_context(self):
@@ -538,12 +519,16 @@ Agent 会在空闲时自动进入睡眠模式进行记忆整理：
         return 0
 
 
+@memory_registry.register("human_thinking")
 class HumanThinkingMemoryManager(BaseMemoryManager):
     """
     HumanThinking Memory Manager v1.0.0
     
     解决 QwenPaw Agent 跨Session认知与情感连续性问题
     """
+    
+    MAX_MEMORY_CHARS = 150
+    MAX_SEARCH_RESULTS = 5
     
     def __init__(
         self,
@@ -755,7 +740,7 @@ HumanThinking 是你的记忆管理系统，具有以下能力：
                 metadata={
                     "is_system_memory": True,
                     "category": "usage_guide",
-                    "version": "1.1.4.post2"
+                    "version": "1.1.5.post1"
                 }
             )
             
@@ -772,6 +757,7 @@ HumanThinking 是你的记忆管理系统，具有以下能力：
             config_path = self.db_path.parent / "human_thinking_config.json"
             
             if not config_path.exists():
+                config_path.parent.mkdir(parents=True, exist_ok=True)
                 default_config = {
                     "enable_cross_session": True,
                     "enable_emotion": True,
@@ -933,7 +919,7 @@ After reading, please save key points to your memory database using `store_memor
             pass
         
         logger.debug(f"Stored memory: temp_id={temp_id}, session={sid}")
-        return hash(temp_id) % 1000000
+        return temp_id
     
     async def memory_search(
         self,
@@ -957,69 +943,28 @@ After reading, please save key points to your memory database using `store_memor
         if not self.db:
             return ToolResponse(content="Database not initialized")
 
-        # 1. 使用 TF-IDF 语义搜索数据库
-        tfidf_engine = TFIDFSearchEngine()
-
-        # 从数据库获取所有记忆用于 TF-IDF 索引
-        # 注：实际使用中可预先构建索引，此处为简化实现
-        # 关键：添加 target_id 隔离
-        memories = await self.db.get_active_memories(
-            agent_id=self.agent_id,
-            target_id=tid,  # 添加 target_id 隔离
-            limit=1000  # 限制搜索范围
-        )
+        config = get_config(self.agent_id, self.working_dir)
         
-        # 构建 TF-IDF 索引
-        for m in memories:
-            tfidf_engine.add_document(str(m.id), m.content)
-        
-        # TF-IDF 语义搜索
-        tfidf_results = tfidf_engine.search(
+        results = await self.db.search_memories(
             query=query,
-            max_results=max_results * 2,  # 多取一些以便后续合并
+            agent_id=self.agent_id,
+            session_id=None if config.enable_cross_session else self._current_session_id,
+            user_id=self.user_id,
+            target_id=self._current_target_id,
+            cross_session=config.enable_cross_session,
+            max_results=max_results,
             min_score=min_score
         )
         
-        # 2. 获取对应的 MemoryRecord
-        all_memories = []
-        memory_map = {str(m.id): m for m in memories}
-        
-        for doc_id, tfidf_score in tfidf_results:
-            if doc_id in memory_map:
-                m = memory_map[doc_id]
-                all_memories.append({
-                    "content": m.content,
-                    "score": tfidf_score,
-                    "source": m.session_id,
-                    "session_id": m.session_id,
-                    "created_at": m.created_at
-                })
-        
-        # 3. 合并缓存中的相关记忆（缓存优先级更高）
-        cached_memories = await self.cache_pool.search(query, sid) if self.cache_pool else []
-        for m in cached_memories[:max_results]:
-            # 检查是否已在结果中
-            if not any(existing["content"] == m.content for existing in all_memories):
-                all_memories.append({
-                    "content": m.content,
-                    "score": 0.95,  # 缓存命中赋予较高分数
-                    "source": m.session_id,
-                    "session_id": m.session_id,
-                    "created_at": m.created_at
-                })
-        
-        # 4. 按分数排序并限制结果数
-        all_memories.sort(key=lambda x: x["score"], reverse=True)
-        filtered_memories = all_memories[:max_results]
-        
-        # 5. 构建响应
-        if not filtered_memories:
+        if not results:
             return ToolResponse(content="未找到相关记忆")
         
         result_parts = []
-        for m in filtered_memories:
+        for m in results:
+            source = m.session_id if hasattr(m, 'session_id') else ""
+            content = m.content if hasattr(m, 'content') else ""
             result_parts.append(
-                f"[{m['source']}] (相关性: {m['score']:.2f})\n{m['content']}"
+                f"[{source}]\n{content[:self.MAX_MEMORY_CHARS * 2]}"
             )
         
         return ToolResponse(content="\n---\n".join(result_parts))
@@ -1030,12 +975,14 @@ After reading, please save key points to your memory database using `store_memor
         current_session_id: Optional[str] = None,
         max_results: int = 5
     ) -> MemoryResponse:
-        """获取相关历史记忆"""
-        return await self.memory_search(
+        tool_response = await self.memory_search(
             query=context,
-            session_id=current_session_id,
-            cross_session=True,
             max_results=max_results
+        )
+        return MemoryResponse(
+            memories=[{"content": tool_response.content}],
+            total_count=1,
+            query=context
         )
     
     async def compact_memory(
@@ -1391,12 +1338,3 @@ After reading, please save key points to your memory database using `store_memor
             logger.info("Created ContextLoadingInMemory with cache injection")
         return self._in_memory_memory
 
-    async def post_memory_operation(
-        self,
-        agent_id: str,
-        operation_type: str,
-        status: str,
-        **kwargs
-    ):
-        """记忆操作后钩子"""
-        pass

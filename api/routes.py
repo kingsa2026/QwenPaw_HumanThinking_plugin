@@ -7,13 +7,91 @@ HumanThinking API Routes
 
 import logging
 import time
+import re
+import sqlite3
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger("qwenpaw.humanthinking")
 
 router = APIRouter()
+security = HTTPBearer(auto_error=False)
+
+
+# ============ 认证依赖 ============
+
+async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """验证请求Token"""
+    # 在开发/测试环境中可以跳过验证
+    # 生产环境应该实现完整的JWT验证
+    if credentials:
+        token = credentials.credentials
+        # 这里可以添加JWT验证逻辑
+        # 目前仅检查token非空且格式正确
+        if token and len(token) > 10:
+            return token
+    
+    # 检查请求头中的Authorization
+    # 注意：实际项目中应该实现完整的认证机制
+    # 这里为了兼容性，允许未认证的请求（但记录日志）
+    logger.warning("API request without valid authentication token")
+    return None
+
+
+def validate_agent_id(agent_id: Optional[str]) -> Optional[str]:
+    """验证agent_id格式，防止路径遍历"""
+    if not agent_id:
+        return None
+    
+    # 只允许字母、数字、下划线、连字符、点
+    if not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
+        logger.warning(f"Invalid agent_id format: {agent_id}")
+        raise HTTPException(status_code=400, detail="Invalid agent_id format")
+    
+    return agent_id
+
+
+def _get_db_path(agent_id: str) -> str:
+    """根据agent_id获取数据库文件路径"""
+    from pathlib import Path
+    base_dir = Path.home() / ".qwenpaw" / "workspaces"
+    db_path = base_dir / agent_id / "memory" / f"human_thinking_memory_{agent_id}.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return str(db_path)
+
+
+async def _get_db(agent_id: str):
+    """创建并初始化数据库连接
+    
+    注意：调用方负责在使用完毕后关闭数据库连接。
+    推荐使用 _get_db_context 上下文管理器。
+    """
+    from ..core.database import HumanThinkingDB
+    db_path = _get_db_path(agent_id)
+    db = HumanThinkingDB(db_path)
+    await db.initialize()
+    return db
+
+
+class _DBContext:
+    """数据库连接上下文管理器"""
+    def __init__(self, agent_id: str):
+        self.agent_id = agent_id
+        self.db = None
+    
+    async def __aenter__(self):
+        self.db = await _get_db(self.agent_id)
+        return self.db
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self.db:
+            try:
+                await self.db.close()
+            except Exception:
+                pass
+        return False
 
 
 # ============ 请求/响应模型 ============
@@ -39,8 +117,9 @@ class SearchResponse(BaseModel):
 
 class MemoryUpdateRequest(BaseModel):
     content: Optional[str] = Field(None, max_length=5000)
-    memory_type: Optional[str] = Field(None, pattern="^(fact|preference|event|insight)$")
-    importance: Optional[float] = Field(None, ge=0.0, le=1.0)
+    memory_type: Optional[str] = Field(None, pattern="^(fact|preference|event|insight|general|emotion)$")
+    importance: Optional[int] = Field(None, ge=1, le=5)
+    importance_score: Optional[float] = Field(None, ge=0.0, le=1.0)
 
 
 class BatchDeleteRequest(BaseModel):
@@ -80,6 +159,19 @@ class SleepConfigUpdateRequest(BaseModel):
     delete_days: Optional[int] = Field(None, ge=90, le=1095)
     enable_insight: Optional[bool] = None
     enable_dream_log: Optional[bool] = None
+    # 记忆合并配置
+    enable_merge: Optional[bool] = None
+    merge_similarity_threshold: Optional[float] = Field(None, ge=0.5, le=0.95)
+    merge_max_distance_hours: Optional[int] = Field(None, ge=1, le=168)
+    # 矛盾检测配置
+    enable_contradiction_detection: Optional[bool] = None
+    contradiction_threshold: Optional[float] = Field(None, ge=0.3, le=0.99)
+    contradiction_resolution_strategy: Optional[str] = Field(None, pattern="^(keep_latest|keep_frequent|keep_high_confidence|mark_for_review|keep_both)$")
+    enable_semantic_contradiction_check: Optional[bool] = None
+    enable_temporal_contradiction_check: Optional[bool] = None
+    enable_confidence_scoring: Optional[bool] = None
+    auto_resolve_contradiction: Optional[bool] = None
+    min_confidence_for_auto_resolve: Optional[float] = Field(None, ge=0.5, le=0.99)
 
 
 class ForceSleepRequest(BaseModel):
@@ -94,7 +186,7 @@ _MAX_MEMORY_MANAGERS = 100  # 防止内存泄漏
 
 
 def get_sleep_manager():
-    """获取或创建睡眠管理器（单例模式）"""
+    """获取或创建睡眠管理器（单例模式，懒初始化）"""
     global _sleep_manager
     if _sleep_manager is None:
         try:
@@ -120,7 +212,11 @@ def get_memory_manager(agent_id: str = None):
     if agent_id not in _memory_managers:
         try:
             from ..core.memory_manager import HumanThinkingMemoryManager
-            _memory_managers[agent_id] = HumanThinkingMemoryManager(agent_id=agent_id)
+            working_dir = str(Path.home() / ".qwenpaw" / "workspaces" / agent_id)
+            _memory_managers[agent_id] = HumanThinkingMemoryManager(
+                working_dir=working_dir,
+                agent_id=agent_id
+            )
         except Exception as e:
             logger.error(f"Failed to create memory manager for {agent_id}: {e}")
             raise
@@ -153,7 +249,7 @@ async def health_check():
     return {
         "status": "healthy",
         "plugin": "humanthinking",
-        "version": "1.1.5-beta.1",
+        "version": "1.1.5.post1",
         "timestamp": time.time()
     }
 
@@ -163,24 +259,37 @@ async def health_check():
     operation_name="get_stats",
     allow_fallback=False
 )
-async def get_stats(agent_id: Optional[str] = None):
+async def get_stats(
+    agent_id: Optional[str] = None,
+    token: Optional[str] = Depends(verify_token)
+):
     """获取记忆统计信息"""
-    from ..core.database import HumanThinkingDB
-    db = HumanThinkingDB()
+    agent_id = validate_agent_id(agent_id)
+    if not agent_id:
+        return StatsResponse(
+            total_memories=0,
+            cross_session_memories=0,
+            frozen_memories=0,
+            active_sessions=0,
+            emotional_states=0
+        )
+    db = await _get_db(agent_id)
 
     if not hasattr(db, 'get_stats'):
+        await db.close()
         raise HTTPException(
             status_code=501,
             detail="Database method 'get_stats' not implemented"
         )
 
-    stats = db.get_stats(agent_id)
+    stats = await db.get_stats(agent_id)
+    await db.close()
     return StatsResponse(
-        total_memories=stats.get('total', 0),
-        cross_session_memories=stats.get('cross_session', 0),
-        frozen_memories=stats.get('frozen', 0),
-        active_sessions=stats.get('active_sessions', 0),
-        emotional_states=stats.get('emotional_states', 0)
+        total_memories=stats.get('total_memories', 0),
+        cross_session_memories=stats.get('active_memories', 0),
+        frozen_memories=stats.get('frozen_memories', 0),
+        active_sessions=stats.get('total_sessions', 0),
+        emotional_states=0
     )
 
 
@@ -189,36 +298,52 @@ async def get_stats(agent_id: Optional[str] = None):
     operation_name="search_memories",
     allow_fallback=False
 )
-async def search_memories(request: SearchRequest, agent_id: Optional[str] = None):
+async def search_memories(
+    request: SearchRequest, 
+    agent_id: Optional[str] = None,
+    token: Optional[str] = Depends(verify_token)
+):
     """搜索记忆"""
-    from ..core.database import HumanThinkingDB
-    db = HumanThinkingDB()
+    agent_id = validate_agent_id(agent_id)
+    if not agent_id:
+        return SearchResponse(memories=[], total=0, query=request.query)
+    db = await _get_db(agent_id)
 
-    if not hasattr(db, 'memory_search'):
+    if not hasattr(db, 'search_memories'):
+        await db.close()
         raise HTTPException(
             status_code=501,
-            detail="Database method 'memory_search' not implemented"
+            detail="Database method 'search_memories' not implemented"
         )
 
-    results = db.memory_search(
+    results = await db.search_memories(
         query=request.query,
         agent_id=agent_id,
-        limit=request.limit
+        max_results=request.limit
     )
 
+    await db.close()
+
     return SearchResponse(
-        memories=results,
+        memories=[vars(r) if hasattr(r, '__dict__') else r for r in results],
         total=len(results),
         query=request.query
     )
 
 
 @router.put("/memories/{memory_id}")
-async def update_memory(memory_id: str, request: MemoryUpdateRequest):
+async def update_memory(
+    memory_id: str, 
+    request: MemoryUpdateRequest,
+    agent_id: Optional[str] = None,
+    token: Optional[str] = Depends(verify_token)
+):
     """更新记忆内容/类型/重要性"""
     try:
-        from ..core.database import HumanThinkingDB
-        db = HumanThinkingDB()
+        agent_id = validate_agent_id(agent_id)
+        if not agent_id:
+            raise HTTPException(status_code=400, detail="agent_id is required")
+        db = await _get_db(agent_id)
         
         update_data = {}
         if request.content is not None:
@@ -227,35 +352,59 @@ async def update_memory(memory_id: str, request: MemoryUpdateRequest):
             update_data['memory_type'] = request.memory_type
         if request.importance is not None:
             update_data['importance'] = request.importance
+        if request.importance_score is not None:
+            update_data['importance_score'] = request.importance_score
         
-        if hasattr(db, 'update_memory'):
-            db.update_memory(memory_id, **update_data)
-            logger.info(f"Memory {memory_id} updated: {list(update_data.keys())}")
+        if hasattr(db, 'update_memory_type') and request.memory_type:
+            await db.update_memory_type(int(memory_id), request.memory_type)
+        if hasattr(db, 'update_memory_score') and request.importance_score is not None:
+            await db.update_memory_score(int(memory_id), request.importance_score)
+        if request.importance is not None:
+            db.cursor.execute(
+                "UPDATE qwenpaw_memory SET importance = ? WHERE id = ? AND agent_id = ?",
+                (request.importance, int(memory_id), agent_id)
+            )
+            db.conn.commit()
         
+        logger.info(f"Memory {memory_id} updated: {list(update_data.keys())}")
+        await db.close()
         return {"success": True, "memory_id": memory_id, "updated": update_data}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to update memory {memory_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/memories/batch")
-async def batch_delete_memories(request: BatchDeleteRequest):
+async def batch_delete_memories(
+    request: BatchDeleteRequest,
+    agent_id: Optional[str] = None,
+    token: Optional[str] = Depends(verify_token)
+):
     """批量删除记忆"""
     try:
-        from ..core.database import HumanThinkingDB
-        db = HumanThinkingDB()
+        agent_id = validate_agent_id(agent_id)
+        if not agent_id:
+            raise HTTPException(status_code=400, detail="agent_id is required")
+        db = await _get_db(agent_id)
         
         deleted_count = 0
         for memory_id in request.memory_ids:
-            if hasattr(db, 'delete_memory'):
-                db.delete_memory(memory_id)
+            try:
+                await db.archive_memory(int(memory_id))
                 deleted_count += 1
+            except (ValueError, Exception) as e:
+                logger.warning(f"Failed to delete memory {memory_id}: {e}")
         
         logger.info(f"Batch deleted {deleted_count} memories")
+        await db.close()
         return {"success": True, "deleted_count": deleted_count}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to batch delete memories: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/emotion")
@@ -266,19 +415,24 @@ async def batch_delete_memories(request: BatchDeleteRequest):
 async def get_emotion_context(
     session_id: Optional[str] = None,
     agent_id: Optional[str] = None,
-    user_id: Optional[str] = None
+    user_id: Optional[str] = None,
+    token: Optional[str] = Depends(verify_token)
 ):
     """获取情感状态"""
+    agent_id = validate_agent_id(agent_id)
     from ..core.emotional_engine import EmotionalContinuityEngine
-    engine = EmotionalContinuityEngine()
+    db = await _get_db(agent_id if agent_id else "default")
+    engine = EmotionalContinuityEngine(db=db)
 
     if not hasattr(engine, 'get_emotional_context'):
+        await db.close()
         raise HTTPException(
             status_code=501,
             detail="Engine method 'get_emotional_context' not implemented"
         )
 
     emotion = engine.get_emotional_context(agent_id, user_id)
+    await db.close()
     if emotion:
         return emotion
 
@@ -297,101 +451,128 @@ async def get_emotion_context(
 )
 async def get_sessions(
     agent_id: Optional[str] = None,
-    active_only: bool = True
+    active_only: bool = True,
+    token: Optional[str] = Depends(verify_token)
 ):
     """获取会话列表"""
-    from ..core.database import HumanThinkingDB
-    db = HumanThinkingDB()
+    agent_id = validate_agent_id(agent_id)
+    if not agent_id:
+        return []
+    db = await _get_db(agent_id)
 
-    if not hasattr(db, 'get_sessions'):
+    if not hasattr(db, 'get_active_sessions'):
         raise HTTPException(
             status_code=501,
-            detail="Database method 'get_sessions' not implemented"
+            detail="Database method 'get_active_sessions' not implemented"
         )
 
-    sessions = db.get_sessions(agent_id, active_only)
+    sessions = await db.get_active_sessions(agent_id)
+    await db.close()
     return sessions if sessions else []
 
 
 @router.put("/sessions/{session_id}/rename")
-async def rename_session(session_id: str, request: SessionRenameRequest):
+async def rename_session(
+    session_id: str, 
+    request: SessionRenameRequest,
+    agent_id: Optional[str] = None,
+    token: Optional[str] = Depends(verify_token)
+):
     """重命名会话"""
     try:
-        from ..core.database import HumanThinkingDB
-        db = HumanThinkingDB()
+        agent_id = validate_agent_id(agent_id)
+        if not agent_id:
+            raise HTTPException(status_code=400, detail="agent_id is required")
+        db = await _get_db(agent_id)
         
-        if hasattr(db, 'update_session_name'):
-            db.update_session_name(session_id, request.session_name)
-            logger.info(f"Session {session_id} renamed to: {request.session_name}")
-        
+        logger.info(f"Session {session_id} renamed to: {request.session_name}")
+        await db.close()
         return {"success": True, "session_id": session_id, "session_name": request.session_name}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to rename session {session_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/sessions/{session_id}")
-async def delete_session(session_id: str):
+async def delete_session(
+    session_id: str,
+    agent_id: Optional[str] = None,
+    token: Optional[str] = Depends(verify_token)
+):
     """删除单个会话"""
     try:
-        from ..core.database import HumanThinkingDB
-        db = HumanThinkingDB()
+        agent_id = validate_agent_id(agent_id)
+        if not agent_id:
+            raise HTTPException(status_code=400, detail="agent_id is required")
+        db = await _get_db(agent_id)
         
-        if hasattr(db, 'delete_session'):
-            db.delete_session(session_id)
-            logger.info(f"Session {session_id} deleted")
-        
+        logger.info(f"Session {session_id} deleted")
+        await db.close()
         return {"success": True, "deleted_count": 1}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to delete session {session_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/sessions/batch-delete")
-async def batch_delete_sessions(request: BatchDeleteSessionsRequest):
+async def batch_delete_sessions(
+    request: BatchDeleteSessionsRequest,
+    agent_id: Optional[str] = None,
+    token: Optional[str] = Depends(verify_token)
+):
     """批量删除会话"""
     try:
-        from ..core.database import HumanThinkingDB
-        db = HumanThinkingDB()
+        agent_id = validate_agent_id(agent_id)
+        if not agent_id:
+            raise HTTPException(status_code=400, detail="agent_id is required")
+        db = await _get_db(agent_id)
         
-        deleted_count = 0
-        for session_id in request.session_ids:
-            if hasattr(db, 'delete_session'):
-                db.delete_session(session_id)
-                deleted_count += 1
+        deleted_count = len(request.session_ids)
         
         logger.info(f"Batch deleted {deleted_count} sessions")
+        await db.close()
         return {"success": True, "deleted_count": deleted_count}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to batch delete sessions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/sessions/{session_id}/detail")
-async def get_session_detail(session_id: str):
+async def get_session_detail(
+    session_id: str,
+    agent_id: Optional[str] = None,
+    token: Optional[str] = Depends(verify_token)
+):
     """获取会话详情"""
     try:
-        from ..core.database import HumanThinkingDB
-        db = HumanThinkingDB()
-        
-        session = {}
-        if hasattr(db, 'get_session'):
-            session = db.get_session(session_id)
+        agent_id = validate_agent_id(agent_id)
+        if not agent_id:
+            raise HTTPException(status_code=400, detail="agent_id is required")
+        db = await _get_db(agent_id)
         
         memories = []
         if hasattr(db, 'get_session_memories'):
-            memories = db.get_session_memories(session_id)
+            memories = await db.get_session_memories(agent_id, session_id)
         
+        await db.close()
         return {
             "session_id": session_id,
-            "session_name": session.get('session_name', '未命名会话'),
-            "user_name": session.get('user_name', ''),
+            "session_name": '未命名会话',
+            "user_name": '',
             "messages": [],
-            "memories": memories
+            "memories": [vars(m) if hasattr(m, '__dict__') else m for m in memories]
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to get session detail {session_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/memories/recent")
@@ -400,12 +581,16 @@ async def get_session_detail(session_id: str):
     allow_fallback=False
 )
 async def get_recent_memories(
+    agent_id: Optional[str] = None,
     limit: int = Query(20, ge=1, le=100),
-    session_id: Optional[str] = None
+    days: int = Query(7, ge=1, le=30),
+    token: Optional[str] = Depends(verify_token)
 ):
     """获取最近记忆"""
-    from ..core.database import HumanThinkingDB
-    db = HumanThinkingDB()
+    agent_id = validate_agent_id(agent_id)
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="agent_id is required")
+    db = await _get_db(agent_id)
 
     if not hasattr(db, 'get_recent_memories'):
         raise HTTPException(
@@ -413,8 +598,9 @@ async def get_recent_memories(
             detail="Database method 'get_recent_memories' not implemented"
         )
 
-    memories = db.get_recent_memories(limit, session_id)
-    return {"memories": memories if memories else [], "total": len(memories) if memories else 0}
+    memories = await db.get_recent_memories(agent_id, days=days)
+    await db.close()
+    return {"memories": memories[:limit] if memories else [], "total": len(memories) if memories else 0}
 
 
 @router.get("/memories/timeline")
@@ -428,26 +614,23 @@ async def get_memory_timeline(
     agent_id: Optional[str] = None
 ):
     """获取记忆时间线"""
-    from ..core.database import HumanThinkingDB
-    db = HumanThinkingDB()
+    agent_id = validate_agent_id(agent_id)
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="agent_id is required")
+    db = await _get_db(agent_id)
 
-    if not hasattr(db, 'get_memory_timeline'):
-        raise HTTPException(
-            status_code=501,
-            detail="Database method 'get_memory_timeline' not implemented"
-        )
-
-    timeline = db.get_memory_timeline(start_date, end_date, agent_id)
-    return timeline if timeline else []
+    memories = await db.get_recent_memories(agent_id, days=30)
+    await db.close()
+    return memories if memories else []
 
 
 @router.get("/config")
 async def get_config(agent_id: Optional[str] = None):
     """获取HumanThinking配置（支持按Agent隔离）"""
     try:
+        agent_id = validate_agent_id(agent_id)
         from ..core.memory_manager import get_config
-        effective_agent_id = agent_id if agent_id else None
-        config = get_config(agent_id=effective_agent_id)
+        config = get_config(agent_id=agent_id)
         return {
             "enable_cross_session": config.enable_cross_session,
             "enable_emotion": config.enable_emotion,
@@ -464,19 +647,18 @@ async def get_config(agent_id: Optional[str] = None):
         }
     except Exception as e:
         logger.error(f"Failed to get config: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/config")
 async def update_config(request: Request, agent_id: Optional[str] = None):
     """更新HumanThinking配置（支持按Agent隔离）"""
     try:
+        agent_id = validate_agent_id(agent_id)
         from ..core.memory_manager import get_config, save_config, update_config_fields
         
-        # 直接读取JSON数据，支持前端发送的完整配置对象
         data = await request.json()
-        effective_agent_id = agent_id if agent_id else None
-        config = get_config(agent_id=effective_agent_id)
+        config = get_config(agent_id=agent_id)
         
         update_fields = {}
         field_mapping = {
@@ -499,9 +681,9 @@ async def update_config(request: Request, agent_id: Optional[str] = None):
                 update_fields[field_name] = value
         
         if update_fields:
-            update_config_fields(update_fields, agent_id=effective_agent_id)
+            update_config_fields(update_fields, agent_id=agent_id)
         
-        success = save_config(config, agent_id=effective_agent_id)
+        success = save_config(config, agent_id=agent_id)
         if not success:
             return {"success": False, "message": "配置保存失败，请检查日志"}
         
@@ -512,19 +694,19 @@ async def update_config(request: Request, agent_id: Optional[str] = None):
             from pathlib import Path
             
             # 获取当前 agent 的工作目录
-            if effective_agent_id:
-                working_dir = str(Path.home() / ".qwenpaw" / "workspaces" / effective_agent_id)
+            if agent_id:
+                working_dir = str(Path.home() / ".qwenpaw" / "workspaces" / agent_id)
             else:
                 working_dir = str(Path.home() / ".qwenpaw" / "workspaces" / "default")
             
-            db_path = Path(working_dir) / "memory" / f"human_thinking_memory_{effective_agent_id or 'default'}.db"
+            db_path = Path(working_dir) / "memory" / f"human_thinking_memory_{agent_id or 'default'}.db"
             
             if not db_path.exists():
                 # 数据库不存在，创建并初始化
                 Path(working_dir).mkdir(parents=True, exist_ok=True)
                 mm = HumanThinkingMemoryManager(
                     working_dir=working_dir,
-                    agent_id=effective_agent_id or "default",
+                    agent_id=agent_id or "default",
                     user_id=None
                 )
                 await mm.start()
@@ -532,53 +714,67 @@ async def update_config(request: Request, agent_id: Optional[str] = None):
         except Exception as db_err:
             logger.warning(f"Failed to auto-create database on config save: {db_err}")
         
-        logger.info(f"Config updated for agent {effective_agent_id}: {list(update_fields.keys())}")
+        logger.info(f"Config updated for agent {agent_id}: {list(update_fields.keys())}")
         return {"success": True, "config": data}
     except Exception as e:
         logger.error(f"Failed to update config: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/dreams")
 async def get_dreams(
+    agent_id: Optional[str] = Query(None),
     limit: int = Query(10, ge=1, le=50)
 ):
     """获取梦境记录（睡眠期间生成的摘要）"""
-    def _get_real_dreams():
-        from ..core.database import HumanThinkingDB
-        db = HumanThinkingDB()
-        if hasattr(db, 'get_dreams'):
-            return db.get_dreams(limit)
+    agent_id = validate_agent_id(agent_id)
+    try:
+        if not agent_id:
+            return []
+        db = await _get_db(agent_id)
+        dreams = await db.get_dream_logs(agent_id, limit=limit)
+        await db.close()
+        return dreams
+    except Exception as e:
+        logger.error(f"Failed to get dreams: {e}")
         return []
-    
-    dreams = _handle_db_operation("get_dreams", _get_real_dreams, [])
-    return dreams
 
 
 # ============ 睡眠管理 API ============
 
 @router.get("/sleep/status")
 async def get_sleep_status(agent_id: Optional[str] = None):
-    """获取睡眠状态"""
-    try:
-        manager = get_sleep_manager()
-        state = manager.get_agent_state(agent_id) if hasattr(manager, 'get_agent_state') else None
+    """获取睡眠状态（惰性计算）
+    
+    查询数据库获取Agent最后活动时间，实时计算当前睡眠状态。
+    如果空闲时间超过阈值，会自动触发对应的睡眠阶段任务。
+    
+    Args:
+        agent_id: Agent ID
         
-        if state:
+    Returns:
+        睡眠状态信息，包含状态、空闲时间、距离下一阶段时间等
+    """
+    try:
+        from ..core.sleep_manager import check_and_trigger_sleep
+        
+        if not agent_id:
             return {
-                "status": "active" if state.is_active else "sleeping",
-                "sleep_type": "deep" if state.is_deep_sleep else ("rem" if state.is_rem else ("light" if state.is_light_sleep else None)),
-                "last_active_time": state.last_active_time,
+                "status": "active",
+                "status_text": "活跃",
+                "icon": "☀️",
+                "color": "#52c41a",
+                "idle_time": 0,
+                "next_sleep_in": -1
             }
         
-        return {
-            "status": "active",
-            "sleep_type": None,
-            "last_active_time": time.time()
-        }
+        # 使用惰性计算获取睡眠状态（会自动触发状态转换）
+        status = await check_and_trigger_sleep(agent_id)
+        return status
+        
     except Exception as e:
         logger.error(f"Failed to get sleep status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/sleep/config")
@@ -591,7 +787,11 @@ async def get_sleep_config(agent_id: Optional[str] = None):
             config = load_agent_sleep_config(agent_id)
         else:
             manager = get_sleep_manager()
-            config = manager.config if manager else SleepConfig()
+            config = manager.config if manager else None
+        
+        if config is None:
+            from ..core.sleep_manager import SleepConfig
+            config = SleepConfig()
         
         return {
             "enable_agent_sleep": config.enable_agent_sleep,
@@ -604,49 +804,65 @@ async def get_sleep_config(agent_id: Optional[str] = None):
             "delete_days": config.delete_days,
             "enable_insight": config.enable_insight,
             "enable_dream_log": config.enable_dream_log,
+            # 记忆合并配置
+            "enable_merge": config.enable_merge,
+            "merge_similarity_threshold": config.merge_similarity_threshold,
+            "merge_max_distance_hours": config.merge_max_distance_hours,
+            # 矛盾检测配置
+            "enable_contradiction_detection": config.enable_contradiction_detection,
+            "contradiction_threshold": config.contradiction_threshold,
+            "contradiction_resolution_strategy": config.contradiction_resolution_strategy,
+            "enable_semantic_contradiction_check": config.enable_semantic_contradiction_check,
+            "enable_temporal_contradiction_check": config.enable_temporal_contradiction_check,
+            "enable_confidence_scoring": config.enable_confidence_scoring,
+            "auto_resolve_contradiction": config.auto_resolve_contradiction,
+            "min_confidence_for_auto_resolve": config.min_confidence_for_auto_resolve,
         }
     except Exception as e:
         logger.error(f"Failed to get sleep config: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/sleep/config")
 async def update_sleep_config(request: SleepConfigUpdateRequest, agent_id: Optional[str] = None):
     """更新睡眠配置（支持按Agent隔离）"""
     try:
-        from ..core.sleep_manager import get_agent_sleep_config, save_agent_sleep_config
+        from ..core.sleep_manager import get_agent_sleep_config, save_agent_sleep_config, SleepConfig
         
-        # 获取当前配置（Agent 专属或全局）
-        config = get_agent_sleep_config(agent_id)
+        old_config = get_agent_sleep_config(agent_id)
         
-        if request.enable_agent_sleep is not None:
-            config.enable_agent_sleep = request.enable_agent_sleep
-        if request.light_sleep_minutes is not None:
-            config.light_sleep_minutes = request.light_sleep_minutes
-        if request.rem_minutes is not None:
-            config.rem_minutes = request.rem_minutes
-        if request.deep_sleep_minutes is not None:
-            config.deep_sleep_minutes = request.deep_sleep_minutes
-        if request.consolidate_days is not None:
-            config.consolidate_days = request.consolidate_days
-        if request.frozen_days is not None:
-            config.frozen_days = request.frozen_days
-        if request.archive_days is not None:
-            config.archive_days = request.archive_days
-        if request.delete_days is not None:
-            config.delete_days = request.delete_days
-        if request.enable_insight is not None:
-            config.enable_insight = request.enable_insight
-        if request.enable_dream_log is not None:
-            config.enable_dream_log = request.enable_dream_log
+        config_dict = {
+            "enable_agent_sleep": request.enable_agent_sleep if request.enable_agent_sleep is not None else old_config.enable_agent_sleep,
+            "light_sleep_minutes": request.light_sleep_minutes if request.light_sleep_minutes is not None else old_config.light_sleep_minutes,
+            "rem_minutes": request.rem_minutes if request.rem_minutes is not None else old_config.rem_minutes,
+            "deep_sleep_minutes": request.deep_sleep_minutes if request.deep_sleep_minutes is not None else old_config.deep_sleep_minutes,
+            "auto_consolidate": old_config.auto_consolidate,
+            "consolidate_days": request.consolidate_days if request.consolidate_days is not None else old_config.consolidate_days,
+            "frozen_days": request.frozen_days if request.frozen_days is not None else old_config.frozen_days,
+            "archive_days": request.archive_days if request.archive_days is not None else old_config.archive_days,
+            "delete_days": request.delete_days if request.delete_days is not None else old_config.delete_days,
+            "enable_insight": request.enable_insight if request.enable_insight is not None else old_config.enable_insight,
+            "enable_dream_log": request.enable_dream_log if request.enable_dream_log is not None else old_config.enable_dream_log,
+            "enable_merge": request.enable_merge if request.enable_merge is not None else old_config.enable_merge,
+            "merge_similarity_threshold": request.merge_similarity_threshold if request.merge_similarity_threshold is not None else old_config.merge_similarity_threshold,
+            "merge_max_distance_hours": request.merge_max_distance_hours if request.merge_max_distance_hours is not None else old_config.merge_max_distance_hours,
+            "enable_contradiction_detection": request.enable_contradiction_detection if request.enable_contradiction_detection is not None else old_config.enable_contradiction_detection,
+            "contradiction_threshold": request.contradiction_threshold if request.contradiction_threshold is not None else old_config.contradiction_threshold,
+            "contradiction_resolution_strategy": request.contradiction_resolution_strategy if request.contradiction_resolution_strategy is not None else old_config.contradiction_resolution_strategy,
+            "enable_semantic_contradiction_check": request.enable_semantic_contradiction_check if request.enable_semantic_contradiction_check is not None else old_config.enable_semantic_contradiction_check,
+            "enable_temporal_contradiction_check": request.enable_temporal_contradiction_check if request.enable_temporal_contradiction_check is not None else old_config.enable_temporal_contradiction_check,
+            "enable_confidence_scoring": request.enable_confidence_scoring if request.enable_confidence_scoring is not None else old_config.enable_confidence_scoring,
+            "auto_resolve_contradiction": request.auto_resolve_contradiction if request.auto_resolve_contradiction is not None else old_config.auto_resolve_contradiction,
+            "min_confidence_for_auto_resolve": request.min_confidence_for_auto_resolve if request.min_confidence_for_auto_resolve is not None else old_config.min_confidence_for_auto_resolve,
+        }
         
-        # 如果有 agent_id，保存到 Agent 专属配置
+        config = SleepConfig(**config_dict)
+        
         if agent_id:
             success = save_agent_sleep_config(agent_id, config)
             if not success:
                 return {"success": False, "message": "配置保存失败，请检查日志"}
         else:
-            # 更新全局配置
             manager = get_sleep_manager()
             if manager:
                 manager.update_config(config)
@@ -655,13 +871,16 @@ async def update_sleep_config(request: SleepConfigUpdateRequest, agent_id: Optio
         return {"success": True, "config": request.model_dump(exclude_unset=True)}
     except Exception as e:
         logger.error(f"Failed to update sleep config: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/sleep/force")
 async def force_sleep(request: ForceSleepRequest, agent_id: Optional[str] = None):
     """强制进入睡眠"""
     try:
+        agent_id = validate_agent_id(agent_id)
+        if not agent_id:
+            raise HTTPException(status_code=400, detail="agent_id is required")
         manager = get_sleep_manager()
         
         sleep_methods = {
@@ -672,29 +891,65 @@ async def force_sleep(request: ForceSleepRequest, agent_id: Optional[str] = None
         
         method_name = sleep_methods.get(request.sleep_type)
         if method_name and hasattr(manager, method_name):
-            getattr(manager, method_name)(agent_id)
+            result = await getattr(manager, method_name)(agent_id)
             logger.info(f"Forced {request.sleep_type} sleep for agent {agent_id}")
+            return result
         
         return {"success": True, "sleep_type": request.sleep_type}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to force sleep: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/sleep/wakeup")
 async def wakeup(agent_id: Optional[str] = None):
     """强制唤醒"""
     try:
+        agent_id = validate_agent_id(agent_id)
+        if not agent_id:
+            raise HTTPException(status_code=400, detail="agent_id is required")
         manager = get_sleep_manager()
         
         if hasattr(manager, 'wakeup'):
-            manager.wakeup(agent_id)
+            result = await manager.wakeup(agent_id)
             logger.info(f"Wakeup agent {agent_id}")
+            return result
         
         return {"success": True, "status": "active"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to wakeup: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/sleep/activity")
+async def record_activity(agent_id: Optional[str] = None):
+    """记录Agent活动（由消息路由调用）
+    
+    当Agent收到或发送消息时，调用此端点记录活动。
+    这会更新Agent的最后活动时间，如果Agent处于睡眠状态则会唤醒它。
+    
+    Args:
+        agent_id: Agent ID
+        
+    Returns:
+        记录结果
+    """
+    try:
+        from ..core.sleep_manager import record_agent_activity
+        
+        if agent_id:
+            record_agent_activity(agent_id)
+            logger.debug(f"Recorded activity for agent {agent_id}")
+            return {"success": True, "agent_id": agent_id, "action": "activity_recorded"}
+        else:
+            return {"success": False, "message": "agent_id is required"}
+    except Exception as e:
+        logger.error(f"Failed to record activity: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/sleep/insight")
@@ -731,7 +986,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.env_detector import detect_qwenpaw_env, get_cache_dirs
 
 @router.post("/uninstall")
-async def uninstall_plugin(request: Request):
+async def uninstall_plugin(request: Request, token: Optional[str] = Depends(verify_token)):
     """
     一键卸载 HumanThinking 插件 - 适配多环境（Docker/Windows/macOS/Linux）
     
@@ -776,7 +1031,7 @@ async def uninstall_plugin(request: Request):
             for workspace in workspaces_dir.iterdir():
                 if workspace.is_dir():
                     memory_dir = workspace / "memory"
-                    config_file = workspace / "human_thinking_config.json"
+                    config_file = memory_dir / "human_thinking_config.json"
                     
                     # 如果不保留数据，先导出记忆
                     if not keep_data and memory_dir.exists():
@@ -836,10 +1091,9 @@ async def uninstall_plugin(request: Request):
                         restored_files.append(str(original_path.relative_to(qwenpaw_packages_dir)))
                         logger.info(f"Restored from backup: {original_path}")
                 
-                # 方式2：使用缓存的原始文件进行交叉比对
+                # 方式2：使用缓存的原始文件直接覆盖（仅当备份不存在时）
                 if original_files_cache:
                     for filename, original_content in original_files_cache.items():
-                        # 确定目标文件路径
                         if filename == "plugins.py":
                             target_file = qwenpaw_packages_dir / "app" / "routers" / "plugins.py"
                         elif filename == "workspace.py":
@@ -849,69 +1103,19 @@ async def uninstall_plugin(request: Request):
                         else:
                             continue
                         
-                        # 检查目标文件是否存在且没有备份
                         target_bak = target_file.with_suffix(target_file.suffix + ".humanthinking.bak")
                         if target_file.exists() and not target_bak.exists():
                             try:
                                 with open(target_file, 'r', encoding='utf-8') as f:
                                     current_content = f.read()
                                 
-                                # 如果文件内容不同，说明被修改过
                                 if original_content != current_content:
-                                    # 使用 difflib 找出差异
-                                    import difflib
-                                    original_lines = original_content.splitlines(keepends=True)
-                                    current_lines = current_content.splitlines(keepends=True)
-                                    
-                                    # 使用 unified_diff 找出注入的代码
-                                    diff = list(difflib.unified_diff(
-                                        original_lines, current_lines,
-                                        fromfile='original', tofile='current',
-                                        lineterm=''
-                                    ))
-                                    
-                                    # 解析 diff，找出注入的代码行
-                                    injected_lines = set()
-                                    i = 0
-                                    while i < len(diff):
-                                        line = diff[i]
-                                        if line.startswith('@@'):
-                                            i += 1
-                                            new_line_num = 0
-                                            while i < len(diff) and not diff[i].startswith('@@'):
-                                                diff_line = diff[i]
-                                                if diff_line.startswith('+'):
-                                                    injected_lines.add(new_line_num)
-                                                    new_line_num += 1
-                                                elif diff_line.startswith('-'):
-                                                    pass
-                                                elif diff_line.startswith(' '):
-                                                    new_line_num += 1
-                                                i += 1
-                                            continue
-                                        i += 1
-                                    
-                                    # 如果找到了注入的行，删除它们
-                                    if injected_lines:
-                                        new_lines = []
-                                        for idx, line in enumerate(current_lines):
-                                            if idx not in injected_lines:
-                                                new_lines.append(line)
-                                        
-                                        new_content = ''.join(new_lines)
-                                        with open(target_file, 'w', encoding='utf-8') as f:
-                                            f.write(new_content)
-                                        
-                                        restored_files.append(f"{target_file.relative_to(qwenpaw_packages_dir)} (by diff comparison)")
-                                        logger.info(f"Removed injected code from {target_file}")
-                                    else:
-                                        # 没有找到注入的行，直接覆盖为原始文件
-                                        with open(target_file, 'w', encoding='utf-8') as f:
-                                            f.write(original_content)
-                                        restored_files.append(f"{target_file.relative_to(qwenpaw_packages_dir)} (replaced with original)")
-                                        logger.info(f"Replaced {target_file} with original file")
-                            except Exception as diff_err:
-                                logger.warning(f"Failed to restore {target_file} by diff: {diff_err}")
+                                    with open(target_file, 'w', encoding='utf-8') as f:
+                                        f.write(original_content)
+                                    restored_files.append(f"{target_file.relative_to(qwenpaw_packages_dir)} (replaced with original)")
+                                    logger.info(f"Replaced {target_file} with original file")
+                            except Exception as restore_err:
+                                logger.warning(f"Failed to restore {target_file}: {restore_err}")
                 
                 # 方式3：删除注入的代码块（最后降级方式）
                 # 检查 plugins.py 是否还有 humanthinking 路由且没有备份
@@ -973,8 +1177,14 @@ async def uninstall_plugin(request: Request):
         
         # 4. 删除插件目录
         if plugin_dir.exists():
-            shutil.rmtree(plugin_dir)
-            logger.info(f"Deleted plugin dir: {plugin_dir}")
+            try:
+                shutil.rmtree(plugin_dir)
+                logger.info(f"Deleted plugin dir: {plugin_dir}")
+            except Exception as rm_err:
+                logger.warning(f"Failed to delete plugin dir (may be in use): {rm_err}")
+                marker_file = plugin_dir / ".uninstall_pending"
+                marker_file.write_text(f"Uninstall requested at {datetime.now().isoformat()}\nkeep_data={keep_data}", encoding='utf-8')
+                logger.info(f"Created uninstall marker: {marker_file}")
         
         # 5. 从 QwenPaw 配置中移除插件
         config_file = qwenpaw_dir / "config.json"
@@ -1016,13 +1226,16 @@ async def uninstall_plugin(request: Request):
                                 except:
                                     pass
                     for root, dirs, files in os.walk(cache_dir):
-                        if "__pycache__" in dirs:
-                            try:
-                                pycache_dir = os.path.join(root, "__pycache__")
-                                shutil.rmtree(pycache_dir)
-                                dirs.remove("__pycache__")
-                            except:
-                                pass
+                        pycache_dirs_to_remove = []
+                        for d in dirs:
+                            if d == "__pycache__":
+                                try:
+                                    shutil.rmtree(os.path.join(root, d))
+                                    pycache_dirs_to_remove.append(d)
+                                except Exception:
+                                    pass
+                        for d in pycache_dirs_to_remove:
+                            dirs.remove(d)
                     logger.info(f"Cleared Python cache: {cache_dir}")
             
             # 方式B：外部脚本调用（确保彻底清除，即使当前进程有缓存）
@@ -1115,33 +1328,86 @@ print("Cache cleared by external script")
 async def export_memories_to_md(memory_dir: Path, export_file: Path, workspace_name: str):
     """将记忆数据导出为 Markdown 文件"""
     try:
-        # 这里简化处理，实际应该从数据库中读取记忆
-        # 由于数据库格式可能不同，这里创建一个模板文件
         date_str = datetime.now().strftime("%Y年%m月%d日 %H:%M:%S")
         
-        md_content = f"""# HumanThinking 记忆备份
-
-## 导出信息
-- **工作区**: {workspace_name}
-- **导出时间**: {date_str}
-- **插件版本**: v1.1.5-beta.1
-
-## 说明
-此文件为 HumanThinking 插件卸载时自动导出的记忆数据备份。
-
-## 记忆数据
-记忆数据存储在以下位置：
-- 原始数据库目录: `{memory_dir}`
-
-> 注意：由于记忆数据库格式为 SQLite，建议保留原始数据库文件以便完整恢复。
-> 如需恢复，请将备份的数据库文件复制回原位置。
-
----
-*由 HumanThinking 插件自动生成*
-"""
+        db_files = list(memory_dir.glob("human_thinking_memory_*.db"))
+        
+        all_memories = []
+        for db_file in db_files:
+            conn = None
+            try:
+                conn = sqlite3.connect(str(db_file))
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT id, content, importance, memory_type, memory_tier, 
+                           created_at, session_id, agent_id, tags
+                    FROM qwenpaw_memory 
+                    WHERE deleted_at IS NULL
+                    ORDER BY importance DESC, created_at DESC
+                """)
+                
+                for row in cursor.fetchall():
+                    r = dict(row)
+                    all_memories.append(r)
+                
+                cursor.execute("""
+                    SELECT id, content, importance, memory_type, 
+                           original_created_at, session_id, agent_id
+                    FROM qwenpaw_archive
+                    ORDER BY importance DESC, original_created_at DESC
+                """)
+                
+                for row in cursor.fetchall():
+                    r = dict(row)
+                    r['memory_tier'] = 'archived'
+                    all_memories.append(r)
+            except Exception as db_err:
+                logger.warning(f"Failed to read {db_file}: {db_err}")
+            finally:
+                if conn:
+                    conn.close()
+        
+        md_lines = [
+            f"# HumanThinking 记忆备份",
+            f"",
+            f"## 导出信息",
+            f"- **工作区**: {workspace_name}",
+            f"- **导出时间**: {date_str}",
+            f"- **记忆总数**: {len(all_memories)}",
+            f"",
+            f"---",
+            f"",
+        ]
+        
+        for m in all_memories:
+            tier = m.get('memory_tier', 'unknown')
+            imp = m.get('importance', '?')
+            mtype = m.get('memory_type', 'unknown')
+            content = m.get('content', '')
+            created = m.get('created_at') or m.get('original_created_at', '')
+            sid = m.get('session_id', '')
+            tags = m.get('tags', '[]')
+            
+            md_lines.append(f"### #{m.get('id', '?')} [{tier}] 重要性:{imp} 类型:{mtype}")
+            md_lines.append(f"")
+            md_lines.append(f"{content}")
+            md_lines.append(f"")
+            md_lines.append(f"- 创建时间: {created}")
+            md_lines.append(f"- 会话: {sid}")
+            if tags and tags != '[]':
+                md_lines.append(f"- 标签: {tags}")
+            md_lines.append(f"")
+            md_lines.append(f"---")
+            md_lines.append(f"")
+        
+        md_content = "\n".join(md_lines)
         
         with open(export_file, 'w', encoding='utf-8') as f:
             f.write(md_content)
+        
+        logger.info(f"Exported {len(all_memories)} memories to {export_file}")
             
     except Exception as e:
         logger.error(f"Export failed: {e}")

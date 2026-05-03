@@ -13,11 +13,11 @@ logger = logging.getLogger(__name__)
 class SessionBridgeEngine:
     """会话桥接引擎"""
     
-    def __init__(self, db, search_engine):
+    def __init__(self, db, search_engine=None):
         """
         Args:
             db: HumanThinkingDB 实例
-            search_engine: 向量搜索引擎
+            search_engine: 向量搜索引擎（可选）
         """
         self.db = db
         self.search_engine = search_engine

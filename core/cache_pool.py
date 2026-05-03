@@ -76,17 +76,18 @@ class AtomicWriteQueue:
         return sum(m.char_count for m in self._queue)
     
     def get_last_push_time(self) -> float:
-        """获取最后一次 push 的时间戳"""
         return self._last_push_time
     
     def get_checkpoint(self) -> Optional[Dict]:
-        """获取当前队列的创建时间戳（用于判断是否老化）"""
         if self._checkpoint:
             return self._checkpoint
-        # 如果没有 checkpoint，使用最后一次 push 时间
         if self._last_push_time > 0:
             return {"timestamp": self._last_push_time}
         return None
+    
+    def snapshot(self) -> List[MemoryItem]:
+        """获取队列的快照（线程安全读）"""
+        return list(self._queue)
 
 
 class ReadCache:
@@ -152,22 +153,22 @@ class ReadCache:
     
     async def search(self, query: str, session_id: Optional[str] = None) -> List[MemoryItem]:
         """在读缓存中搜索，更新访问时间"""
-        results = []
-        query_lower = query.lower()
-        
-        for m in self._cache:
-            if session_id and m.session_id != session_id:
-                continue
-            if query_lower in m.content.lower():
-                results.append(m)
-        
-        # 更新访问时间
-        if results:
-            now = time.time()
-            for m in results:
-                self._session_last_access[m.session_id] = now
-        
-        return results
+        async with self._lock:
+            results = []
+            query_lower = query.lower()
+            
+            for m in self._cache:
+                if session_id and m.session_id != session_id:
+                    continue
+                if query_lower in m.content.lower():
+                    results.append(m)
+            
+            if results:
+                now = time.time()
+                for m in results:
+                    self._session_last_access[m.session_id] = now
+            
+            return results
     
     async def evict_inactive_sessions(self) -> int:
         """
@@ -267,6 +268,7 @@ class AgentCachePool:
         
         self._flush_lock = asyncio.Lock()
         self._lock = asyncio.Lock()
+        self._pending_push: List[MemoryItem] = []
         
         # 后台兜底刷新任务
         self._auto_flush_task: Optional[asyncio.Task] = None
@@ -351,7 +353,11 @@ class AgentCachePool:
         if not success:
             raise Exception(f"Failed to add memory to session {session_id}")
         
-        await self._write_queue.push(memory)
+        try:
+            await self._write_queue.push(memory)
+        except QueueDrainingError:
+            logger.debug(f"Write queue is draining, memory {memory.temp_id} deferred to session buffer only")
+            self._pending_push.append(memory)
         
         logger.debug(
             f"Memory cached: temp_id={memory.temp_id}, session={session_id}, "
@@ -391,8 +397,6 @@ class AgentCachePool:
             if not batch:
                 return 0
             
-            await asyncio.sleep(0.01)
-            
             try:
                 memories_data = [
                     {
@@ -415,11 +419,11 @@ class AgentCachePool:
                 # 同步到读缓存
                 await self._read_cache.add_batch(batch)
                 
-                # 清理写缓存
+                flushed_temp_ids = set(m.temp_id for m in batch)
                 affected_sessions = set(m.session_id for m in batch)
                 for sid in affected_sessions:
                     if sid in self._sessions:
-                        await self._sessions[sid].mark_flushed()
+                        await self._sessions[sid].remove_by_temp_ids(flushed_temp_ids)
                 
                 logger.info(
                     f"Flushed {len(batch)} memories to DB, "
@@ -433,6 +437,15 @@ class AgentCachePool:
                 raise
             finally:
                 await self._write_queue.release()
+                
+                if self._pending_push:
+                    pending = self._pending_push.copy()
+                    self._pending_push.clear()
+                    for m in pending:
+                        try:
+                            await self._write_queue.push(m)
+                        except Exception:
+                            self._pending_push.append(m)
     
     # ====== 读取路径 ======
     
@@ -443,14 +456,13 @@ class AgentCachePool:
         优先级：
         1. 写缓存（SessionBuffer）- 当前 session 未持久化
         2. 写队列（WriteQueue）- 待持久化
-        3. DB - 已持久化历史
+        3. 读缓存（ReadCache）- 已持久化
         
-        注：不使用读缓存，直接查 DB 更简洁
+        注：不查DB，DB查询由 memory_search 直接调用
         """
         results = []
         seen_ids = set()
         
-        # 1. 搜索当前 session 的写缓存
         for sid, session in self._sessions.items():
             if session_id and sid != session_id:
                 continue
@@ -460,14 +472,19 @@ class AgentCachePool:
                     results.append(memory)
                     seen_ids.add(memory.temp_id)
         
-        # 2. 搜索当前 session 的写队列
-        for memory in self._write_queue._queue:
+        for memory in self._write_queue.snapshot():
             if memory.temp_id not in seen_ids:
                 if session_id and memory.session_id != session_id:
                     continue
                 if query.lower() in memory.content.lower():
                     results.append(memory)
                     seen_ids.add(memory.temp_id)
+        
+        read_results = await self._read_cache.search(query, session_id)
+        for memory in read_results:
+            if memory.temp_id not in seen_ids:
+                results.append(memory)
+                seen_ids.add(memory.temp_id)
         
         return results
     
@@ -513,17 +530,18 @@ class AgentCachePool:
     # ====== Session 管理 ======
     
     async def close_session(self, session_id: str) -> None:
-        """关闭 Session"""
+        """关闭 Session
+        
+        注意：SessionBuffer 中的记忆已在 store() 时同步写入 WriteQueue，
+        此处只需清理 SessionBuffer 并确保 flush，不需要重复 push。
+        """
         async with self._lock:
             if session_id in self._sessions:
                 session = self._sessions[session_id]
                 
-                memories = await session.close()
+                await session.close()
                 
-                if memories:
-                    for m in memories:
-                        await self._write_queue.push(m)
-                    
+                if self._write_queue.size() > 0:
                     await self.flush()
                 
                 del self._sessions[session_id]

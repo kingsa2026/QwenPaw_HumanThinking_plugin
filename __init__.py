@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
 """HumanThinking Memory Manager Plugin
 
-v1.1.4.post2 - 跟随QwenPaw版本
+v1.1.5.post1 - 跟随QwenPaw版本
 """
 
-from .plugin import HumanThinkingMemoryPlugin
+try:
+    from .plugin import HumanThinkingMemoryPlugin
+    __all__ = ["HumanThinkingMemoryPlugin"]
+except ImportError:
+    # Allow imports during testing when qwenpaw is not available
+    __all__ = []
 
-__version__ = "1.1.4.post2"
-__all__ = ["HumanThinkingMemoryPlugin"]
+__version__ = "1.1.5.post1"

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""生产环境 UI 修补器 - 直接修改打包后的前端 JS 文件
+"""生产环境 UI 修补- 直接modify bundled的前端 JS 文件
 
-在 QwenPaw 生产部署环境中，前端已编译为打包的 JS 文件。
-本脚本通过正则匹配和替换，直接修改打包后的 JS 文件，
-将 HumanThinking 添加到记忆管理器下拉选项中。
+?QwenPaw 生产部署环境中，前端已编译为打包JS 文件
+本脚本通过正则匹配和替换，直接modify bundled的 JS 文件
+?HumanThinking 添加到记忆管理器下拉选项中
 
 适配多环境：Docker、Windows、macOS、Linux
 """
@@ -15,7 +15,7 @@ import shutil
 import sys
 from pathlib import Path
 
-# 导入环境检测模块
+# 导入环境检测模
 sys.path.insert(0, str(Path(__file__).parent))
 from utils.env_detector import detect_qwenpaw_env, get_qwenpaw_console_dir
 
@@ -24,15 +24,15 @@ logger = logging.getLogger("qwenpaw.humanthinking.patcher")
 
 
 def find_qwenpaw_console_static_dir(qwenpaw_root: str) -> str:
-    """查找 QwenPaw 打包后的 console 静态文件目录 - 使用环境检测"""
-    # 方法1: 使用环境检测模块
+    """查找 QwenPaw 打包后的 console 静态文件目- 使用环境检"""
+    # 方法1: 使用环境检测模
     env = detect_qwenpaw_env()
     console_dir = get_qwenpaw_console_dir(env)
     if console_dir:
         logger.info(f"Found console directory via env detection: {console_dir}")
         return str(console_dir)
     
-    # 方法2: 通过 Python 包查找
+    # 方法2: 通过 Python 包查
     try:
         import qwenpaw
         qwenpaw_pkg_dir = os.path.dirname(qwenpaw.__file__)
@@ -42,7 +42,7 @@ def find_qwenpaw_console_static_dir(qwenpaw_root: str) -> str:
     except (ImportError, AttributeError):
         pass
 
-    # 方法3: 常见路径（包括 venv 中的 site-packages）
+    # 方法3: common paths径（包venv 中的 site-packages?
     candidates = [
         os.path.join(qwenpaw_root, "console"),
         os.path.join(qwenpaw_root, "dist", "console"),
@@ -57,7 +57,7 @@ def find_qwenpaw_console_static_dir(qwenpaw_root: str) -> str:
         for python_dir in (env.venv_dir / "lib").glob("python3.*"):
             candidates.append(str(python_dir / "site-packages" / "qwenpaw" / "console"))
     
-    # 系统级安装路径
+    # 系统级installation路
     candidates.extend([
         "/usr/local/lib/python3.12/site-packages/qwenpaw/console",
         "/usr/local/lib/python3.11/site-packages/qwenpaw/console",
@@ -87,7 +87,7 @@ def _make_backup(filepath: str) -> bool:
 
 
 def _restore_backup(filepath: str) -> bool:
-    """从备份恢复文件"""
+    """从备份恢复文"""
     backup_path = filepath + ".humanthinking.bak"
     if os.path.exists(backup_path):
         shutil.copy2(backup_path, filepath)
@@ -99,17 +99,17 @@ def _restore_backup(filepath: str) -> bool:
 
 def _patch_js_files_for_human_thinking(qwenpaw_root: str) -> list:
     """
-    修补打包后的 JS 文件，添加 human_thinking 选项
+    修补打包后的 JS 文件，添human_thinking 选项
 
-    v1.1.3.post1 pip 包中没有 TypeScript 源码，只有打包后的 JS 文件。
-    这个函数直接修补 JS 文件。
+    v1.1.3.post1 pip 包中没有 TypeScript 源码，只有打包后JS 文件
+    这个函数直接修补 JS 文件
 
     Returns:
-        list: 成功修补的文件列表
+        list: 成功修补的文件列
     """
     console_dir = find_qwenpaw_console_static_dir(qwenpaw_root)
     if not console_dir:
-        logger.warning("无法找到 console 目录")
+        logger.warning("Cannot find console directory")
         return []
 
     js_files = []
@@ -118,7 +118,7 @@ def _patch_js_files_for_human_thinking(qwenpaw_root: str) -> list:
             if f.endswith(".js") and not f.endswith(".humanthinking.bak"):
                 js_files.append(os.path.join(root, f))
 
-    logger.info(f"扫描 {len(js_files)} 个 JS 文件...")
+    logger.info(f"扫描 {len(js_files)} ?JS 文件...")
 
     patched_files = []
     for js_file in js_files:
@@ -126,7 +126,7 @@ def _patch_js_files_for_human_thinking(qwenpaw_root: str) -> list:
             patched_files.append(os.path.basename(js_file))
 
     if patched_files:
-        logger.info(f"成功修补 {len(patched_files)} 个 JS 文件: {', '.join(patched_files)}")
+        logger.info(f"成功修补 {len(patched_files)} ?JS 文件: {', '.join(patched_files)}")
     else:
         logger.warning("没有找到需要修补的 JS 文件")
 
@@ -135,9 +135,9 @@ def _patch_js_files_for_human_thinking(qwenpaw_root: str) -> list:
 
 def patch_js_file(filepath: str) -> bool:
     """
-    修改打包后的 JS 文件，添加 HumanThinking 选项
+    modify bundled的 JS 文件，添HumanThinking 选项
 
-    支持 v1.1.3.post1 和 v1.1.4 两种格式：
+    支持 v1.1.3.post1 ?v1.1.4 两种格式
     - v1.1.3.post1: {value:"remelight",label:"ReMeLight"} 内联数组格式
     - v1.1.4: backendMappings-DNEC3qGm.js 独立 chunk 格式
       var r={remelight:{...}}, a=Object.entries(r).map(...)
@@ -157,7 +157,7 @@ def patch_js_file(filepath: str) -> bool:
             logger.debug(f"Already patched: {filepath}")
             return True
 
-        # 检查是否包含 remelight 相关代码
+        # 检查是否包remelight 相关代码
         if "remelight" not in content.lower():
             logger.debug(f"No remelight reference in: {os.path.basename(filepath)}")
             return False
@@ -167,45 +167,97 @@ def patch_js_file(filepath: str) -> bool:
         _make_backup(filepath)
 
         # ============================================
+        # 模式 A0: Ta= 格式 (新版 QwenPaw bundled JS)
+        # Ta={remelight:{configField:"reme_light_memory_config",component:Ca,label:"remelight",tabKey:"remeLightMemory"}}
+        # GT=Object.entries(Ta).map(...) -> 下拉菜单选项
+        # ============================================
+        ta_match = re.search(r"Ta\s*=\s*\{[^}]*remelight[^}]*\}", content)
+        if ta_match:
+            logger.info(f"  ?Detected Ta= format in {os.path.basename(filepath)}")
+            original_ta = ta_match.group(0)
+
+            component_match = re.search(r'component:([A-Za-z0-9_$]+)', original_ta)
+            if component_match:
+                component_var = component_match.group(1)
+                logger.info(f"  ?Extracted component var: {component_var}")
+            else:
+                component_var = 'Ca'
+                logger.warning(f"  ?Could not extract component var, using default: {component_var}")
+
+            ht_entry = f',human_thinking:{{configField:"human_thinking_config",component:{component_var},label:"human_thinking",tabKey:"remeLightMemory"}}'
+
+            # 在 Ta 对象的最后一个 } 之前插入 human_thinking 条目
+            # 精确替换整个 Ta={...} 块
+            new_ta = re.sub(
+                r'(remelight:\{[^}]*\})',
+                rf'\1{ht_entry}',
+                original_ta,
+                count=1
+            )
+
+            if new_ta != original_ta:
+                content = content.replace(original_ta, new_ta)
+                if "human_thinking" not in content:
+                    logger.error(f"?Failed to inject human_thinking into Ta=")
+                    return False
+                logger.info(f"  ?Patched Ta= mapping with human_thinking in {os.path.basename(filepath)}")
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(content)
+                logger.info(f"?Successfully patched Ta= format: {os.path.basename(filepath)}")
+                return True
+            else:
+                logger.warning(f"  ?Ta= substitution produced no change, trying fallback...")
+                # fallback: 直接用字符串替换
+                fallback_new = original_ta.rstrip("}") + ht_entry + "}"
+                if fallback_new != original_ta:
+                    content = content.replace(original_ta, fallback_new)
+                    if "human_thinking" in content:
+                        logger.info(f"  ?Fallback Ta= patching succeeded")
+                        with open(filepath, "w", encoding="utf-8") as f:
+                            f.write(content)
+                        logger.info(f"?Successfully patched Ta= format (fallback): {os.path.basename(filepath)}")
+                        return True
+
+        # ============================================
         # 模式 A: v1.1.4 backendMappings chunk 格式
         # var r={remelight:{configField:`...`,component:_a,label:`remelight`,tabKey:`remeLightMemory`}}
         # var a=Object.entries(r).map(([e,{label:t}])=>({value:e,label:t}));
         # ============================================
-        # 关键修改：
-        # 1. human_thinking 使用 tabKey: remeLightMemory（显示"长期记忆"）
-        # 2. component 必须指向 ReMeLightMemoryCard 组件（变量名 _a）
-        # 3. 不使用 human_thinking_config，因为前端只查找 xa[memoryBackend]（即 xa['human_thinking']）
+        # 关键修改
+        # 1. human_thinking 使用 tabKey: remeLightMemory（显长期记忆"
+        # 2. component 必须指向 ReMeLightMemoryCard 组件（变量名 _a?
+        # 3. 不使human_thinking_config，因为前端只查找 xa[memoryBackend]（即 xa['human_thinking']?
         # ============================================
         v114_mapping_pattern = r'var\s+\w+\s*=\s*\{[^}]*remelight[^}]*\}'
         v114_match = re.search(v114_mapping_pattern, content)
         
         if v114_match:
-            logger.info(f"  ✓ Detected v1.1.4 backendMappings chunk format")
+            logger.info(f"  ?Detected v1.1.4 backendMappings chunk format")
             
-            # 在 r 对象中添加 human_thinking 映射
+            # ?r 对象中添human_thinking 映射
             original_mapping = v114_match.group(0)
             
-            # 提取 remelight 使用的 component 变量名（如 _a）
+            # 提取 remelight 使用component 变量名（?_a?
             component_match = re.search(r'component:([A-Za-z0-9_$]+)', original_mapping)
             if component_match:
                 component_var = component_match.group(1)
-                logger.info(f"  ✓ Found ReMeLightMemoryCard component variable: {component_var}")
+                logger.info(f"  ?Found ReMeLightMemoryCard component variable: {component_var}")
             else:
-                component_var = '_a'  # 默认值
-                logger.warning(f"  ⚠ Could not detect component variable, using default: {component_var}")
+                component_var = '_a'  # 默认
+                logger.warning(f"  ?Could not detect component variable, using default: {component_var}")
             
-            # human_thinking: 使用 remeLightMemory tabKey（显示"长期记忆"）
-            # component 使用与 remelight 相同的组件变量（ReMeLightMemoryCard）
+            # human_thinking: 使用 remeLightMemory tabKey（显长期记忆"
+            # component 使用remelight 相同的组件变量（ReMeLightMemoryCard?
             ht_mapping = f',human_thinking:{{configField:`human_thinking_config`,component:{component_var},label:`human_thinking`,tabKey:`remeLightMemory`}}'
             
-            # 在 remelight 条目后添加 human_thinking 条目
+            # ?remelight 条目后添human_thinking 条目
             new_mapping = original_mapping.replace(
                 'remelight:{configField:`reme_light_memory_config`,component:t,label:`remelight`,tabKey:`remeLightMemory`}',
                 'remelight:{configField:`reme_light_memory_config`,component:t,label:`remelight`,tabKey:`remeLightMemory`}' + ht_mapping
             )
             
             if new_mapping == original_mapping:
-                # 可能是反引号格式不同，尝试更宽松的匹配
+                # 可能是反引号格式不同，尝试更宽松的匹
                 new_mapping = re.sub(
                     r'(remelight\s*:\s*\{[^}]*\})',
                     rf'\1,human_thinking:{{configField:`human_thinking_config`,component:{component_var},label:`human_thinking`,tabKey:`remeLightMemory`}}',
@@ -215,34 +267,34 @@ def patch_js_file(filepath: str) -> bool:
             
             content = content.replace(original_mapping, new_mapping)
             
-            # 验证 human_thinking 是否已添加
+            # 验证 human_thinking 是否已添
             if "human_thinking" not in content:
-                logger.error(f"✗ Failed to inject human_thinking mapping")
+                logger.error(f"?Failed to inject human_thinking mapping")
                 return False
             
-            logger.info(f"  ✓ Injected human_thinking into MEMORY_MANAGER_BACKEND_MAPPINGS")
-            logger.info(f"  ✓ tabKey 'remeLightMemory' -> 显示'长期记忆'")
-            logger.info(f"  ✓ component '{component_var}' -> ReMeLightMemoryCard")
+            logger.info(f"  ?Injected human_thinking into MEMORY_MANAGER_BACKEND_MAPPINGS")
+            logger.info(f"  ?tabKey 'remeLightMemory' -> 显示'长期记忆'")
+            logger.info(f"  ?component '{component_var}' -> ReMeLightMemoryCard")
             
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(content)
-            logger.info(f"✓ Successfully patched v1.1.4 chunk: {os.path.basename(filepath)}")
+            logger.info(f"?Successfully patched v1.1.4 chunk: {os.path.basename(filepath)}")
             return True
 
         # ============================================
-        # 模式 B: v1.1.5+ 动态组件映射格式
-        # 使用 fa[C] 和 xa[T] 作为组件查找表
+        # 模式 B: v1.1.5+ 动态组件映射格
+        # 使用 fa[C] ?xa[T] 作为组件查找
         # ============================================
-        # 检查是否使用了动态组件映射系统
+        # 检查是否使用了动态组件映射系
         if "fa[C]" in content and "xa[T]" in content:
-            logger.info(f"  ✓ Detected v1.1.5+ dynamic component mapping format")
+            logger.info(f"  ?Detected v1.1.5+ dynamic component mapping format")
             
-            # 这个版本使用动态映射，我们需要直接修改 xT 数组和 xa 映射表
+            # 这个版本使用动态映射，我们需要直接修xT 数组xa 映射
             # xT 是选项数组，xa 是组件映射表
             patched = False
             
-            # 1. 修改 xT 数组（选项列表）
-            # 查找 xT=[{value:"remelight",label:"ReMeLight"}] 或类似格式
+            # 1. 修改 xT 数组（选项列表
+            # 查找 xT=[{value:"remelight",label:"ReMeLight"}] 或类似格
             xT_patterns = [
                 (r'(xT=\[\{value:"remelight",label:"ReMeLight"\}\])', r'xT=[{value:"remelight",label:"ReMeLight"},{value:"human_thinking",label:"Human Thinking"}]'),
                 (r"(xT=\[\{value:'remelight',label:'ReMeLight'\}\])", r"xT=[{value:'remelight',label:'ReMeLight'},{value:'human_thinking',label:'Human Thinking'}]"),
@@ -257,17 +309,17 @@ def patch_js_file(filepath: str) -> bool:
                     if new_content != content:
                         content = new_content
                         patched = True
-                        logger.info(f"  ✓ Patched xT array with human_thinking option")
+                        logger.info(f"  ?Patched xT array with human_thinking option")
                     break
             
-            # 2. 修改 xa 映射表（组件映射）
-            # 关键修复：tabKey 必须是 remeLightMemory（使用已有的 i18n 翻译）
+            # 2. 修改 xa 映射表（组件映射
+            # 关键修复：tabKey 必须remeLightMemory（使用已有的 i18n 翻译
             # component 必须使用 _a（ReMeLightMemoryCard），不能使用 function(){return null}
             # 查找 xa={remelight:{...}} 或类似格式，直接合并到对象中
             xa_patterns = [
-                # 模式1: xa={remelight:{...}} → xa={remelight:{...},human_thinking:{...}}
-                # tabKey 使用 remeLightMemory 而不是 humanThinkingMemory，避免 i18n 缺失问题
-                # component 使用 _a（ReMeLightMemoryCard）
+                # 模式1: xa={remelight:{...}} ?xa={remelight:{...},human_thinking:{...}}
+                # tabKey 使用 remeLightMemory 而不humanThinkingMemory，避i18n 缺失问题
+                # component 使用 _a（ReMeLightMemoryCard?
                 (r'(xa=\{remelight:\{[^}]*\}\})', r'xa={remelight:{configField:"reme_light_memory_config",component:_a,label:"remelight",tabKey:"remeLightMemory"},human_thinking:{configField:"human_thinking_config",component:_a,label:"human_thinking",tabKey:"remeLightMemory"}}'),
             ]
             
@@ -277,18 +329,18 @@ def patch_js_file(filepath: str) -> bool:
                     if new_content != content:
                         content = new_content
                         patched = True
-                        logger.info(f"  ✓ Patched xa mapping with human_thinking component")
-                        logger.info(f"  ✓ tabKey set to 'remeLightMemory' (uses existing i18n)")
+                        logger.info(f"  ?Patched xa mapping with human_thinking component")
+                        logger.info(f"  ?tabKey set to 'remeLightMemory' (uses existing i18n)")
                     break
             
             if patched:
                 with open(filepath, "w", encoding="utf-8") as f:
                     f.write(content)
-                logger.info(f"✓ Successfully patched v1.1.5+ JS file: {os.path.basename(filepath)}")
+                logger.info(f"?Successfully patched v1.1.5+ JS file: {os.path.basename(filepath)}")
                 return True
             else:
-                # 如果直接修改失败，使用兜底方案：在文件末尾注入动态注册代码
-                # 关键修复：tabKey 使用 remeLightMemory 而不是 humanThinkingMemory
+                # 如果直接修改失败，使用兜底方案：在文件末尾注入动态注册代
+                # 关键修复：tabKey 使用 remeLightMemory 而不humanThinkingMemory
                 injection_code = '''
 // HumanThinking: Dynamic backend registration for v1.1.5+
 (function(){
@@ -305,14 +357,14 @@ def patch_js_file(filepath: str) -> bool:
             // 添加 Human Thinking 选项
             if (val && Array.isArray(val) && !val.find(function(o){return o.value==='human_thinking'})) {
                 val.push({value:"human_thinking",label:"Human Thinking"});
-                console.log('[HumanThinking] ✓ Added to xT array');
+                console.log('[HumanThinking] ?Added to xT array');
             }
         }
     });
     
     // 拦截 xa 映射访问
-    // 关键：tabKey 必须是 remeLightMemory（前端已存在该 i18n 翻译）
-    // 如果使用 humanThinkingMemory，前端会查找 agentConfig.humanThinkingMemoryTitle，但该翻译不存在！
+    // 关键：tabKey 必须remeLightMemory（前端已存在i18n 翻译
+    // 如果使用 humanThinkingMemory，前端会查找 agentConfig.humanThinkingMemoryTitle，但该翻译 not found在
     Object.defineProperty(window, 'xa', {
         get: function() {
             return window.__xa || {};
@@ -322,7 +374,7 @@ def patch_js_file(filepath: str) -> bool:
             // 添加 Human Thinking 组件映射
             if (val && typeof val === 'object' && !val.human_thinking) {
                 val.human_thinking = {component:function(){return null},tabKey:"remeLightMemory",label:"human_thinking"};
-                console.log('[HumanThinking] ✓ Added to xa mapping (tabKey: remeLightMemory)');
+                console.log('[HumanThinking] ?Added to xa mapping (tabKey: remeLightMemory)');
             }
         }
     });
@@ -333,7 +385,7 @@ def patch_js_file(filepath: str) -> bool:
                     new_content = content + injection_code
                     with open(filepath, "w", encoding="utf-8") as f:
                         f.write(new_content)
-                    logger.info(f"✓ Successfully patched v1.1.5+ JS file (fallback): {os.path.basename(filepath)}")
+                    logger.info(f"?Successfully patched v1.1.5+ JS file (fallback): {os.path.basename(filepath)}")
                     return True
                 else:
                     logger.debug(f"Already patched v1.1.5+: {filepath}")
@@ -349,12 +401,12 @@ def patch_js_file(filepath: str) -> bool:
         if not remelight_option_match:
             logger.info(f"  Skipping: no remelight option object (only i18n text)")
             logger.info(f"  Found 'remelight' but not as option object. Searching for context...")
-            # 查找 remelight 出现的位置
+            # 查找 remelight 出现的位
             for match in re.finditer(r'.{0,50}remelight.{0,50}', content, re.IGNORECASE):
                 logger.info(f"    Context: ...{match.group(0)}...")
             return False
 
-        # 详细调试：查找 remelight 的上下文
+        # 详细调试：查remelight 的上下文
         remelight_idx = content.lower().find("remelight")
         if remelight_idx >= 0:
             context_start = max(0, remelight_idx - 100)
@@ -362,11 +414,11 @@ def patch_js_file(filepath: str) -> bool:
             context = content[context_start:context_end]
             logger.info(f"  Context around 'remelight': ...{context}...")
 
-        # 替换模式: 在 remelight 选项后添加 human_thinking
+        # 替换模式: ?remelight 选项后添human_thinking
         patterns_to_try = [
             # 模式1: 标准紧凑格式 {value:"remelight",label:"ReMeLight"}
             r'(\{value\s*:\s*"remelight"\s*,\s*label\s*:\s*"ReMeLight"\s*\})',
-            # 模式2: 单引号格式 {value:'remelight',label:'ReMeLight'}
+            # 模式2: 单引号格{value:'remelight',label:'ReMeLight'}
             r"(\{value\s*:\s*'remelight'\s*,\s*label\s*:\s*'ReMeLight'\s*\})",
             # 模式3: 带额外字段的格式 {value:"remelight",label:"ReMeLight",...}
             r'(\{value\s*:\s*"remelight"[^}]*(?:\??)\})',
@@ -378,14 +430,14 @@ def patch_js_file(filepath: str) -> bool:
             match = re.search(pattern, content)
             if match:
                 matched_pattern = i
-                logger.info(f"  ✓ Pattern {i} matched: {pattern}")
-                logger.info(f"  ✓ Matched text: {match.group(0)}")
+                logger.info(f"  ?Pattern {i} matched: {pattern}")
+                logger.info(f"  ?Matched text: {match.group(0)}")
                 break
             else:
-                logger.info(f"  ✗ Pattern {i} did not match: {pattern}")
+                logger.info(f"  ?Pattern {i} did not match: {pattern}")
 
         if not match:
-            logger.warning(f"✗ No remelight option object found in {os.path.basename(filepath)}")
+            logger.warning(f"?No remelight option object found in {os.path.basename(filepath)}")
             return False
         
         matched_pattern_idx = matched_pattern - 1
@@ -404,12 +456,12 @@ def patch_js_file(filepath: str) -> bool:
         
         if new_content != content:
             if "human_thinking" not in new_content:
-                logger.error(f"✗ human_thinking not found in patched content!")
+                logger.error(f"?human_thinking not found in patched content!")
                 return False
             
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(new_content)
-            logger.info(f"✓ Successfully patched v1.1.3 JS file: {os.path.basename(filepath)}")
+            logger.info(f"?Successfully patched v1.1.3 JS file: {os.path.basename(filepath)}")
             return True
 
         logger.warning(f"Pattern did not match in {os.path.basename(filepath)}")
@@ -422,19 +474,18 @@ def patch_js_file(filepath: str) -> bool:
 
 def patch_human_thinking_config_tab(qwenpaw_root: str) -> dict:
     """
-    修补前端JS，在选择 HumanThinking 时添加"HT记忆配置" tab
+    修补前端JS，在选择 HumanThinking 时添HT记忆配置" tab
     
     问题：原生UI只支持一个记忆管理tab。选择 HumanThinking 后，
-    需要显示两个tab："长期记忆" + "HT记忆配置"。
-    
-    解决方案：修改打包后的JS，在 dynamicTabs 生成逻辑中注入额外的tab。
-    当 memoryBackend 为 human_thinking 时，额外添加一个 HT记忆配置 tab。
+    需要显示两个tab?长期记忆" + "HT记忆配置"
+    解决方案：modify bundled的JS，在 dynamicTabs 生成逻辑中注入额外的tab?
+    ?memoryBackend ?human_thinking 时，额外添加一HT记忆配置 tab?
     """
     results = {"success": False, "patched": [], "errors": []}
     
     console_dir = find_qwenpaw_console_static_dir(qwenpaw_root)
     if not console_dir:
-        results["errors"].append("无法找到 console 目录")
+        results["errors"].append("Cannot find console directory")
         return results
     
     # 查找所有JS文件
@@ -446,7 +497,7 @@ def patch_human_thinking_config_tab(qwenpaw_root: str) -> dict:
     
     logger.info(f"[HTConfigTab] Scanning {len(js_files)} JS files for tab injection...")
     
-    # 找到最大的JS文件（通常是主chunk，包含 Agent/Config/index.tsx）
+    # 找到最大的JS文件（通常是主chunk，包Agent/Config/index.tsx?
     largest_file = None
     largest_size = 0
     
@@ -467,7 +518,7 @@ def patch_human_thinking_config_tab(qwenpaw_root: str) -> dict:
         with open(largest_file, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
         
-        # 检查是否已经注入
+        # 检查是否已经注
         if "HumanThinking: HT记忆配置 tab" in content:
             logger.info(f"[HTConfigTab] Already patched: {os.path.basename(largest_file)}")
             results["success"] = True
@@ -475,9 +526,9 @@ def patch_human_thinking_config_tab(qwenpaw_root: str) -> dict:
         
         # 查找 dynamicTabs 生成逻辑中的 memoryMapping 处理代码
         # 打包后的代码类似：const v=xa[T];if(v){const j=v.component;R.push({key:v.tabKey,label:...,children:...})}
-        # 我们需要在这段代码后面注入额外的 tab
+        # 我们需要在这段代码后面注入额外tab
         
-        # 模式1：查找 memoryMapping 处理代码（压缩后的变量名可能不同）
+        # 模式1：查memoryMapping 处理代码（压缩后的变量名可能不同
         # 关键特征：xa[T] 或类似的后端映射查找
         memory_mapping_patterns = [
             # v1.1.4 打包后模式：const v=xa[T];if(v){const j=v.component;R.push({key:v.tabKey,...})}
@@ -493,8 +544,8 @@ def patch_human_thinking_config_tab(qwenpaw_root: str) -> dict:
                 logger.info(f"[HTConfigTab] Found memoryMapping push code")
                 original_code = match.group(1)
                 
-                # 注入额外的 HT记忆配置 tab
-                # 当 memoryBackend 为 human_thinking 时，添加额外的 tab
+                # 注入额外HT记忆配置 tab
+                # ?memoryBackend ?human_thinking 时，添加额外tab
                 injection_code = '''
 // HumanThinking: HT记忆配置 tab
 (function(){
@@ -518,21 +569,21 @@ def patch_human_thinking_config_tab(qwenpaw_root: str) -> dict:
             children: React.createElement("div", {className: "ht-tab-content"}, 
                 React.createElement("div", {style: {padding: 16}},
                     React.createElement("h3", null, "HumanThinking 记忆配置"),
-                    React.createElement("p", null, "此配置已移至侧边栏 HumanThinking 记忆管理页面。"),
-                    React.createElement("p", null, "请使用右侧侧边栏进行配置。")
+                    React.createElement("p", null, "此配置已移至侧边HumanThinking 记忆管理页面),
+                    React.createElement("p", null, "请使用右侧侧边栏进行配置)
                 )
             )
         };
         
-        // 找到 tab 数组并添加
+        // 找到 tab 数组并添
         if (typeof R !== 'undefined' && Array.isArray(R)) {
             R.push(htConfigTab);
-            console.log('[HumanThinking] ✓ Added HT记忆配置 tab');
+            console.log('[HumanThinking] ?Added HT记忆配置 tab');
         }
     }
 })();
 '''
-                # 在原始代码后面添加注入代码
+                # 在原始代码后面添加注入代
                 new_content = content.replace(original_code, original_code + injection_code)
                 
                 if new_content != content:
@@ -542,7 +593,7 @@ def patch_human_thinking_config_tab(qwenpaw_root: str) -> dict:
                     results["patched"].append(os.path.basename(largest_file))
                     results["success"] = True
                     patched = True
-                    logger.info(f"[HTConfigTab] ✓ Patched: {os.path.basename(largest_file)}")
+                    logger.info(f"[HTConfigTab] ?Patched: {os.path.basename(largest_file)}")
                     break
         
         if not patched:
@@ -561,16 +612,16 @@ def patch_agent_config_refresh(qwenpaw_root: str) -> dict:
     修补前端JS，添加agent切换时自动刷新配置的功能
     
     问题：原生UI的useAgentConfig hook在切换agent时不会重新加载配置，
-    因为fetchConfig的依赖数组只有[form, t]，不包含selectedAgent。
+    因为fetchConfig的依赖数组只有[form, t]，不包含selectedAgent?
     
     解决方案：注入一个全局的agent切换监听器，当检测到agent变化时，
-    自动调用fetchConfig或刷新页面。
+    自动调用fetchConfig或刷新页面
     """
     results = {"success": False, "patched": [], "errors": []}
     
     console_dir = find_qwenpaw_console_static_dir(qwenpaw_root)
     if not console_dir:
-        results["errors"].append("无法找到 console 目录")
+        results["errors"].append("Cannot find console directory")
         return results
     
     # 查找所有JS文件
@@ -582,7 +633,7 @@ def patch_agent_config_refresh(qwenpaw_root: str) -> dict:
     
     logger.info(f"[AgentRefresh] Scanning {len(js_files)} JS files for agent config refresh patch...")
     
-    # 要注入的代码：监听sessionStorage变化，当agent切换时刷新配置
+    # 要注入的代码：监听sessionStorage变化，当agent切换时刷新配
     refresh_code = '''
 // HumanThinking: Agent切换自动刷新配置
 (function(){
@@ -600,7 +651,7 @@ def patch_agent_config_refresh(qwenpaw_root: str) -> dict:
                 if (window.__agentConfigFetch) {
                     window.__agentConfigFetch();
                 } else {
-                    // 方法2：刷新页面（兜底方案）
+                    // 方法2：刷新页面（兜底方案
                     window.location.reload();
                 }
             }
@@ -609,7 +660,7 @@ def patch_agent_config_refresh(qwenpaw_root: str) -> dict:
 })();
 '''
     
-    # 找到最大的JS文件（通常是主chunk）
+    # 找到最大的JS文件（通常是主chunk?
     largest_file = None
     largest_size = 0
     
@@ -627,7 +678,7 @@ def patch_agent_config_refresh(qwenpaw_root: str) -> dict:
             with open(largest_file, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read()
             
-            # 检查是否已经注入
+            # 检查是否已经注
             if "HumanThinking: Agent切换自动刷新配置" in content:
                 logger.debug(f"[AgentRefresh] Already patched: {os.path.basename(largest_file)}")
                 results["success"] = True
@@ -635,14 +686,14 @@ def patch_agent_config_refresh(qwenpaw_root: str) -> dict:
             
             _make_backup(largest_file)
             
-            # 在文件末尾注入代码
+            # 在文件末尾注入代
             new_content = content + "\n" + refresh_code
             
             with open(largest_file, "w", encoding="utf-8") as f:
                 f.write(new_content)
             
             results["patched"].append(os.path.basename(largest_file))
-            logger.info(f"[AgentRefresh] ✓ Patched largest JS file: {os.path.basename(largest_file)} ({largest_size} bytes)")
+            logger.info(f"[AgentRefresh] ?Patched largest JS file: {os.path.basename(largest_file)} ({largest_size} bytes)")
         except Exception as e:
             results["errors"].append(f"Failed to patch {largest_file}: {e}")
     else:
@@ -659,13 +710,13 @@ def patch_agent_config_refresh(qwenpaw_root: str) -> dict:
 
 
 def install_human_thinking_to_qwenpaw(qwenpaw_root: str, plugin_dir: str = None) -> dict:
-    """安装 HumanThinkingMemoryManager 到 QwenPaw 的 agents/tools 目录
+    """installation HumanThinkingMemoryManager ?QwenPaw ?agents/tools 目录
     
-    这是关键步骤——必须让 HumanThinkingMemoryManager 可以被正确导入
+    这是关键步骤——必须让 HumanThinkingMemoryManager 可以被正确导
     
     Args:
-        qwenpaw_root: QwenPaw 根目录
-        plugin_dir: 插件目录路径（如果为 None，则从 qwenpaw_root 推导）
+        qwenpaw_root: QwenPaw 根目
+        plugin_dir: 插件目录路径（如果为 None，则qwenpaw_root 推导
     """
     results = {"success": False, "installed": False, "errors": [], "details": {}}
     
@@ -673,15 +724,23 @@ def install_human_thinking_to_qwenpaw(qwenpaw_root: str, plugin_dir: str = None)
         import qwenpaw
         qwenpaw_pkg_dir = os.path.dirname(qwenpaw.__file__)
     except ImportError:
-        results["errors"].append("无法导入 qwenpaw 包")
+        results["errors"].append("Cannot import qwenpaw")
         return results
     
-    target_dir = os.path.join(qwenpaw_pkg_dir, "agents", "tools", "HumanThinkingMemoryManager")
+    target_dir = os.path.join(qwenpaw_pkg_dir, "agents", "tools", "HumanThinking")
+    legacy_dir = os.path.join(qwenpaw_pkg_dir, "agents", "tools", "HumanThinkingMemoryManager")
     logger.info(f"Target installation directory: {target_dir}")
+    
+    if os.path.exists(legacy_dir) and not os.path.exists(target_dir):
+        try:
+            os.rename(legacy_dir, target_dir)
+            logger.info(f"Renamed legacy directory: {legacy_dir} -> {target_dir}")
+        except Exception as e:
+            logger.warning(f"Failed to rename legacy directory: {e}")
     
     # 确定插件目录
     if plugin_dir is None:
-        # 先尝试常见路径
+        # 先尝试common paths
         possible_dirs = [
             os.path.join(qwenpaw_root, "plugins", "HumanThinking"),  # /root/.qwenpaw/plugins/HumanThinking
             os.path.join(os.path.expanduser("~"), ".qwenpaw", "plugins", "HumanThinking"),
@@ -693,11 +752,11 @@ def install_human_thinking_to_qwenpaw(qwenpaw_root: str, plugin_dir: str = None)
                 break
         
         if plugin_dir is None:
-            results["errors"].append(f"无法找到插件目录，尝试了: {possible_dirs}")
+            results["errors"].append(f"Cannot find plugin directory，tried:: {possible_dirs}")
             return results
     
     if not os.path.isdir(plugin_dir):
-        results["errors"].append(f"插件目录不存在: {plugin_dir}")
+        results["errors"].append(f"Plugin directory not found: {plugin_dir}")
         return results
     
     logger.info(f"Using plugin directory: {plugin_dir}")
@@ -715,16 +774,16 @@ def install_human_thinking_to_qwenpaw(qwenpaw_root: str, plugin_dir: str = None)
     logger.info(f"  utils/ exists: {os.path.isdir(source_utils)}")
     logger.info(f"  __init__.py exists: {os.path.isfile(source_init)}")
     
-    # 创建目标目录（只在不存在时创建，避免触发 WatchFiles）
+    # 创建目标目录（只在 not found在时创建，避免触发 WatchFiles?
     try:
         if os.path.exists(target_dir):
-            # 检查是否已经安装（跳过重复安装，避免触发 WatchFiles 热重载循环）
+            # 检查是否已经installation（跳过重复installation，避免触WatchFiles 热重载循环）
             marker_file = os.path.join(target_dir, ".ht_installed")
             if os.path.exists(marker_file):
                 with open(marker_file, "r", encoding="utf-8") as f:
                     marker_content = f.read().strip()
                 
-                # 标记文件记录安装时间，如果超过 24 小时则重新安装
+                # 标记文件记录installation时间，如果超24 小时则重新安
                 try:
                     install_time = float(marker_content)
                     import time
@@ -743,7 +802,7 @@ def install_human_thinking_to_qwenpaw(qwenpaw_root: str, plugin_dir: str = None)
         os.makedirs(target_dir, exist_ok=True)
         logger.info(f"Created target directory: {target_dir}")
     except Exception as e:
-        results["errors"].append(f"创建目标目录失败: {e}")
+        results["errors"].append(f"Failed to create target directory: {e}")
         return results
     
     # 复制目录
@@ -752,6 +811,16 @@ def install_human_thinking_to_qwenpaw(qwenpaw_root: str, plugin_dir: str = None)
         ("search", source_search),
         ("hooks", source_hooks),
         ("utils", source_utils),
+        ("api", os.path.join(plugin_dir, "api")),
+        ("locales", os.path.join(plugin_dir, "locales")),
+    ]
+    
+    files_to_copy = [
+        ("__init__.py", source_init),
+        ("frontend.js", os.path.join(plugin_dir, "frontend.js")),
+        ("prod_ui_patcher.py", os.path.join(plugin_dir, "prod_ui_patcher.py")),
+        ("plugin.json", os.path.join(plugin_dir, "plugin.json")),
+        ("AGENT.md", os.path.join(plugin_dir, "AGENT.md")),
     ]
     
     for name, source in items_to_copy:
@@ -761,12 +830,12 @@ def install_human_thinking_to_qwenpaw(qwenpaw_root: str, plugin_dir: str = None)
                 if os.path.exists(target):
                     shutil.rmtree(target)
                 shutil.copytree(source, target)
-                logger.info(f"  ✓ Copied {name}/")
+                logger.info(f"  ?Copied {name}/")
                 results["details"][name] = "copied"
             except Exception as e:
-                results["errors"].append(f"复制 {name}/ 失败: {e}")
+                results["errors"].append(f"Copy {name}/ 失败: {e}")
         else:
-            logger.warning(f"  ✗ Source {name}/ not found, skipping")
+            logger.warning(f"  ?Source {name}/ not found, skipping")
             results["details"][name] = "not_found"
     
     # 复制 __init__.py
@@ -774,47 +843,61 @@ def install_human_thinking_to_qwenpaw(qwenpaw_root: str, plugin_dir: str = None)
         target_init = os.path.join(target_dir, "__init__.py")
         try:
             shutil.copy2(source_init, target_init)
-            logger.info(f"  ✓ Copied __init__.py")
+            logger.info(f"  ?Copied __init__.py")
             results["details"]["__init__.py"] = "copied"
         except Exception as e:
-            results["errors"].append(f"复制 __init__.py 失败: {e}")
+            results["errors"].append(f"Copy __init__.py 失败: {e}")
     else:
-        # 创建基本的 __init__.py
         target_init = os.path.join(target_dir, "__init__.py")
         try:
             with open(target_init, "w") as f:
                 f.write("# HumanThinking Memory Manager\n")
-            logger.info(f"  ✓ Created basic __init__.py")
+            logger.info(f"  ?Created basic __init__.py")
             results["details"]["__init__.py"] = "created"
         except Exception as e:
             results["errors"].append(f"创建 __init__.py 失败: {e}")
     
-    # 验证安装
+    for name, source in files_to_copy:
+        if name == "__init__.py":
+            continue
+        if os.path.isfile(source):
+            target_file = os.path.join(target_dir, name)
+            try:
+                shutil.copy2(source, target_file)
+                logger.info(f"  ?Copied {name}")
+                results["details"][name] = "copied"
+            except Exception as e:
+                results["errors"].append(f"Copy {name} 失败: {e}")
+        else:
+            logger.warning(f"  ?Source {name} not found, skipping")
+            results["details"][name] = "not_found"
+    
+    # 验证installation
     memory_manager_file = os.path.join(target_dir, "core", "memory_manager.py")
     if os.path.isfile(memory_manager_file):
-        logger.info(f"  ✓ Installation verified: core/memory_manager.py exists")
+        logger.info(f"  ?Installation verified: core/memory_manager.py exists")
         results["success"] = True
         results["installed"] = True
         
-        # 创建安装标记文件（避免下次启动重复安装触发 WatchFiles）
+        # 创建installation标记文件（避免下次启动重复installation触WatchFiles?
         import time
         marker_file = os.path.join(target_dir, ".ht_installed")
         try:
             with open(marker_file, "w", encoding="utf-8") as f:
                 f.write(str(time.time()))
-            logger.info(f"  ✓ Installation marker created: {marker_file}")
+            logger.info(f"  ?Installation marker created: {marker_file}")
         except Exception as e:
-            logger.warning(f"  ✗ Failed to create installation marker: {e}")
+            logger.warning(f"  ?Failed to create installation marker: {e}")
         
-        # 安装成功后，修补 plugins.py 添加 API 路由
-        logger.info("  → Patching plugins.py for API routes...")
+        # installation successful功后，修补 plugins.py 添加 API 路由
+        logger.info("  ?Patching plugins.py for API routes...")
         router_result = patch_plugins_router(qwenpaw_root)
         if router_result.get("success"):
-            logger.info(f"  ✓ Plugins router patched: {router_result.get('patched', False)}")
+            logger.info(f"  ?Plugins router patched: {router_result.get('patched', False)}")
         else:
-            logger.warning(f"  ✗ Plugins router patch failed: {router_result.get('errors', [])}")
+            logger.warning(f"  ?Plugins router patch failed: {router_result.get('errors', [])}")
     else:
-        results["errors"].append("安装验证失败: core/memory_manager.py 不存在")
+        results["errors"].append("Installation verification failed: core/memory_manager.py not found")
     
     return results
 
@@ -833,19 +916,19 @@ def patch_workspace_import(qwenpaw_root: str) -> dict:
         import qwenpaw
         qwenpaw_pkg_dir = os.path.dirname(qwenpaw.__file__)
     except ImportError:
-        results["errors"].append("无法导入 qwenpaw 包")
+        results["errors"].append("Cannot import qwenpaw")
         return results
     
     workspace_file = os.path.join(qwenpaw_pkg_dir, "app", "workspace", "workspace.py")
     if not os.path.isfile(workspace_file):
-        results["errors"].append(f"workspace.py 不存在: {workspace_file}")
+        results["errors"].append(f"workspace.py not found: {workspace_file}")
         return results
     
     try:
         with open(workspace_file, "r", encoding="utf-8") as f:
             content = f.read()
         
-        # 检查是否已经修补
+        # 检查是否已经修
         if 'human_thinking' in content and 'HumanThinkingMemoryManager' in content:
             logger.info(f"workspace.py already supports human_thinking")
             results["success"] = True
@@ -861,7 +944,7 @@ def patch_workspace_import(qwenpaw_root: str) -> dict:
                     _make_backup(workspace_file)
                     with open(workspace_file, "w", encoding="utf-8") as f:
                         f.write(content)
-                    logger.info(f"  ✓ Added config_key")
+                    logger.info(f"  ?Added config_key")
             return results
         
         _make_backup(workspace_file)
@@ -870,14 +953,14 @@ def patch_workspace_import(qwenpaw_root: str) -> dict:
         # 1. 添加 HumanThinkingMemoryManager 导入
         old_import = 'from ...agents.memory import ReMeLightMemoryManager'
         new_imports = '''from ...agents.memory import ReMeLightMemoryManager
-    from ...agents.tools.HumanThinkingMemoryManager.core.memory_manager import HumanThinkingMemoryManager'''
+    from ...agents.tools.HumanThinking.core.memory_manager import HumanThinkingMemoryManager'''
         
         if old_import in content:
             content = content.replace(old_import, new_imports)
-            logger.info(f"  ✓ Added HumanThinkingMemoryManager import")
+            logger.info(f"  ?Added HumanThinkingMemoryManager import")
         else:
-            logger.warning(f"  ✗ Could not find ReMeLightMemoryManager import")
-            results["errors"].append("未找到 ReMeLightMemoryManager 导入")
+            logger.warning(f"  ?Could not find ReMeLightMemoryManager import")
+            results["errors"].append("Not foundReMeLightMemoryManager 导入")
         
         # 2. 添加 human_thinking 分支
         old_branch = '''    if backend == "remelight":
@@ -892,23 +975,23 @@ def patch_workspace_import(qwenpaw_root: str) -> dict:
             logger.info(f"  ✓ Added human_thinking branch")
         else:
             logger.warning(f"  ✗ Could not find remelight branch")
-            results["errors"].append("未找到 remelight 分支")
+            results["errors"].append("Not found到 remelight 分支")
         
-        # 3. 添加 config_key 到 ConfigurationException
+        # 3. 添加 config_key ?ConfigurationException
         if 'config_key="memory_manager_backend"' not in content:
             old_exception = 'message=f"Unsupported memory manager backend: \'{backend}\'",\n    )'
             new_exception = 'message=f"Unsupported memory manager backend: \'{backend}\'",\n        config_key="memory_manager_backend",\n    )'
             if old_exception in content:
                 content = content.replace(old_exception, new_exception)
-                logger.info(f"  ✓ Added config_key to ConfigurationException")
+                logger.info(f"  ?Added config_key to ConfigurationException")
             else:
-                logger.warning(f"  ✗ Could not find ConfigurationException pattern")
+                logger.warning(f"  ?Could not find ConfigurationException pattern")
         
         # 写入文件
         if content:
             with open(workspace_file, "w", encoding="utf-8") as f:
                 f.write(content)
-            logger.info(f"✓ workspace.py patched successfully")
+            logger.info(f"?workspace.py patched successfully")
             results["success"] = True
             results["patched"] = True
     
@@ -922,8 +1005,8 @@ def patch_workspace_import(qwenpaw_root: str) -> dict:
 def patch_backend_config(qwenpaw_root: str) -> dict:
     """修改后端配置，使 memory_manager_backend 接受 human_thinking
     
-    服务器上安装的 QwenPaw 版本中，config.py 的 memory_manager_backend 
-    类型定义是 Literal["remelight"]，需要改为 Literal["remelight", "human_thinking"]
+    服务器上installationQwenPaw 版本中，config.py ?memory_manager_backend 
+    类型定义Literal["remelight"]，需要改Literal["remelight", "human_thinking"]
     """
     results = {"success": True, "patched_files": [], "errors": []}
     
@@ -932,13 +1015,13 @@ def patch_backend_config(qwenpaw_root: str) -> dict:
         qwenpaw_pkg_dir = os.path.dirname(qwenpaw.__file__)
     except ImportError:
         results["success"] = False
-        results["errors"].append("无法导入 qwenpaw 包")
+        results["errors"].append("Cannot import qwenpaw")
         return results
     
     config_dir = os.path.join(qwenpaw_pkg_dir, "config")
     if not os.path.isdir(config_dir):
         results["success"] = False
-        results["errors"].append(f"配置目录不存在: {config_dir}")
+        results["errors"].append(f"Config directory not found: {config_dir}")
         return results
     
     logger.info(f"Patching backend config in: {config_dir}")
@@ -947,14 +1030,14 @@ def patch_backend_config(qwenpaw_root: str) -> dict:
     config_file = os.path.join(config_dir, "config.py")
     if not os.path.isfile(config_file):
         results["success"] = False
-        results["errors"].append(f"config.py 不存在: {config_file}")
+        results["errors"].append(f"config.py not found: {config_file}")
         return results
     
     try:
         with open(config_file, "r", encoding="utf-8") as f:
             content = f.read()
         
-        # 检查是否已经包含 human_thinking
+        # 检查是否已经包human_thinking
         if 'human_thinking' in content and 'memory_manager_backend' in content:
             # 验证是否是正确的格式
             if 'Literal["remelight", "human_thinking"]' in content or "Literal['remelight', 'human_thinking']" in content:
@@ -962,7 +1045,7 @@ def patch_backend_config(qwenpaw_root: str) -> dict:
                 results["patched_files"].append(os.path.basename(config_file))
                 return results
         
-        # 查找 memory_manager_backend 的 Literal 定义
+        # 查找 memory_manager_backend ?Literal 定义
         # 模式1: Literal["remelight"]
         pattern1 = r'Literal\["remelight"\]'
         # 模式2: Literal['remelight']
@@ -976,7 +1059,7 @@ def patch_backend_config(qwenpaw_root: str) -> dict:
             # 创建备份
             _make_backup(config_file)
             
-            # 替换为包含 human_thinking 的版本
+            # 替换为包human_thinking 的版
             new_content = content.replace(
                 'Literal["remelight"]',
                 'Literal["remelight", "human_thinking"]'
@@ -985,17 +1068,17 @@ def patch_backend_config(qwenpaw_root: str) -> dict:
             if new_content != content:
                 with open(config_file, "w", encoding="utf-8") as f:
                     f.write(new_content)
-                logger.info(f"✓ Patched backend config: {config_file}")
+                logger.info(f"?Patched backend config: {config_file}")
                 logger.info(f"  Changed: Literal['remelight'] -> Literal['remelight', 'human_thinking']")
                 results["patched_files"].append(os.path.basename(config_file))
                 
-                # ====== 关键：强制重新加载模块 ======
-                # 修改磁盘文件后，需要强制重新加载模块才能让运行时生效
+                # ====== 关键：强制重新加载模======
+                # 修改磁盘文件后，需要强制重新加载模块才能让运行时生
                 try:
                     import qwenpaw.config.config as config_module
                     import sys
                     
-                    # 从 sys.modules 中移除，然后重新导入
+                    # ?sys.modules 中移除，然后重新导入
                     module_name = 'qwenpaw.config.config'
                     if module_name in sys.modules:
                         old_module = sys.modules.pop(module_name)
@@ -1011,9 +1094,9 @@ def patch_backend_config(qwenpaw_root: str) -> dict:
                     if hasattr(pydantic.main, '_cache'):
                         pydantic.main._cache.clear()
                     
-                    logger.info("  ✓ Reloaded qwenpaw.config.config module")
+                    logger.info("  ?Reloaded qwenpaw.config.config module")
                 except Exception as e:
-                    logger.warning(f"  ✗ Failed to reload module: {e}")
+                    logger.warning(f"  ?Failed to reload module: {e}")
             else:
                 logger.warning(f"Pattern matched but replacement produced no change")
         
@@ -1029,11 +1112,11 @@ def patch_backend_config(qwenpaw_root: str) -> dict:
             if new_content != content:
                 with open(config_file, "w", encoding="utf-8") as f:
                     f.write(new_content)
-                logger.info(f"✓ Patched backend config: {config_file}")
+                logger.info(f"?Patched backend config: {config_file}")
                 results["patched_files"].append(os.path.basename(config_file))
         
         else:
-            # 可能已经是多值 Literal 或者格式不同
+            # 可能已经是多Literal 或者格式不
             logger.warning(f"Could not find Literal['remelight'] pattern in config.py")
             logger.warning(f"  memory_manager_backend may already support multiple values")
             logger.warning(f"  Or the format is different than expected")
@@ -1045,7 +1128,7 @@ def patch_backend_config(qwenpaw_root: str) -> dict:
                 end = min(len(content), mmb_idx + 300)
                 logger.info(f"  Context: {content[start:end]}")
             
-            results["errors"].append("未找到 Literal['remelight'] 模式")
+            results["errors"].append("Not foundLiteral['remelight'] 模式")
     
     except Exception as e:
         logger.error(f"Failed to patch backend config: {e}", exc_info=True)
@@ -1055,16 +1138,16 @@ def patch_backend_config(qwenpaw_root: str) -> dict:
 
 
 def patch_runtime_config_model() -> dict:
-    """修补运行时内存中的 Pydantic 模型，使其接受 human_thinking
+    """修补运行时内存中Pydantic 模型，使其接human_thinking
     
     关键问题：即使修改了磁盘上的 config.py 文件，Python 进程已经在内存中
-    缓存了旧的 AgentsRunningConfig 类定义。Pydantic 验证使用的是内存中的
-    类定义，所以必须同时修补内存中的模型。
+    缓存了旧AgentsRunningConfig 类定义。Pydantic 验证使用的是内存中的
+    类定义，所以必须同时修补内存中的模型
     
-    修补方式：
+    修补方式
     1. 修改 __annotations__ 中的 Literal 类型定义
     2. 同步更新 model_fields
-    3. 清理 Pydantic 内部缓存（核心！）
+    3. 清理 Pydantic 内部缓存（核心！?
     4. 调用 model_rebuild() 重新构建模型
     """
     results = {"success": False, "patched": False, "errors": []}
@@ -1075,7 +1158,7 @@ def patch_runtime_config_model() -> dict:
         from typing import Literal, get_args
         import pydantic
         
-        # 检查当前类型定义
+        # 检查当前类型定
         current_annotation = AgentsRunningConfig.__annotations__.get('memory_manager_backend')
         current_args = get_args(current_annotation) if hasattr(current_annotation, '__args__') else ()
         
@@ -1088,7 +1171,7 @@ def patch_runtime_config_model() -> dict:
         logger.info(f"Current memory_manager_backend Literal values: {current_args}")
         logger.info("Patching runtime AgentsRunningConfig.__annotations__...")
         
-        # 核心修补：直接修改 __annotations__
+        # 核心修补：直接修__annotations__
         new_literal = Literal["remelight", "human_thinking"]
         qwenpaw.config.config.AgentsRunningConfig.__annotations__['memory_manager_backend'] = new_literal
         AgentsRunningConfig.__annotations__['memory_manager_backend'] = new_literal
@@ -1099,12 +1182,12 @@ def patch_runtime_config_model() -> dict:
             field.annotation = new_literal
             logger.info(f"Patched model_fields['memory_manager_backend'].annotation = {new_literal}")
         
-        # ========== 关键：清理 Pydantic 内部缓存 ==========
-        # Pydantic 会在模块加载时缓存 validator，即使修改了 __annotations__
-        # 也需要清理这些缓存才能让新的 Literal 值生效
+        # ========== 关键：清Pydantic 内部缓存 ==========
+        # Pydantic 会在模块加载时缓validator，即使修改了 __annotations__
+        # 也需要清理这些缓存才能让新的 Literal 值生
         
         try:
-            # 清理模型级别的缓存
+            # 清理模型级别的缓
             if hasattr(AgentsRunningConfig, '__pydantic_validator__'):
                 del AgentsRunningConfig.__pydantic_validator__
             if hasattr(AgentsRunningConfig, '__pydantic_fields_schema__'):
@@ -1141,16 +1224,16 @@ def patch_runtime_config_model() -> dict:
         if verify_field:
             field_args = get_args(verify_field.annotation) if hasattr(verify_field.annotation, '__args__') else ()
             if 'human_thinking' in field_args:
-                logger.info(f"✓ Runtime AgentsRunningConfig patched successfully")
+                logger.info(f"?Runtime AgentsRunningConfig patched successfully")
                 logger.info(f"  New Literal values: {field_args}")
                 results["success"] = True
                 results["patched"] = True
             else:
                 results["errors"].append(f"Verification failed: human_thinking not in Literal after patch, got {field_args}")
-                logger.warning(f"✗ Runtime patch verification failed, field_args: {field_args}")
+                logger.warning(f"?Runtime patch verification failed, field_args: {field_args}")
         else:
             results["errors"].append("model_fields verification failed")
-            logger.warning(f"✗ Cannot find memory_manager_backend in model_fields")
+            logger.warning(f"?Cannot find memory_manager_backend in model_fields")
     
     except Exception as e:
         logger.error(f"Failed to patch runtime config model: {e}", exc_info=True)
@@ -1161,10 +1244,10 @@ def patch_runtime_config_model() -> dict:
 
 def patch_production_ui(qwenpaw_root: str) -> dict:
     """
-    修改生产环境的前端文件
+    修改生产环境的前端文
 
     Args:
-        qwenpaw_root: QwenPaw 根目录
+        qwenpaw_root: QwenPaw 根目
 
     Returns:
         修改结果
@@ -1174,7 +1257,7 @@ def patch_production_ui(qwenpaw_root: str) -> dict:
     if not console_dir:
         return {
             "success": False,
-            "error": "无法找到 QwenPaw console 静态文件目录",
+            "error": "Cannot find QwenPaw console static directory",
         }
 
     logger.info(f"Found console directory: {console_dir}")
@@ -1212,44 +1295,44 @@ def patch_production_ui(qwenpaw_root: str) -> dict:
     else:
         logger.warning("No files were patched - may need manual review")
         results["success"] = False
-        results["error"] = "未找到包含 remelight 选项对象的 JS 文件"
+        results["error"] = "Not found到包remelight 选项对象JS 文件"
     
     # 额外注入 HT记忆配置 tab
     logger.info("[patch_production_ui] Injecting HT记忆配置 tab...")
     ht_result = patch_human_thinking_config_tab(qwenpaw_root)
     if ht_result.get("success"):
-        logger.info("[patch_production_ui] ✓ HT记忆配置 tab injected")
+        logger.info("[patch_production_ui] ?HT记忆配置 tab injected")
     else:
-        logger.warning(f"[patch_production_ui] ✗ HT记忆配置 tab injection failed: {ht_result.get('errors', [])}")
+        logger.warning(f"[patch_production_ui] ?HT记忆配置 tab injection failed: {ht_result.get('errors', [])}")
 
-    # 修改注释文字：记忆管理器的后端类型，目前仅支持 remelight -> 记忆管理器的后端类型，目前可支持 remelight 和 HumanThinking
+    # 修改注释文字：记忆管理器的后端类型，目前only when支remelight -> 记忆管理器的后端类型，目前可支持 remelight ?HumanThinking
     logger.info("[patch_production_ui] Updating tooltip text...")
     tooltip_result = patch_memory_manager_tooltip(js_files)
     if tooltip_result.get("success"):
-        logger.info("[patch_production_ui] ✓ Tooltip text updated")
+        logger.info("[patch_production_ui] ?Tooltip text updated")
     else:
-        logger.warning(f"[patch_production_ui] ✗ Tooltip update failed: {tooltip_result.get('errors', [])}")
+        logger.warning(f"[patch_production_ui] ?Tooltip update failed: {tooltip_result.get('errors', [])}")
     
     # 确保 xa 映射表中包含 human_thinking
     logger.info("[patch_production_ui] Ensuring xa mapping has human_thinking...")
     xa_result = ensure_xa_human_thinking(js_files)
     if xa_result.get("success"):
-        logger.info("[patch_production_ui] ✓ xa mapping verified")
+        logger.info("[patch_production_ui] ?xa mapping verified")
     else:
-        logger.warning(f"[patch_production_ui] ✗ xa mapping fix failed: {xa_result.get('errors', [])}")
+        logger.warning(f"[patch_production_ui] ?xa mapping fix failed: {xa_result.get('errors', [])}")
 
     return results
 
 
 def patch_memory_manager_tooltip(js_files: list) -> dict:
     """
-    修改前端 JS 中的注释文字：
-    "记忆管理器的后端类型，目前仅支持 remelight" -> "记忆管理器的后端类型，目前可支持 remelight 和 HumanThinking"
+    修改前端 JS 中的注释文字
+    "记忆管理器的后端类型，目前only when支持 remelight" -> "记忆管理器的后端类型，目前可支持 remelight ?HumanThinking"
     """
     results = {"success": False, "patched": [], "errors": []}
     
     old_text = "记忆管理器的后端类型，目前仅支持 remelight"
-    new_text = "记忆管理器的后端类型，目前可支持 remelight 和 HumanThinking"
+    new_text = "记忆管理器的后端类型，目前可支持 remelight和HumanThinking"
     
     patched_count = 0
     for js_file in js_files:
@@ -1265,7 +1348,7 @@ def patch_memory_manager_tooltip(js_files: list) -> dict:
                         f.write(new_content)
                     results["patched"].append(os.path.basename(js_file))
                     patched_count += 1
-                    logger.info(f"  ✓ Updated tooltip in {os.path.basename(js_file)}")
+                    logger.info(f"  ?Updated tooltip in {os.path.basename(js_file)}")
         except Exception as e:
             results["errors"].append(str(e))
     
@@ -1277,10 +1360,10 @@ def patch_memory_manager_tooltip(js_files: list) -> dict:
 
 def ensure_xa_human_thinking(js_files: list) -> dict:
     """
-    确保 xa 映射表中包含 human_thinking 条目。
+    确保 xa 映射表中包含 human_thinking 条目
     
-    问题：QwenPaw 启动时可能会从备份恢复 JS 文件，导致 human_thinking 丢失。
-    解决方案：直接检查并修复 xa 映射表。
+    问题：QwenPaw 启动时可能会从备份恢JS 文件，导human_thinking 丢失
+    解决方案：直接检查并修复 xa 映射表
     """
     results = {"success": False, "patched": [], "errors": []}
     
@@ -1289,20 +1372,20 @@ def ensure_xa_human_thinking(js_files: list) -> dict:
             with open(js_file, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read()
             
-            # 查找 xa= 映射表
+            # 查找 xa= 映射
             match = re.search(r'xa=\{[^}]*\}', content)
             if match:
                 old_mapping = match.group()
                 
                 # 检查是否已包含 human_thinking
                 if 'human_thinking' not in old_mapping:
-                    # 提取 remelight 的 configField 和 component
+                    # 提取 remelight ?configField ?component
                     reme_match = re.search(r'remelight:\{([^}]+)\}', old_mapping)
                     if reme_match:
                         reme_content = reme_match.group(1)
                         # 构建 human_thinking 映射
                         ht_mapping = f'human_thinking:{{{reme_content}}}'
-                        # 在 remelight 后添加 human_thinking
+                        # ?remelight 后添human_thinking
                         new_mapping = old_mapping.replace(
                             f'remelight:{{{reme_content}}}',
                             f'remelight:{{{reme_content}}},{ht_mapping}'
@@ -1314,7 +1397,7 @@ def ensure_xa_human_thinking(js_files: list) -> dict:
                                 f.write(content)
                             results["patched"].append(os.path.basename(js_file))
                             results["success"] = True
-                            logger.info(f"  ✓ Added human_thinking to xa in {os.path.basename(js_file)}")
+                            logger.info(f"  ?Added human_thinking to xa in {os.path.basename(js_file)}")
                             break
         except Exception as e:
             results["errors"].append(str(e))
@@ -1326,8 +1409,8 @@ def patch_plugins_router(qwenpaw_root: str) -> dict:
     """
     修改 plugins.py 添加 HumanThinking API 路由
     
-    由于 QwenPaw 不支持插件动态注册 API 路由，
-    我们需要直接修改 plugins.py 文件来添加我们的路由。
+    由于 QwenPaw 不支持插件动态注API 路由
+    我们需要直接修plugins.py 文件来添加我们的路由
     """
     results = {"success": False, "patched": False, "errors": []}
     
@@ -1346,39 +1429,102 @@ def patch_plugins_router(qwenpaw_root: str) -> dict:
         with open(plugins_py, "r", encoding="utf-8") as f:
             content = f.read()
         
-        # 检查是否已经修补（包含所有路由，包括uninstall）
-        if "/humanthinking/uninstall" in content:
-            logger.info("[PluginsRouter] Already patched with all routes (including uninstall)")
-            results["success"] = True
-            results["patched"] = True
-            return results
+        begin_marker = "# ── HumanThinking Plugin Routes [BEGIN"
+        end_marker = "# ── HumanThinking Plugin Routes [END"
         
-        # 如果只有旧路由，需要追加新路由
-        has_old_routes = "/humanthinking/stats" in content
-        if has_old_routes:
-            logger.info("[PluginsRouter] Found old routes, appending new routes...")
+        if begin_marker in content:
+            start_idx = content.find(begin_marker)
+            end_idx = content.find(end_marker)
+            if end_idx > start_idx:
+                end_idx = content.find("\n", end_idx) + 1
+                content = content[:start_idx] + content[end_idx:]
+                logger.info("[PluginsRouter] Removed old marked HumanThinking routes block")
         
-        # 备份原文件
+        bak_file = plugins_py + ".humanthinking.bak"
+        if "/humanthinking/" in content and begin_marker not in content:
+            if os.path.isfile(bak_file):
+                with open(bak_file, "r", encoding="utf-8") as bf:
+                    content = bf.read()
+                logger.info("[PluginsRouter] Restored from backup to remove old inline routes")
+            else:
+                while True:
+                    idx = content.find("@router.")
+                    if idx == -1:
+                        break
+                    route_line_end = content.find("\n", idx)
+                    route_line = content[idx:route_line_end]
+                    if '"/humanthinking/' in route_line:
+                        func_start = content.find("async def ", route_line_end)
+                        if func_start == -1 or func_start > route_line_end + 200:
+                            break
+                        func_name_end = content.find("(", func_start)
+                        func_name = content[func_start:func_name_end]
+                        next_router = content.find("\n@router.", func_start)
+                        next_class = content.find("\nclass ", func_start)
+                        next_marker = content.find("\n# ──", func_start)
+                        end_pos = len(content)
+                        for pos in [next_router, next_class, next_marker]:
+                            if pos > func_start and (pos < end_pos):
+                                end_pos = pos
+                        content = content[:idx] + content[end_pos:]
+                    else:
+                        break
+        
         _make_backup(plugins_py)
         
         # 在文件末尾添加我们的路由
         ht_routes = '''
 
 # ── HumanThinking Plugin Routes [BEGIN v1.1.5-beta.1] ───────────────────────────
-# 警告：此区块由 HumanThinking 插件自动注入
-# 卸载插件时会自动删除此区块或从备份恢复
+# 警告：此区块HumanThinking 插件自动注入
+# 卸载插件时会自动删除此区块或从备份恢
 # 请勿手动修改此标记之间的代码
+from typing import Optional
 
 @router.get("/humanthinking/stats")
-async def humanthinking_stats():
+async def humanthinking_stats(agent_id: Optional[str] = None):
     """Get HumanThinking memory statistics"""
-    return {
-        "total_memories": 0,
-        "cross_session_memories": 0,
-        "frozen_memories": 0,
-        "active_sessions": 0,
-        "emotional_states": 0
-    }
+    import re
+    if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
+        return {
+            "total_memories": 0,
+            "cross_session_memories": 0,
+            "frozen_memories": 0,
+            "active_sessions": 0,
+            "emotional_states": 0
+        }
+    try:
+        from qwenpaw.agents.tools.HumanThinking.core.database import HumanThinkingDB
+        from pathlib import Path
+        if not agent_id:
+            return {
+                "total_memories": 0,
+                "cross_session_memories": 0,
+                "frozen_memories": 0,
+                "active_sessions": 0,
+                "emotional_states": 0
+            }
+        db_path = str(Path.home() / ".qwenpaw" / "workspaces" / agent_id / "memory" / f"human_thinking_memory_{agent_id}.db")
+        db = HumanThinkingDB(db_path)
+        await db.initialize()
+        stats = await db.get_stats(agent_id)
+        return {
+            "total_memories": stats.get("total_memories", 0),
+            "cross_session_memories": stats.get("active_memories", 0),
+            "frozen_memories": stats.get("frozen_memories", 0),
+            "active_sessions": stats.get("total_sessions", 0),
+            "emotional_states": 0
+        }
+    except Exception as e:
+        import logging
+        logging.getLogger("qwenpaw.humanthinking").warning(f"Failed to get stats: {e}")
+        return {
+            "total_memories": 0,
+            "cross_session_memories": 0,
+            "frozen_memories": 0,
+            "active_sessions": 0,
+            "emotional_states": 0
+        }
 
 @router.get("/humanthinking/config")
 async def humanthinking_get_config():
@@ -1400,10 +1546,28 @@ async def humanthinking_update_config(request: Request):
     return {"success": True}
 
 @router.post("/humanthinking/search")
-async def humanthinking_search(request: Request):
+async def humanthinking_search(request: Request, agent_id: Optional[str] = None):
     """Search memories"""
     data = await request.json()
-    return {"memories": [], "total": 0, "query": data.get("query", "")}
+    import re
+    if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
+        return {"memories": [], "total": 0, "query": data.get("query", "")}
+    try:
+        from qwenpaw.agents.tools.HumanThinking.core.database import HumanThinkingDB
+        from pathlib import Path
+        if not agent_id:
+            return {"memories": [], "total": 0, "query": data.get("query", "")}
+        db_path = str(Path.home() / ".qwenpaw" / "workspaces" / agent_id / "memory" / f"human_thinking_memory_{agent_id}.db")
+        db = HumanThinkingDB(db_path)
+        await db.initialize()
+        query = data.get("query", "")
+        limit = data.get("limit", 10)
+        results = await db.search_memories(query=query, agent_id=agent_id, limit=limit)
+        return {"memories": results, "total": len(results), "query": query}
+    except Exception as e:
+        import logging
+        logging.getLogger("qwenpaw.humanthinking").warning(f"Failed to search memories: {e}")
+        return {"memories": [], "total": 0, "query": data.get("query", "")}
 
 @router.get("/humanthinking/emotion")
 async def humanthinking_emotion():
@@ -1415,14 +1579,67 @@ async def humanthinking_emotion():
     }
 
 @router.get("/humanthinking/sessions")
-async def humanthinking_sessions():
+async def humanthinking_sessions(agent_id: Optional[str] = None):
     """Get session list"""
-    return []
+    import re
+    if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
+        return []
+    try:
+        from qwenpaw.agents.tools.HumanThinking.core.database import HumanThinkingDB
+        from pathlib import Path
+        if not agent_id:
+            return []
+        db_path = str(Path.home() / ".qwenpaw" / "workspaces" / agent_id / "memory" / f"human_thinking_memory_{agent_id}.db")
+        db = HumanThinkingDB(db_path)
+        await db.initialize()
+        sessions = await db.get_active_sessions(agent_id)
+        return sessions if sessions else []
+    except Exception as e:
+        import logging
+        logging.getLogger("qwenpaw.humanthinking").warning(f"Failed to get sessions: {e}")
+        return []
 
 @router.get("/humanthinking/memories/recent")
-async def humanthinking_recent_memories(limit: int = 20):
+async def humanthinking_recent_memories(agent_id: Optional[str] = None, limit: int = 20):
     """Get recent memories"""
-    return {"memories": [], "total": 0}
+    import re
+    if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
+        return {"memories": [], "total": 0}
+    try:
+        from qwenpaw.agents.tools.HumanThinking.core.database import HumanThinkingDB
+        from pathlib import Path
+        if not agent_id:
+            return {"memories": [], "total": 0}
+        db_path = str(Path.home() / ".qwenpaw" / "workspaces" / agent_id / "memory" / f"human_thinking_memory_{agent_id}.db")
+        db = HumanThinkingDB(db_path)
+        await db.initialize()
+        memories = await db.get_recent_memories(agent_id, days=7)
+        return {"memories": memories[:limit] if memories else [], "total": len(memories) if memories else 0}
+    except Exception as e:
+        import logging
+        logging.getLogger("qwenpaw.humanthinking").warning(f"Failed to get recent memories: {e}")
+        return {"memories": [], "total": 0}
+
+@router.get("/humanthinking/memories")
+async def humanthinking_memories(agent_id: Optional[str] = None, limit: Optional[int] = 20):
+    """Get memories list"""
+    import re
+    if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
+        return {"memories": [], "total": 0, "error": "Invalid agent_id format"}
+    try:
+        from qwenpaw.agents.tools.HumanThinking.core.database import HumanThinkingDB
+        from pathlib import Path
+        if not agent_id:
+            return {"memories": [], "total": 0}
+        db_path = str(Path.home() / ".qwenpaw" / "workspaces" / agent_id / "memory" / f"human_thinking_memory_{agent_id}.db")
+        db = HumanThinkingDB(db_path)
+        await db.initialize()
+        memories = await db.get_recent_memories(agent_id, days=7)
+        return {"memories": memories[:limit] if limit else memories, "total": len(memories)}
+    except Exception as e:
+        import logging
+        logging.getLogger("qwenpaw.humanthinking").warning(f"Failed to get memories: {e}")
+        return {"memories": [], "total": 0, "error": str(e)}
 
 @router.get("/humanthinking/memories/timeline")
 async def humanthinking_timeline():
@@ -1452,13 +1669,64 @@ async def humanthinking_batch_delete_memories(request: Request):
     return {"success": True, "deleted_count": len(data.get("memory_ids", []))}
 
 @router.get("/humanthinking/sleep/status")
-async def humanthinking_sleep_status():
-    """Get sleep status"""
-    return {"status": "active", "sleep_type": None, "last_active_time": __import__('time').time()}
+async def humanthinking_sleep_status(agent_id: Optional[str] = None):
+    """Get sleep status (lazy evaluation from database)"""
+    try:
+        from qwenpaw.agents.tools.HumanThinking.core.sleep_manager import check_and_trigger_sleep
+        if agent_id:
+            return await check_and_trigger_sleep(agent_id)
+        return {
+            "agent_id": "default",
+            "status": "active",
+            "status_text": "活跃",
+            "icon": "sun",
+            "color": "#52c41a",
+            "idle_time": 0,
+            "next_sleep_in": -1
+        }
+    except Exception as e:
+        logger.warning(f"Failed to get sleep status: {e}")
+        return {"status": "active", "sleep_type": None, "last_active_time": __import__('time').time()}
 
 @router.get("/humanthinking/sleep/config")
-async def humanthinking_sleep_config():
+async def humanthinking_sleep_config(agent_id: Optional[str] = None):
     """Get sleep configuration"""
+    try:
+        from qwenpaw.agents.tools.HumanThinking.core.sleep_manager import get_sleep_manager, get_agent_sleep_config
+        import re
+        if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
+            return {"error": "Invalid agent_id format"}
+        
+        if agent_id:
+            cfg = get_agent_sleep_config(agent_id)
+        else:
+            manager = get_sleep_manager()
+            cfg = manager.config if manager and manager.config else None
+            return {
+                "enable_agent_sleep": cfg.enable_agent_sleep,
+                "light_sleep_minutes": cfg.light_sleep_minutes,
+                "rem_minutes": cfg.rem_minutes,
+                "deep_sleep_minutes": cfg.deep_sleep_minutes,
+                "consolidate_days": cfg.consolidate_days,
+                "frozen_days": cfg.frozen_days,
+                "archive_days": cfg.archive_days,
+                "delete_days": cfg.delete_days,
+                "enable_insight": cfg.enable_insight,
+                "enable_dream_log": cfg.enable_dream_log,
+                "enable_merge": cfg.enable_merge,
+                "merge_similarity_threshold": cfg.merge_similarity_threshold,
+                "merge_max_distance_hours": cfg.merge_max_distance_hours,
+                "enable_contradiction_detection": cfg.enable_contradiction_detection,
+                "contradiction_threshold": cfg.contradiction_threshold,
+                "contradiction_resolution_strategy": cfg.contradiction_resolution_strategy,
+                "enable_semantic_contradiction_check": cfg.enable_semantic_contradiction_check,
+                "enable_temporal_contradiction_check": cfg.enable_temporal_contradiction_check,
+                "enable_confidence_scoring": cfg.enable_confidence_scoring,
+                "auto_resolve_contradiction": cfg.auto_resolve_contradiction,
+                "min_confidence_for_auto_resolve": cfg.min_confidence_for_auto_resolve,
+            }
+    except Exception as e:
+        logger.warning(f"Failed to get sleep config: {e}")
     return {
         "enable_agent_sleep": True,
         "light_sleep_minutes": 30,
@@ -1470,28 +1738,127 @@ async def humanthinking_sleep_config():
         "delete_days": 180,
         "enable_insight": True,
         "enable_dream_log": True,
+        "enable_merge": True,
+        "merge_similarity_threshold": 0.8,
+        "merge_max_distance_hours": 72,
+        "enable_contradiction_detection": True,
+        "contradiction_threshold": 0.7,
+        "contradiction_resolution_strategy": "keep_latest",
+        "enable_semantic_contradiction_check": True,
+        "enable_temporal_contradiction_check": True,
+        "enable_confidence_scoring": True,
+        "auto_resolve_contradiction": True,
+        "min_confidence_for_auto_resolve": 0.85,
     }
 
 @router.post("/humanthinking/sleep/config")
-async def humanthinking_sleep_update_config(request: Request):
+async def humanthinking_sleep_update_config(request: Request, agent_id: Optional[str] = None):
     """Update sleep configuration"""
     data = await request.json()
-    return {"success": True, "config": data}
+    try:
+        from qwenpaw.agents.tools.HumanThinking.core.sleep_manager import get_sleep_manager, SleepConfig, get_agent_sleep_config, save_agent_sleep_config
+        import re
+        if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
+            return {"success": False, "error": "Invalid agent_id format"}
+        
+        old_config = get_agent_sleep_config(agent_id)
+        config_dict = {}
+        for key in [
+            "enable_agent_sleep", "light_sleep_minutes", "rem_minutes", "deep_sleep_minutes",
+            "auto_consolidate", "consolidate_days", "frozen_days", "archive_days", "delete_days",
+            "enable_insight", "enable_dream_log", "enable_merge", "merge_similarity_threshold",
+            "merge_max_distance_hours", "enable_contradiction_detection", "contradiction_threshold",
+            "contradiction_resolution_strategy", "enable_semantic_contradiction_check",
+            "enable_temporal_contradiction_check", "enable_confidence_scoring",
+            "auto_resolve_contradiction", "min_confidence_for_auto_resolve"
+        ]:
+            config_dict[key] = data[key] if key in data else getattr(old_config, key, None)
+        
+        config = SleepConfig(**{k: v for k, v in config_dict.items() if v is not None})
+        
+        if agent_id:
+            save_agent_sleep_config(agent_id, config)
+        else:
+            manager = get_sleep_manager()
+            if manager:
+                manager.update_config(config)
+        
+        return {"success": True, "config": data}
+    except Exception as e:
+        logger.warning(f"Failed to update sleep config: {e}")
+        return {"success": False, "error": str(e)}
 
 @router.post("/humanthinking/sleep/force")
-async def humanthinking_sleep_force(request: Request):
+async def humanthinking_sleep_force(request: Request, agent_id: Optional[str] = None):
     """Force sleep"""
     data = await request.json()
-    return {"success": True, "sleep_type": data.get("sleep_type", "light")}
+    import re
+    if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
+        return {"success": False, "error": "Invalid agent_id format"}
+    try:
+        from qwenpaw.agents.tools.HumanThinking.core.sleep_manager import get_sleep_manager
+        manager = get_sleep_manager()
+        
+        sleep_type = data.get("sleep_type", "light")
+        if not agent_id:
+            return {"success": False, "error": "agent_id is required"}
+        
+        if sleep_type == "light":
+            result = await manager.force_light_sleep(agent_id)
+        elif sleep_type == "rem":
+            result = await manager.force_rem(agent_id)
+        elif sleep_type == "deep":
+            result = await manager.force_deep_sleep(agent_id)
+        else:
+            return {"success": False, "error": f"Unknown sleep type: {sleep_type}"}
+        
+        return result
+    except Exception as e:
+        logger.warning(f"Failed to force sleep: {e}")
+        return {"success": False, "error": str(e)}
 
 @router.post("/humanthinking/sleep/wakeup")
-async def humanthinking_sleep_wakeup():
+async def humanthinking_sleep_wakeup(agent_id: Optional[str] = None):
     """Force wakeup"""
-    return {"success": True, "status": "active"}
+    import re
+    if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
+        return {"success": False, "error": "Invalid agent_id format"}
+    try:
+        from qwenpaw.agents.tools.HumanThinking.core.sleep_manager import get_sleep_manager
+        manager = get_sleep_manager()
+        
+        if not agent_id:
+            return {"success": False, "error": "agent_id is required"}
+        
+        result = await manager.wakeup(agent_id)
+        return result
+    except Exception as e:
+        logger.warning(f"Failed to wakeup: {e}")
+        return {"success": False, "error": str(e)}
+
+@router.post("/humanthinking/sleep/activity")
+async def humanthinking_sleep_activity(agent_id: Optional[str] = None):
+    """Record agent activity"""
+    import re
+    if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
+        return {"success": False, "error": "Invalid agent_id format"}
+    try:
+        from qwenpaw.agents.tools.HumanThinking.core.sleep_manager import record_agent_activity
+        if agent_id:
+            record_agent_activity(agent_id)
+            return {"success": True, "agent_id": agent_id, "action": "activity_recorded"}
+        return {"success": False, "message": "agent_id is required"}
+    except Exception as e:
+        import logging
+        logging.getLogger("qwenpaw.humanthinking").warning(f"Failed to record activity: {e}")
+        return {"success": False, "message": "Internal error"}
 
 @router.post("/humanthinking/uninstall")
-async def humanthinking_uninstall(request: Request):
+async def humanthinking_uninstall(request: Request, agent_id: Optional[str] = None):
     """Uninstall HumanThinking plugin"""
+    import re
+    if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
+        return {"success": False, "message": "Invalid agent_id format"}
     try:
         data = await request.json()
     except:
@@ -1503,11 +1870,11 @@ async def humanthinking_uninstall(request: Request):
     import os
     import sys
     
-    # 导入环境检测模块
+    # 导入环境检测模
     sys.path.insert(0, str(Path(__file__).parent))
     from utils.env_detector import detect_qwenpaw_env
     
-    # 自动检测环境
+    # 自动检测环
     env = detect_qwenpaw_env()
     qwenpaw_dir = env.working_dir or Path("/root/.qwenpaw")
     plugin_dir = (env.plugins_dir or qwenpaw_dir / "plugins") / "HumanThinking"
@@ -1515,17 +1882,31 @@ async def humanthinking_uninstall(request: Request):
     qwenpaw_packages_dir = env.qwenpaw_package_dir
     
     try:
-        # Export memories if not keeping data
         exported_files = []
-        if not keep_data and plugin_dir.exists():
-            memory_dir = plugin_dir / "memory"
-            if memory_dir.exists():
-                import datetime
-                backup_name = f"memory_backup_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-                backup_path = plugin_dir / "Memory" / backup_name
-                backup_path.parent.mkdir(exist_ok=True)
-                # Simple export logic
-                exported_files.append(str(backup_path))
+        workspaces_dir = qwenpaw_dir / "workspaces"
+        
+        if not keep_data and workspaces_dir.exists():
+            for workspace in workspaces_dir.iterdir():
+                if workspace.is_dir():
+                    memory_dir = workspace / "memory"
+                    if memory_dir.exists():
+                        import datetime
+                        backup_name = f"memory_backup_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+                        backup_path = workspace / "Memory" / backup_name
+                        backup_path.parent.mkdir(exist_ok=True)
+                        
+                        try:
+                            from qwenpaw.agents.tools.HumanThinking.api.routes import export_memories_to_md
+                            await export_memories_to_md(memory_dir, backup_path, workspace.name)
+                            exported_files.append(str(backup_path))
+                        except Exception as export_err:
+                            exported_files.append(str(backup_path))
+                        
+                        shutil.rmtree(memory_dir)
+                    
+                    config_file = workspace / "human_thinking_config.json"
+                    if config_file.exists():
+                        config_file.unlink()
         
         # Restore QwenPaw files from backups (before deleting plugin dir)
         restored_files = []
@@ -1537,18 +1918,12 @@ async def humanthinking_uninstall(request: Request):
                             bak_path = os.path.join(root, f)
                             original_path = bak_path.replace(".humanthinking.bak", "")
                             if os.path.exists(original_path):
-                for root, dirs, files in os.walk(qwenpaw_packages_dir):
-                    for f in files:
-                        if f.endswith(".humanthinking.bak"):
-                            bak_path = os.path.join(root, f)
-                            original_path = bak_path.replace(".humanthinking.bak", "")
-                            if os.path.exists(original_path):
                                 shutil.copy2(bak_path, original_path)
                                 os.remove(bak_path)
                                 rel_path = os.path.relpath(original_path, qwenpaw_packages_dir)
                                 restored_files.append(rel_path)
-        except Exception as e:
-            print(f"Warning: Failed to restore some files: {e}")
+            except Exception as e:
+                print(f"Warning: Failed to restore some files: {e}")
         
         # Remove plugin directory (after restoring files)
         if plugin_dir.exists():
@@ -1595,15 +1970,15 @@ async def humanthinking_uninstall(request: Request):
 # ── HumanThinking Plugin Routes [END v1.1.5-beta.1] ─────────────────────────────
 '''
         
-        # 添加路由代码 - 必须插入到 /{plugin_id}/files/{file_path:path} 路由之前
-        # 否则 /humanthinking/uninstall 会被通配路由拦截，导致 405 Method Not Allowed
-        if has_old_routes:
-            # 只追加新路由（去掉头部注释）
-            new_routes = ht_routes.replace("\n# ── HumanThinking Plugin Routes [BEGIN v1.1.5-beta.1] ───────────────────────────\n# 警告：此区块由 HumanThinking 插件自动注入\n# 卸载插件时会自动删除此区块或从备份恢复\n# 请勿手动修改此标记之间的代码\n", "")
-            new_content = content + new_routes
+        # 添加路由代码 - 必须插入/{plugin_id}/files/{file_path:path} 路由之前
+        # 否则 /humanthinking/uninstall 会被通配路由拦截，导405 Method Not Allowed
+        wildcard_route_pattern = '@router.get("/{plugin_id}/files/{file_path:path}")'
+        if wildcard_route_pattern in content:
+            insert_pos = content.find(wildcard_route_pattern)
+            new_content = content[:insert_pos] + ht_routes + "\n" + content[insert_pos:]
         else:
             # 查找 /{plugin_id}/files/{file_path:path} 路由的位置，在其之前插入
-            # 使用正则匹配 @router.get("/{plugin_id}/files/{file_path:path}") 或类似模式
+            # 使用正则匹配 @router.get("/{plugin_id}/files/{file_path:path}") 或类似模
             import re
             pattern = r'(@router\.get\(\s*\n?\s*"/\{plugin_id\}/files/\{file_path:path\}"\s*\n?\s*,?)'
             match = re.search(pattern, content)
@@ -1619,7 +1994,7 @@ async def humanthinking_uninstall(request: Request):
         with open(plugins_py, "w", encoding="utf-8") as f:
             f.write(new_content)
         
-        logger.info("[PluginsRouter] ✓ Patched plugins.py with HumanThinking routes")
+        logger.info("[PluginsRouter] ?Patched plugins.py with HumanThinking routes")
         
         # 清除 Python 缓存，确保新路由立即生效
         try:
@@ -1630,7 +2005,7 @@ async def humanthinking_uninstall(request: Request):
             
             for cache_dir in cache_dirs:
                 if os.path.exists(cache_dir):
-                    # 删除所有 .pyc 文件
+                    # 删除所.pyc 文件
                     for root, dirs, files in os.walk(cache_dir):
                         for f in files:
                             if f.endswith(".pyc"):
@@ -1638,7 +2013,7 @@ async def humanthinking_uninstall(request: Request):
                                     os.remove(os.path.join(root, f))
                                 except:
                                     pass
-                    # 删除所有 __pycache__ 目录
+                    # 删除所__pycache__ 目录
                     for root, dirs, files in os.walk(cache_dir):
                         if "__pycache__" in dirs:
                             try:
@@ -1647,7 +2022,7 @@ async def humanthinking_uninstall(request: Request):
                                 dirs.remove("__pycache__")
                             except:
                                 pass
-                    logger.info(f"[PluginsRouter] ✓ Cleared Python cache: {cache_dir}")
+                    logger.info(f"[PluginsRouter] ?Cleared Python cache: {cache_dir}")
         except Exception as cache_err:
             logger.warning(f"[PluginsRouter] Failed to clear cache: {cache_err}")
         
@@ -1662,11 +2037,11 @@ async def humanthinking_uninstall(request: Request):
 
 
 def restore_production_ui(qwenpaw_root: str) -> dict:
-    """恢复生产环境的前端文件"""
+    """恢复生产环境的前端文"""
     console_dir = find_qwenpaw_console_static_dir(qwenpaw_root)
 
     if not console_dir:
-        return {"success": False, "error": "无法找到 console 目录"}
+        return {"success": False, "error": "Cannot find console directory"}
 
     results = {"success": True, "restored": []}
 
@@ -1681,6 +2056,92 @@ def restore_production_ui(qwenpaw_root: str) -> dict:
                     results["restored"].append(original)
 
     return results
+
+
+def ensure_memory_registry_registration() -> dict:
+    """确保 human_thinking 已注册到 memory_registry
+    
+    这是一个防御性函数，作为 @memory_registry.register 装饰器的补充。
+    如果由于某种原因装饰器未触发，此函数会显式检查并注册。
+    
+    Returns:
+        dict: {success: bool, registered: bool, backends: list, message: str}
+    """
+    try:
+        from qwenpaw.agents.memory.base_memory_manager import memory_registry
+        
+        # 检查当前注册列表
+        registered = memory_registry.list_registered()
+        
+        if "human_thinking" in registered:
+            logger.info(
+                f"[RegistryGuard] human_thinking already registered. "
+                f"Backends: {registered}"
+            )
+            return {
+                "success": True,
+                "registered": True,
+                "already_registered": True,
+                "backends": registered,
+                "message": "human_thinking was already registered"
+            }
+        
+        # 未注册 → 尝试导入模块触发装饰器
+        logger.info("[RegistryGuard] human_thinking not found in registry, importing module...")
+        
+        try:
+            from qwenpaw.agents.tools.HumanThinking.core.memory_manager import HumanThinkingMemoryManager
+            registered = memory_registry.list_registered()
+            
+            if "human_thinking" in registered:
+                logger.info(f"[RegistryGuard] Registered via import. Backends: {registered}")
+                return {
+                    "success": True,
+                    "registered": True,
+                    "already_registered": False,
+                    "backends": registered,
+                    "message": "human_thinking registered via module import"
+                }
+            else:
+                # 装饰器未生效 → 尝试手动注册
+                logger.warning("[RegistryGuard] Decorator didn't register, trying manual registration...")
+                memory_registry.register("human_thinking")(HumanThinkingMemoryManager)
+                registered = memory_registry.list_registered()
+                
+                if "human_thinking" in registered:
+                    logger.info(f"[RegistryGuard] Manually registered. Backends: {registered}")
+                    return {
+                        "success": True,
+                        "registered": True,
+                        "already_registered": False,
+                        "manual_register": True,
+                        "backends": registered,
+                        "message": "human_thinking manually registered"
+                    }
+                else:
+                    logger.error("[RegistryGuard] All registration attempts failed!")
+                    return {
+                        "success": False,
+                        "registered": False,
+                        "backends": registered,
+                        "message": "Failed to register human_thinking"
+                    }
+        except ImportError as ie:
+            logger.error(f"[RegistryGuard] Cannot import HumanThinkingMemoryManager: {ie}")
+            return {
+                "success": False,
+                "registered": False,
+                "backends": registered,
+                "message": f"Import failed: {ie}"
+            }
+    except Exception as e:
+        logger.error(f"[RegistryGuard] Unexpected error: {e}", exc_info=True)
+        return {
+            "success": False,
+            "registered": False,
+            "backends": [],
+            "message": str(e)
+        }
 
 
 if __name__ == "__main__":

@@ -131,27 +131,17 @@ class ImportanceCalculatorHook(MemoryHook):
         return memory_data
 
     def _calculate_importance(self, content: str) -> int:
-        """
-        简单重要性计算规则
+        score = 3
         
-        基于：
-        - 内容长度
-        - 关键词密度
-        - 特殊标记
-        """
-        score = 3  # 默认中等重要性
-        
-        # 长内容更重要
         if len(content) > 100:
             score += 1
         elif len(content) > 50:
-            score += 0.5
+            score += 1
         
-        # 包含关键词
         important_keywords = ["目标", "计划", "决定", "重要", "必须", "关键"]
         for keyword in important_keywords:
             if keyword in content:
-                score += 0.5
+                score += 1
                 break
         
-        return min(5, max(1, int(score)))
+        return min(5, max(1, score))

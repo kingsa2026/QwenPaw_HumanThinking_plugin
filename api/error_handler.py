@@ -91,10 +91,10 @@ def handle_api_errors(
                     # 添加来源标识
                     return _add_source_to_response(fallback_data, "fallback")
 
-                # 不允许降级，抛出 HTTP 异常
+                # 不允许降级，抛出 HTTP 异常（返回通用错误信息，避免泄露内部细节）
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Internal server error: {operation_name} failed"
+                    detail="Internal server error"
                 )
 
         @wraps(func)
@@ -130,7 +130,7 @@ def handle_api_errors(
 
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Internal server error: {operation_name} failed"
+                    detail="Internal server error"
                 )
 
         # 根据函数类型返回对应的包装器

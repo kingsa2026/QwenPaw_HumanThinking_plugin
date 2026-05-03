@@ -3,7 +3,7 @@
 
 支持的环境：
 1. Docker: /app/working, /app/venv
-2. Windows脚本安装: %USERPROFILE%\.qwenpaw, venv
+2. Windows脚本安装: %USERPROFILE%\\.qwenpaw, venv
 3. macOS/Linux脚本安装: ~/.qwenpaw, venv
 4. pip安装: site-packages
 5. 源码安装: 项目目录

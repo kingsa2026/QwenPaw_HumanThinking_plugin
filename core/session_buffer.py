@@ -148,6 +148,39 @@ class SessionBuffer:
             logger.debug(f"Session {self.session_id} flushed, cleared {flushed_count} memories")
             return True
     
+    async def remove_by_temp_ids(self, temp_ids: set) -> int:
+        """
+        按temp_id精确移除已写入DB的记忆，保留未写入的新记忆
+        
+        Args:
+            temp_ids: 已写入DB的记忆temp_id集合
+            
+        Returns:
+            移除的记忆数量
+        """
+        async with self._lock:
+            new_buffer = []
+            removed = 0
+            new_total_chars = 0
+            
+            for m in self._buffer:
+                if m.temp_id in temp_ids:
+                    removed += 1
+                else:
+                    new_buffer.append(m)
+                    new_total_chars += m.char_count
+            
+            self._buffer = new_buffer
+            self.total_chars = new_total_chars
+            
+            if removed > 0:
+                logger.debug(
+                    f"Session {self.session_id}: removed {removed} flushed memories, "
+                    f"remaining {len(self._buffer)} memories"
+                )
+            
+            return removed
+    
     async def mark_draining(self) -> bool:
         """
         标记为等待刷新状态
