@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.3] - 2026-05-04
+
+### Fixed (Round 1: Agent Workspace Path Refactoring)
+
+- **New `_resolve_agent_workspace_dir(agent_id)` function** in `plugin.py`, `memory_manager.py`, `routes.py`, `sleep_manager.py`: Reads agent's real `workspace_dir` from QwenPaw's `config.json`, supporting custom agent working directories.
+- **New `_resolve_all_agent_workspace_dirs()` function** in `plugin.py`, `backup_manager.py`: Iterates all agent workspace directories from config or falls back to scanning the `workspaces/` directory.
+- Replaced all hardcoded `workspaces/{agent_id}` paths in `plugin.py`, `memory_manager.py`, `routes.py`, `sleep_manager.py` with the new resolution functions.
+
+### Fixed (Round 2: Path Bug Fixes)
+
+- **BUG1 - `routes.py` `_get_db_path`**: Fixed double `agent_id` in path (was `workspaces/{agent_id}/memory/human_thinking_memory_{agent_id}.db` where `workspaces/{agent_id}` already contained the agent_id prefix).
+- **BUG2 - `sleep_manager.py` `_get_db_path`**: Same double `agent_id` path issue fixed.
+- **BUG3 - `plugin.py` `init_backup_manager`**: Was passing QwenPaw package root directory instead of the working directory. Fixed `backup_manager.py` methods `get_all_agent_dbs`, `backup_agent`, `restore_agent`, `export_to_json`, `import_from_json` to all use agent workspace paths.
+- **BUG4 - `plugin.py` `_find_qwenpaw_root`**: Removed hardcoded `/root/.qwenpaw` fallback, now dynamically resolves via `_resolve_qwenpaw_dir()`.
+- **BUG5 - `memory_manager.py` `get_memory_prompt`**: Removed hardcoded paths in help text, now dynamically constructs the plugin directory path.
+
+---
+
 ## [1.4.2] - 2026-05-04
 
 ### Fixed

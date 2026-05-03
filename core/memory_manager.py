@@ -64,6 +64,18 @@ def _resolve_qwenpaw_dir() -> Path:
     return Path("~/.qwenpaw").expanduser().resolve()
 
 
+def _resolve_agent_workspace_dir(agent_id: str) -> Path:
+    try:
+        from qwenpaw.config.utils import load_config
+        config = load_config()
+        if agent_id in config.agents.profiles:
+            ws_dir = config.agents.profiles[agent_id].workspace_dir
+            return Path(ws_dir).expanduser().resolve()
+    except Exception:
+        pass
+    return _resolve_qwenpaw_dir() / "workspaces" / agent_id
+
+
 def get_config(agent_id: str = None, working_dir: str = None) -> HumanThinkingConfig:
     """获取配置（支持按 Agent 隔离）
     
@@ -106,7 +118,7 @@ def get_config(agent_id: str = None, working_dir: str = None) -> HumanThinkingCo
         
         # 如果有 agent_id，尝试从全局配置目录读取
         elif agent_id:
-            config_path = _resolve_qwenpaw_dir() / "workspaces" / agent_id / "memory" / "human_thinking_config.json"
+            config_path = _resolve_agent_workspace_dir(agent_id) / "memory" / "human_thinking_config.json"
         
         if config_path and config_path.exists():
             with open(config_path, "r", encoding="utf-8") as f:
@@ -145,7 +157,7 @@ def save_config(config: HumanThinkingConfig, agent_id: str = None, working_dir: 
     if working_dir:
         config_path = Path(working_dir) / "memory" / "human_thinking_config.json"
     elif agent_id:
-        config_path = _resolve_qwenpaw_dir() / "workspaces" / agent_id / "memory" / "human_thinking_config.json"
+        config_path = _resolve_agent_workspace_dir(agent_id) / "memory" / "human_thinking_config.json"
     else:
         # 没有agent_id时，保存到插件全局配置目录
         config_path = _resolve_qwenpaw_dir() / "plugins" / "HumanThinking" / "config.json"
@@ -803,14 +815,15 @@ HumanThinking 是你的记忆管理系统，具有以下能力：
 
     def get_memory_prompt(self, language: str = "zh") -> str:
         """返回记忆指导 prompt - 引导 agent 阅读 agent-read.md"""
+        plugins_dir = _resolve_qwenpaw_dir() / "plugins" / "HumanThinking"
         prompts = {
-            "zh": """## 🧠 记忆系统 - HumanThinking
+            "zh": f"""## 🧠 记忆系统 - HumanThinking
 
 你当前使用 **HumanThinking** 记忆管理系统。
 
 **重要：不要手动创建 MEMORY.md 或 memory/*.md 文件** - 记忆由系统自动管理。
 
-**首次使用请阅读**：`/root/.qwenpaw/plugins/HumanThinking/agent-read.md`
+**首次使用请阅读**：`{plugins_dir}/agent-read.md`
 阅读后，请将重要要点使用 `store_memory` 记入你的记忆数据库（importance=5）。
 
 **常用工具**：
@@ -819,13 +832,13 @@ HumanThinking 是你的记忆管理系统，具有以下能力：
 
 **快速搜索**：memory_search(query="HumanThinking 系统使用说明")
 """,
-            "en": """## 🧠 Memory System - HumanThinking
+            "en": f"""## 🧠 Memory System - HumanThinking
 
 You are using the **HumanThinking** memory management system.
 
 **Important: Do not manually create MEMORY.md or memory/*.md files** - Memories are managed automatically.
 
-**First-time users please read**: `/root/.qwenpaw/plugins/HumanThinking/agent-read.md`
+**First-time users please read**: `{plugins_dir}/agent-read.md`
 After reading, please save key points to your memory database using `store_memory` (importance=5).
 
 **Common Tools**:

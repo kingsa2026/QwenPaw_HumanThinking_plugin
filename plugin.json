@@ -1,7 +1,7 @@
 {
   "id": "humanthinking",
   "name": "Human Thinking Memory Manager",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "HumanThinking 记忆管理插件 - 支持跨会话记忆、情感状态、睡眠管理和记忆生命周期管理",
   "author": "HumanThinking Team",
   "license": "MIT",

@@ -30,6 +30,34 @@ def _resolve_qwenpaw_dir() -> Path:
     return Path("~/.qwenpaw").expanduser().resolve()
 
 
+def _resolve_agent_workspace_dir(agent_id: str) -> Path:
+    try:
+        from qwenpaw.config.utils import load_config
+        config = load_config()
+        if agent_id in config.agents.profiles:
+            ws_dir = config.agents.profiles[agent_id].workspace_dir
+            return Path(ws_dir).expanduser().resolve()
+    except Exception:
+        pass
+    return _resolve_qwenpaw_dir() / "workspaces" / agent_id
+
+
+def _resolve_all_agent_workspace_dirs() -> list[Path]:
+    try:
+        from qwenpaw.config.utils import load_config
+        config = load_config()
+        return [
+            Path(ref.workspace_dir).expanduser().resolve()
+            for ref in config.agents.profiles.values()
+        ]
+    except Exception:
+        pass
+    workspaces_dir = _resolve_qwenpaw_dir() / "workspaces"
+    if workspaces_dir.exists():
+        return [d for d in workspaces_dir.iterdir() if d.is_dir()]
+    return []
+
+
 def load_backup_config() -> dict:
     try:
         config_path = _resolve_qwenpaw_dir() / "config" / f"{BACKUP_CONFIG_KEY}.json"
@@ -172,7 +200,7 @@ class HumanThinkingMemoryPlugin:
 
         common_paths = [
             os.path.expanduser("~/.qwenpaw"),
-            "/root/.qwenpaw",
+            str(_resolve_qwenpaw_dir()),
             "/opt/QwenPaw",
         ]
 
@@ -280,32 +308,31 @@ class HumanThinkingMemoryPlugin:
             plugin_dir = os.path.dirname(os.path.abspath(__file__))
             agent_md_source = os.path.join(plugin_dir, "AGENT.md")
 
-            workspaces_dir = _resolve_qwenpaw_dir() / "workspaces"
-            if workspaces_dir.exists():
-                for agent_dir in workspaces_dir.iterdir():
-                    if agent_dir.is_dir():
-                        agent_md_target = agent_dir / "AGENTS.md"
-                        need_copy = False
-                        if not agent_md_target.exists():
+            workspaces_dirs = _resolve_all_agent_workspace_dirs()
+            for agent_dir in workspaces_dirs:
+                if agent_dir.is_dir():
+                    agent_md_target = agent_dir / "AGENTS.md"
+                    need_copy = False
+                    if not agent_md_target.exists():
+                        need_copy = True
+                    else:
+                        existing_content = agent_md_target.read_text(encoding='utf-8')
+                        if "HumanThinking" not in existing_content:
                             need_copy = True
-                        else:
-                            existing_content = agent_md_target.read_text(encoding='utf-8')
-                            if "HumanThinking" not in existing_content:
-                                need_copy = True
 
-                        if need_copy and os.path.exists(agent_md_source):
-                            with open(agent_md_source, 'r', encoding='utf-8') as f:
-                                content = f.read()
+                    if need_copy and os.path.exists(agent_md_source):
+                        with open(agent_md_source, 'r', encoding='utf-8') as f:
+                            content = f.read()
 
-                            if agent_md_target.exists():
-                                existing = agent_md_target.read_text(encoding='utf-8')
-                                if "<!-- HumanThinking:start -->" not in existing:
-                                    content = existing + "\n\n<!-- HumanThinking:start -->\n\n" + content + "\n\n<!-- HumanThinking:end -->\n"
-                                    agent_md_target.write_text(content, encoding='utf-8')
-                                    logger.info(f"Appended HumanThinking to {agent_dir.name}/AGENTS.md")
-                            else:
+                        if agent_md_target.exists():
+                            existing = agent_md_target.read_text(encoding='utf-8')
+                            if "<!-- HumanThinking:start -->" not in existing:
+                                content = existing + "\n\n<!-- HumanThinking:start -->\n\n" + content + "\n\n<!-- HumanThinking:end -->\n"
                                 agent_md_target.write_text(content, encoding='utf-8')
-                                logger.info(f"Created {agent_dir.name}/AGENTS.md")
+                                logger.info(f"Appended HumanThinking to {agent_dir.name}/AGENTS.md")
+                        else:
+                            agent_md_target.write_text(content, encoding='utf-8')
+                            logger.info(f"Created {agent_dir.name}/AGENTS.md")
 
             logger.info("AGENT.md copy completed")
         except Exception as e:
@@ -381,7 +408,7 @@ class HumanThinkingMemoryPlugin:
 
             try:
                 qwenpaw_dir = _resolve_qwenpaw_dir()
-                working_dir = str(qwenpaw_dir / "workspaces" / "default")
+                working_dir = str(_resolve_agent_workspace_dir("default"))
                 logger.info(f"Resolved working directory: {working_dir} (from {qwenpaw_dir})")
 
                 Path(working_dir).mkdir(parents=True, exist_ok=True)
@@ -433,7 +460,7 @@ class HumanThinkingMemoryPlugin:
             sleep_mgr = init_sleep_manager(sleep_cfg)
             logger.info("SleepManager initialized with config (event-driven mode, no timer thread)")
 
-            qwenpaw_root = self._find_qwenpaw_root()
+            qwenpaw_root = str(_resolve_qwenpaw_dir())
             if qwenpaw_root:
                 from qwenpaw.agents.tools.HumanThinking.core.backup_manager import init_backup_manager
                 backup_config = load_backup_config()

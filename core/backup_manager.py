@@ -25,6 +25,49 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 
+def _resolve_qwenpaw_dir() -> Path:
+    env_dir = os.environ.get('QWENPAW_WORKING_DIR', '')
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
+    try:
+        from qwenpaw.constant import WORKING_DIR
+        return WORKING_DIR
+    except (ImportError, AttributeError):
+        pass
+    legacy = Path("~/.copaw").expanduser()
+    if legacy.exists():
+        return legacy.resolve()
+    return Path("~/.qwenpaw").expanduser().resolve()
+
+
+def _resolve_all_agent_workspace_dirs() -> list[Path]:
+    try:
+        from qwenpaw.config.utils import load_config
+        config = load_config()
+        return [
+            Path(ref.workspace_dir).expanduser().resolve()
+            for ref in config.agents.profiles.values()
+        ]
+    except Exception:
+        pass
+    workspaces_dir = _resolve_qwenpaw_dir() / "workspaces"
+    if workspaces_dir.exists():
+        return [d for d in workspaces_dir.iterdir() if d.is_dir()]
+    return []
+
+
+def _resolve_agent_workspace_dir(agent_id: str) -> Path:
+    try:
+        from qwenpaw.config.utils import load_config
+        config = load_config()
+        if agent_id in config.agents.profiles:
+            ws_dir = config.agents.profiles[agent_id].workspace_dir
+            return Path(ws_dir).expanduser().resolve()
+    except Exception:
+        pass
+    return _resolve_qwenpaw_dir() / "workspaces" / agent_id
+
+
 @dataclass
 class BackupInfo:
     """备份信息"""
@@ -95,30 +138,26 @@ class BackupManager:
         logger.info(f"BackupManager initialized: {self.backup_dir}")
     
     def get_all_agent_dbs(self) -> List[Dict[str, Any]]:
-        """获取所有 Agent 数据库"""
-        memory_dir = self.working_dir / "memory"
-        if not memory_dir.exists():
-            return []
-        
-        db_files = list(memory_dir.glob("human_thinking_memory_*.db"))
-        
         agents = []
-        for db_file in db_files:
-            agent_id = db_file.stem.replace("human_thinking_memory_", "")
-            stat = db_file.stat()
-            
-            agents.append({
-                "agent_id": agent_id,
-                "db_path": str(db_file),
-                "db_size_mb": round(stat.st_size / 1024 / 1024, 2),
-                "last_modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-            })
-        
+        for ws_dir in _resolve_all_agent_workspace_dirs():
+            memory_dir = ws_dir / "memory"
+            if not memory_dir.exists():
+                continue
+            db_files = list(memory_dir.glob("human_thinking_memory_*.db"))
+            for db_file in db_files:
+                agent_id = db_file.stem.replace("human_thinking_memory_", "")
+                stat = db_file.stat()
+                agents.append({
+                    "agent_id": agent_id,
+                    "db_path": str(db_file),
+                    "db_size_mb": round(stat.st_size / 1024 / 1024, 2),
+                    "last_modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                })
         return agents
     
     def backup_agent(self, agent_id: str) -> BackupInfo:
         """备份单个 Agent"""
-        source_db = self.working_dir / "memory" / f"human_thinking_memory_{agent_id}.db"
+        source_db = _resolve_agent_workspace_dir(agent_id) / "memory" / f"human_thinking_memory_{agent_id}.db"
         
         if not source_db.exists():
             raise FileNotFoundError(f"Database not found: {source_db}")
@@ -174,7 +213,7 @@ class BackupManager:
             raise FileNotFoundError(f"Backup not found: {backup_id}")
         
         target_agent = agent_id or backup_id.split("_")[0]
-        target_db = self.working_dir / "memory" / f"human_thinking_memory_{target_agent}.db"
+        target_db = _resolve_agent_workspace_dir(target_agent) / "memory" / f"human_thinking_memory_{target_agent}.db"
         
         shutil.copy2(backup_file, target_db)
         
@@ -214,7 +253,7 @@ class BackupManager:
     
     def export_to_json(self, agent_id: str) -> str:
         """导出为 JSON"""
-        source_db = self.working_dir / "memory" / f"human_thinking_memory_{agent_id}.db"
+        source_db = _resolve_agent_workspace_dir(agent_id) / "memory" / f"human_thinking_memory_{agent_id}.db"
         
         if not source_db.exists():
             raise FileNotFoundError(f"Database not found: {source_db}")
@@ -259,7 +298,7 @@ class BackupManager:
         with open(json_file, "r", encoding="utf-8") as f:
             data = json.load(f)
         
-        target_db = self.working_dir / "memory" / f"human_thinking_memory_{agent_id}.db"
+        target_db = _resolve_agent_workspace_dir(agent_id) / "memory" / f"human_thinking_memory_{agent_id}.db"
         
         conn = sqlite3.connect(str(target_db))
         cursor = conn.cursor()

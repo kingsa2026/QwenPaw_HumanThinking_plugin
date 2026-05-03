@@ -32,6 +32,18 @@ def _resolve_qwenpaw_dir():
     if legacy.exists():
         return legacy.resolve()
     return Path("~/.qwenpaw").expanduser().resolve()
+
+
+def _resolve_agent_workspace_dir(agent_id: str) -> Path:
+    try:
+        from qwenpaw.config.utils import load_config
+        config = load_config()
+        if agent_id in config.agents.profiles:
+            ws_dir = config.agents.profiles[agent_id].workspace_dir
+            return Path(ws_dir).expanduser().resolve()
+    except Exception:
+        pass
+    return _resolve_qwenpaw_dir() / "workspaces" / agent_id
 from datetime import datetime, timedelta
 import re
 
@@ -60,8 +72,8 @@ def _get_db_path(agent_id: str) -> str:
     Returns:
         数据库文件路径字符串
     """
-    base_dir = _resolve_qwenpaw_dir() / "workspaces"
-    db_path = base_dir / agent_id / "memory" / f"human_thinking_memory_{agent_id}.db"
+    base_dir = _resolve_agent_workspace_dir(agent_id)
+    db_path = base_dir / "memory" / f"human_thinking_memory_{agent_id}.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     return str(db_path)
 
@@ -1129,7 +1141,7 @@ _agent_sleep_configs: Dict[str, SleepConfig] = {}
 
 def _get_config_path(agent_id: str) -> Path:
     """获取Agent配置文件路径"""
-    return _resolve_qwenpaw_dir() / "workspaces" / agent_id / "memory" / "sleep_config.json"
+    return _resolve_agent_workspace_dir(agent_id) / "memory" / "sleep_config.json"
 
 
 def _save_config_to_file(agent_id: str, config: SleepConfig) -> bool:
