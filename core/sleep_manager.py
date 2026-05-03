@@ -11,15 +11,28 @@ HumanThinking 睡眠管理器 - 事件驱动模式
 - 每次查询睡眠状态时，从数据库获取最后活动时间
 - 根据空闲时间实时计算当前应处于的睡眠状态
 - 状态转换时执行对应的睡眠任务
-"""
-
-import logging
+"""import logging
 import time
 import os
+from pathlib import Path
 from typing import Dict, Optional, List, TYPE_CHECKING
 from dataclasses import dataclass, field
+
+
+def _resolve_qwenpaw_dir():
+    env_dir = os.environ.get('QWENPAW_WORKING_DIR', '')
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
+    try:
+        from qwenpaw.constant import WORKING_DIR
+        return WORKING_DIR
+    except (ImportError, AttributeError):
+        pass
+    legacy = Path("~/.copaw").expanduser()
+    if legacy.exists():
+        return legacy.resolve()
+    return Path("~/.qwenpaw").expanduser().resolve()
 from datetime import datetime, timedelta
-from pathlib import Path
 import re
 
 logger = logging.getLogger(__name__)
@@ -47,7 +60,7 @@ def _get_db_path(agent_id: str) -> str:
     Returns:
         数据库文件路径字符串
     """
-    base_dir = Path.home() / ".qwenpaw" / "workspaces"
+    base_dir = _resolve_qwenpaw_dir() / "workspaces"
     db_path = base_dir / agent_id / "memory" / f"human_thinking_memory_{agent_id}.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     return str(db_path)
@@ -1116,7 +1129,7 @@ _agent_sleep_configs: Dict[str, SleepConfig] = {}
 
 def _get_config_path(agent_id: str) -> Path:
     """获取Agent配置文件路径"""
-    return Path.home() / ".qwenpaw" / "workspaces" / agent_id / "memory" / "sleep_config.json"
+    return _resolve_qwenpaw_dir() / "workspaces" / agent_id / "memory" / "sleep_config.json"
 
 
 def _save_config_to_file(agent_id: str, config: SleepConfig) -> bool:

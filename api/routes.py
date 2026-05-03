@@ -20,6 +20,23 @@ router = APIRouter()
 security = HTTPBearer(auto_error=False)
 
 
+def _resolve_qwenpaw_dir():
+    from pathlib import Path
+    import os
+    env_dir = os.environ.get('QWENPAW_WORKING_DIR', '')
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
+    try:
+        from qwenpaw.constant import WORKING_DIR
+        return WORKING_DIR
+    except (ImportError, AttributeError):
+        pass
+    legacy = Path("~/.copaw").expanduser()
+    if legacy.exists():
+        return legacy.resolve()
+    return Path("~/.qwenpaw").expanduser().resolve()
+
+
 # ============ 认证依赖 ============
 
 async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -56,7 +73,7 @@ def validate_agent_id(agent_id: Optional[str]) -> Optional[str]:
 def _get_db_path(agent_id: str) -> str:
     """根据agent_id获取数据库文件路径"""
     from pathlib import Path
-    base_dir = Path.home() / ".qwenpaw" / "workspaces"
+    base_dir = _resolve_qwenpaw_dir() / "workspaces"
     db_path = base_dir / agent_id / "memory" / f"human_thinking_memory_{agent_id}.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     return str(db_path)
@@ -212,7 +229,7 @@ def get_memory_manager(agent_id: str = None):
     if agent_id not in _memory_managers:
         try:
             from ..core.memory_manager import HumanThinkingMemoryManager
-            working_dir = str(Path.home() / ".qwenpaw" / "workspaces" / agent_id)
+            working_dir = str(_resolve_qwenpaw_dir() / "workspaces" / agent_id)
             _memory_managers[agent_id] = HumanThinkingMemoryManager(
                 working_dir=working_dir,
                 agent_id=agent_id
@@ -693,11 +710,11 @@ async def update_config(request: Request, agent_id: Optional[str] = None):
             import os
             from pathlib import Path
             
-            # 获取当前 agent 的工作目录
+            base_dir = _resolve_qwenpaw_dir()
             if agent_id:
-                working_dir = str(Path.home() / ".qwenpaw" / "workspaces" / agent_id)
+                working_dir = str(base_dir / "workspaces" / agent_id)
             else:
-                working_dir = str(Path.home() / ".qwenpaw" / "workspaces" / "default")
+                working_dir = str(base_dir / "workspaces" / "default")
             
             db_path = Path(working_dir) / "memory" / f"human_thinking_memory_{agent_id or 'default'}.db"
             

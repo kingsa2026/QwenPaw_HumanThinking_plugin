@@ -445,33 +445,177 @@ class VoiceAdapter(ChannelAdapter):
 
 
 class XiaoYiAdapter(ChannelAdapter):
-    """小艺渠道适配器"""
+    """小艺（华为智能助手）渠道适配器"""
 
     channel_type = ChannelType.XIAOYI
 
+    @staticmethod
+    def extract_user_id(payload: Dict[str, Any], meta: Dict[str, Any]) -> str:
+        return (
+            meta.get("session_id")
+            or payload.get("sender_id")
+            or ""
+        )
+
+    @staticmethod
+    def extract_session_id(
+        payload: Dict[str, Any],
+        meta: Dict[str, Any],
+        channel_id: str,
+    ) -> str:
+        if meta.get("session_id"):
+            return f"xiaoyi:{meta['session_id']}"
+        sender = payload.get("sender_id", "")
+        return f"xiaoyi:{sender}" if sender else "xiaoyi:unknown"
+
+    @staticmethod
+    def extract_group_info(meta: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+        return False, None
+
 
 class OneBotAdapter(ChannelAdapter):
-    """OneBot 渠道适配器"""
+    """OneBot 协议渠道适配器（QQ 机器人通用协议）"""
 
     channel_type = ChannelType.ONEBOT
 
+    @staticmethod
+    def extract_user_id(payload: Dict[str, Any], meta: Dict[str, Any]) -> str:
+        return (
+            meta.get("sender_id")
+            or payload.get("sender_id")
+            or ""
+        )
+
+    @staticmethod
+    def extract_session_id(
+        payload: Dict[str, Any],
+        meta: Dict[str, Any],
+        channel_id: str,
+    ) -> str:
+        is_group = meta.get("is_group", False)
+        group_id = meta.get("group_id", "")
+        sender = payload.get("sender_id", "")
+        if is_group and group_id:
+            return f"onebot:g:{group_id}"
+        return f"onebot:{sender}" if sender else "onebot:unknown"
+
+    @staticmethod
+    def extract_group_info(meta: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+        is_group = meta.get("is_group", False)
+        group_id = meta.get("group_id") if is_group else None
+        return is_group, group_id
+
+    @staticmethod
+    def extract_target_id(payload: Dict[str, Any], meta: Dict[str, Any]) -> Optional[str]:
+        is_group = meta.get("is_group", False)
+        if is_group:
+            return meta.get("group_id")
+        return payload.get("sender_id")
+
 
 class MqttAdapter(ChannelAdapter):
-    """MQTT 渠道适配器"""
+    """MQTT 物联网协议渠道适配器"""
 
     channel_type = ChannelType.MQTT
 
+    @staticmethod
+    def extract_user_id(payload: Dict[str, Any], meta: Dict[str, Any]) -> str:
+        return (
+            str(meta.get("client_id", ""))
+            or payload.get("sender_id")
+            or ""
+        )
+
+    @staticmethod
+    def extract_session_id(
+        payload: Dict[str, Any],
+        meta: Dict[str, Any],
+        channel_id: str,
+    ) -> str:
+        sender = payload.get("sender_id", "")
+        return f"mqtt:{sender}" if sender else "mqtt:unknown"
+
+    @staticmethod
+    def extract_group_info(meta: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+        return False, None
+
 
 class MattermostAdapter(ChannelAdapter):
-    """Mattermost 渠道适配器"""
+    """Mattermost 开源团队协作渠道适配器"""
 
     channel_type = ChannelType.MATTERMOST
 
+    @staticmethod
+    def extract_user_id(payload: Dict[str, Any], meta: Dict[str, Any]) -> str:
+        return payload.get("sender_id") or ""
+
+    @staticmethod
+    def extract_session_id(
+        payload: Dict[str, Any],
+        meta: Dict[str, Any],
+        channel_id: str,
+    ) -> str:
+        channel_type_mm = meta.get("channel_type", "")
+        mm_channel_id = meta.get("mm_channel_id", "")
+        root_id = meta.get("root_id", "")
+        if channel_type_mm == "D":
+            return f"mattermost_dm:{mm_channel_id}" if mm_channel_id else "mattermost:unknown"
+        if root_id:
+            return f"mattermost_thread:{root_id}"
+        return f"mattermost:{mm_channel_id}" if mm_channel_id else "mattermost:unknown"
+
+    @staticmethod
+    def extract_group_info(meta: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+        channel_type_mm = meta.get("channel_type", "")
+        is_group = channel_type_mm != "D"
+        group_id = meta.get("mm_channel_id") if is_group else None
+        return is_group, group_id
+
+    @staticmethod
+    def extract_target_id(payload: Dict[str, Any], meta: Dict[str, Any]) -> Optional[str]:
+        channel_type_mm = meta.get("channel_type", "")
+        if channel_type_mm == "D":
+            return payload.get("sender_id")
+        return meta.get("mm_channel_id")
+
 
 class MatrixAdapter(ChannelAdapter):
-    """Matrix 渠道适配器"""
+    """Matrix 联邦通信协议渠道适配器"""
 
     channel_type = ChannelType.MATRIX
+
+    @staticmethod
+    def extract_user_id(payload: Dict[str, Any], meta: Dict[str, Any]) -> str:
+        return (
+            meta.get("room_id")
+            or payload.get("sender_id")
+            or ""
+        )
+
+    @staticmethod
+    def extract_session_id(
+        payload: Dict[str, Any],
+        meta: Dict[str, Any],
+        channel_id: str,
+    ) -> str:
+        room_id = meta.get("room_id")
+        if room_id:
+            return f"matrix:{room_id}"
+        sender = payload.get("sender_id", "")
+        return f"matrix:{sender}" if sender else "matrix:unknown"
+
+    @staticmethod
+    def extract_group_info(meta: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+        is_dm = meta.get("is_dm", True)
+        room_id = meta.get("room_id")
+        return not is_dm, room_id if not is_dm else None
+
+    @staticmethod
+    def extract_target_id(payload: Dict[str, Any], meta: Dict[str, Any]) -> Optional[str]:
+        is_dm = meta.get("is_dm", True)
+        if is_dm:
+            return payload.get("sender_id")
+        return meta.get("room_id")
 
 
 # ============================================================

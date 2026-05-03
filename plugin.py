@@ -15,9 +15,24 @@ BACKUP_CONFIG_KEY = 'humanthinking_backup_config'
 SLEEP_CONFIG_KEY = 'humanthinking_sleep_config'
 
 
+def _resolve_qwenpaw_dir() -> Path:
+    env_dir = os.environ.get('QWENPAW_WORKING_DIR', '')
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
+    try:
+        from qwenpaw.constant import WORKING_DIR
+        return WORKING_DIR
+    except (ImportError, AttributeError):
+        pass
+    legacy = Path("~/.copaw").expanduser()
+    if legacy.exists():
+        return legacy.resolve()
+    return Path("~/.qwenpaw").expanduser().resolve()
+
+
 def load_backup_config() -> dict:
     try:
-        config_path = Path.home() / ".qwenpaw" / "config" / f"{BACKUP_CONFIG_KEY}.json"
+        config_path = _resolve_qwenpaw_dir() / "config" / f"{BACKUP_CONFIG_KEY}.json"
         if config_path.exists():
             with open(config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
@@ -28,7 +43,7 @@ def load_backup_config() -> dict:
 
 def load_humanthinking_config() -> dict:
     try:
-        config_path = Path.home() / ".qwenpaw" / "config" / f"{CONFIG_KEY}.json"
+        config_path = _resolve_qwenpaw_dir() / "config" / f"{CONFIG_KEY}.json"
         if config_path.exists():
             with open(config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
@@ -39,7 +54,7 @@ def load_humanthinking_config() -> dict:
 
 def load_sleep_config() -> dict:
     try:
-        config_path = Path.home() / ".qwenpaw" / "config" / f"{SLEEP_CONFIG_KEY}.json"
+        config_path = _resolve_qwenpaw_dir() / "config" / f"{SLEEP_CONFIG_KEY}.json"
         if config_path.exists():
             with open(config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
@@ -265,7 +280,7 @@ class HumanThinkingMemoryPlugin:
             plugin_dir = os.path.dirname(os.path.abspath(__file__))
             agent_md_source = os.path.join(plugin_dir, "AGENT.md")
 
-            workspaces_dir = Path.home() / ".qwenpaw" / "workspaces"
+            workspaces_dir = _resolve_qwenpaw_dir() / "workspaces"
             if workspaces_dir.exists():
                 for agent_dir in workspaces_dir.iterdir():
                     if agent_dir.is_dir():
@@ -365,9 +380,9 @@ class HumanThinkingMemoryPlugin:
             delete_days = ht_config.get("delete_days", global_config.delete_days)
 
             try:
-                working_dir = os.environ.get('QWENPAW_WORKING_DIR', '')
-                if not working_dir:
-                    working_dir = str(Path.home() / ".qwenpaw" / "workspaces" / "default")
+                qwenpaw_dir = _resolve_qwenpaw_dir()
+                working_dir = str(qwenpaw_dir / "workspaces" / "default")
+                logger.info(f"Resolved working directory: {working_dir} (from {qwenpaw_dir})")
 
                 Path(working_dir).mkdir(parents=True, exist_ok=True)
 

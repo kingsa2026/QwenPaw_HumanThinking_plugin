@@ -48,6 +48,22 @@ _agent_configs: Dict[str, HumanThinkingConfig] = {}
 _global_config = HumanThinkingConfig()
 
 
+def _resolve_qwenpaw_dir() -> Path:
+    import os
+    env_dir = os.environ.get('QWENPAW_WORKING_DIR', '')
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
+    try:
+        from qwenpaw.constant import WORKING_DIR
+        return WORKING_DIR
+    except (ImportError, AttributeError):
+        pass
+    legacy = Path("~/.copaw").expanduser()
+    if legacy.exists():
+        return legacy.resolve()
+    return Path("~/.qwenpaw").expanduser().resolve()
+
+
 def get_config(agent_id: str = None, working_dir: str = None) -> HumanThinkingConfig:
     """获取配置（支持按 Agent 隔离）
     
@@ -90,7 +106,7 @@ def get_config(agent_id: str = None, working_dir: str = None) -> HumanThinkingCo
         
         # 如果有 agent_id，尝试从全局配置目录读取
         elif agent_id:
-            config_path = Path.home() / ".qwenpaw" / "workspaces" / agent_id / "memory" / "human_thinking_config.json"
+            config_path = _resolve_qwenpaw_dir() / "workspaces" / agent_id / "memory" / "human_thinking_config.json"
         
         if config_path and config_path.exists():
             with open(config_path, "r", encoding="utf-8") as f:
@@ -102,8 +118,7 @@ def get_config(agent_id: str = None, working_dir: str = None) -> HumanThinkingCo
         
     except Exception as e:
         logger.warning(f"Failed to load config for agent {agent_id}: {e}")
-    
-    # 缓存配置实例
+
     _agent_configs[config_key] = config
     return config
 
@@ -130,10 +145,10 @@ def save_config(config: HumanThinkingConfig, agent_id: str = None, working_dir: 
     if working_dir:
         config_path = Path(working_dir) / "memory" / "human_thinking_config.json"
     elif agent_id:
-        config_path = Path.home() / ".qwenpaw" / "workspaces" / agent_id / "memory" / "human_thinking_config.json"
+        config_path = _resolve_qwenpaw_dir() / "workspaces" / agent_id / "memory" / "human_thinking_config.json"
     else:
         # 没有agent_id时，保存到插件全局配置目录
-        config_path = Path.home() / ".qwenpaw" / "plugins" / "HumanThinking" / "config.json"
+        config_path = _resolve_qwenpaw_dir() / "plugins" / "HumanThinking" / "config.json"
     
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
