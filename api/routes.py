@@ -683,8 +683,8 @@ async def get_config(agent_id: Optional[str] = None):
 @router.post("/config")
 async def update_config(request: Request, agent_id: Optional[str] = None):
     """更新HumanThinking配置（支持按Agent隔离）"""
+    agent_id = validate_agent_id(agent_id)
     try:
-        agent_id = validate_agent_id(agent_id)
         from ..core.memory_manager import get_config, save_config, update_config_fields
         
         data = await request.json()
@@ -713,11 +713,14 @@ async def update_config(request: Request, agent_id: Optional[str] = None):
         if update_fields:
             update_config_fields(update_fields, agent_id=agent_id)
         
+        logger.info(f"准备保存配置 agent={agent_id or 'default'}, 更新字段: {list(update_fields.keys())}")
         success = save_config(config, agent_id=agent_id)
         if not success:
+            logger.error(f"save_config 返回 False, agent={agent_id or 'default'}")
             return {"success": False, "message": "配置保存失败，请检查日志"}
         
-        # 保存配置时自动初始化数据库（如果尚未初始化）
+        logger.info(f"配置已保存成功 agent={agent_id or 'default'}, 检查数据库...")
+        
         try:
             from ..core.memory_manager import HumanThinkingMemoryManager
             import os
@@ -729,24 +732,28 @@ async def update_config(request: Request, agent_id: Optional[str] = None):
                 working_dir = str(_resolve_agent_workspace_dir("default"))
             
             db_path = Path(working_dir) / "memory" / f"human_thinking_memory_{agent_id or 'default'}.db"
+            logger.info(f"检查数据库: db_path={db_path}, working_dir={working_dir}")
             
             if not db_path.exists():
-                # 数据库不存在，创建并初始化
+                logger.info(f"数据库不存在，开始创建: {db_path}")
                 Path(working_dir).mkdir(parents=True, exist_ok=True)
                 mm = HumanThinkingMemoryManager(
                     working_dir=working_dir,
                     agent_id=agent_id or "default",
                     user_id=None
                 )
+                logger.info(f"HumanThinkingMemoryManager 已创建, 调用 mm.start()...")
                 await mm.start()
-                logger.info(f"Database auto-created on config save: {mm.db_path}")
+                logger.info(f"数据库自动创建成功: {mm.db_path}")
+            else:
+                logger.info(f"数据库已存在，跳过创建: {db_path}")
         except Exception as db_err:
-            logger.warning(f"Failed to auto-create database on config save: {db_err}")
+            logger.error(f"数据库自动创建失败 agent={agent_id or 'default'}: {db_err}", exc_info=True)
         
-        logger.info(f"Config updated for agent {agent_id}: {list(update_fields.keys())}")
+        logger.info(f"配置更新完成 agent={agent_id or 'default'}: {list(update_fields.keys())}")
         return {"success": True, "config": data}
     except Exception as e:
-        logger.error(f"Failed to update config: {e}")
+        logger.error(f"配置更新异常 agent={agent_id or 'default'}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

@@ -193,7 +193,7 @@ def save_config(config: HumanThinkingConfig, agent_id: str = None, working_dir: 
         logger.info(f"Config saved to: {config_path} (agent_id={agent_id})")
         return True
     except Exception as e:
-        logger.error(f"Failed to save config: {e}")
+        logger.error(f"Failed to save config to {config_path}: {e}", exc_info=True)
         return False
 
 
