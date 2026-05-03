@@ -11,7 +11,8 @@ HumanThinking 睡眠管理器 - 事件驱动模式
 - 每次查询睡眠状态时，从数据库获取最后活动时间
 - 根据空闲时间实时计算当前应处于的睡眠状态
 - 状态转换时执行对应的睡眠任务
-"""import logging
+"""
+import logging
 import time
 import os
 from pathlib import Path

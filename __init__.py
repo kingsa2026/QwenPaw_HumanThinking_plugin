@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """HumanThinking Memory Manager Plugin
 
-v1.1.5.post1 - 跟随QwenPaw版本
+v1.4.4 - Human Thinking Memory Plugin
 """
 
 try:
@@ -11,4 +11,4 @@ except ImportError:
     # Allow imports during testing when qwenpaw is not available
     __all__ = []
 
-__version__ = "1.1.5.post1"
+__version__ = "1.4.4"

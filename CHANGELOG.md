@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.4] - 2026-05-04
+
+### Fixed
+- **sleep_manager.py docstring syntax error**: Fixed line 14 where the docstring closing marker `"""` was incorrectly concatenated with `import logging` on the same line, causing a Python parsing failure. Separated into two lines.
+
+### Added
+- **`_config_profiles()` function** in `plugin.py`: New unified helper that reads all agent profiles from QwenPaw's `config.json`. Shared by `_resolve_all_agent_workspace_dirs()` and `_startup_hook` to eliminate duplicate config-loading logic.
+- **Auto-initialization block in `_startup_hook`**: On QwenPaw startup, iterates **all** configured agents (not just `default`) and auto-creates for each agent:
+  - `memory/` directory inside the agent's workspace
+  - `human_thinking_config.json` with sensible defaults
+  - `human_thinking_memory_{agent_id}.db` database file
+  - This solves the issue where Docker environments with custom workspace paths (e.g. `/agents/Kai/workspace`) failed to auto-create databases and config files.
+
+### Changed
+- Refactored `_resolve_all_agent_workspace_dirs()` to delegate config reading to `_config_profiles()`.
+
+---
+
 ## [1.4.3] - 2026-05-04
 
 ### Fixed (Round 1: Agent Workspace Path Refactoring)

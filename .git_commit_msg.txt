@@ -1,0 +1,20 @@
+v1.4.4: Fix sleep_manager docstring + _config_profiles() + multi-agent auto-init
+
+Fixed:
+- sleep_manager.py line 14: docstring closing marker """ was incorrectly
+  concatenated with `import logging` on same line, causing parse failure.
+  Separated into two lines.
+
+Added:
+- `_config_profiles()` in plugin.py: unified helper reading all agent profiles
+  from QwenPaw config.json. Shared by _resolve_all_agent_workspace_dirs() and
+  _startup_hook, eliminating duplicate config-loading logic.
+- Auto-initialization block in `_startup_hook`: iterates ALL configured agents
+  (no longer just 'default'), auto-creating for each: memory/ directory,
+  human_thinking_config.json with defaults, human_thinking_memory_{agent_id}.db.
+  Solves Docker custom workspace paths (e.g. /agents/Kai/workspace) failing to
+  auto-create databases and config files.
+
+Changed:
+- Refactored _resolve_all_agent_workspace_dirs() to delegate to _config_profiles().
+- Bumped version: 1.4.3 -> 1.4.4

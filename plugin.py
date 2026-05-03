@@ -42,16 +42,18 @@ def _resolve_agent_workspace_dir(agent_id: str) -> Path:
     return _resolve_qwenpaw_dir() / "workspaces" / agent_id
 
 
-def _resolve_all_agent_workspace_dirs() -> list[Path]:
+def _config_profiles():
     try:
         from qwenpaw.config.utils import load_config
-        config = load_config()
-        return [
-            Path(ref.workspace_dir).expanduser().resolve()
-            for ref in config.agents.profiles.values()
-        ]
+        return load_config().agents.profiles
     except Exception:
-        pass
+        return {}
+
+
+def _resolve_all_agent_workspace_dirs() -> list[Path]:
+    profiles = _config_profiles()
+    if profiles:
+        return [Path(ref.workspace_dir).expanduser().resolve() for ref in profiles.values()]
     workspaces_dir = _resolve_qwenpaw_dir() / "workspaces"
     if workspaces_dir.exists():
         return [d for d in workspaces_dir.iterdir() if d.is_dir()]
@@ -337,6 +339,54 @@ class HumanThinkingMemoryPlugin:
             logger.info("AGENT.md copy completed")
         except Exception as e:
             logger.warning(f"Failed to copy AGENT.md: {e}")
+
+        try:
+            logger.info("=== Auto-initializing databases and configs for all agents ===")
+
+            for agent_id, profile in _config_profiles().items():
+                ws_dir = Path(profile.workspace_dir).expanduser().resolve()
+                if not ws_dir.is_dir():
+                    continue
+
+                memory_dir = ws_dir / "memory"
+                memory_dir.mkdir(parents=True, exist_ok=True)
+
+                config_file = memory_dir / "human_thinking_config.json"
+                if not config_file.exists():
+                    default_config = {
+                        "enable_cross_session": True,
+                        "enable_emotion": True,
+                        "enable_session_isolation": True,
+                        "enable_memory_freeze": True,
+                        "session_idle_timeout": 180,
+                        "refresh_interval": 5,
+                        "max_results": 5,
+                        "max_memory_chars": 150,
+                        "disable_file_memory": True,
+                        "frozen_days": 30,
+                        "archive_days": 90,
+                        "delete_days": 180,
+                        "enable_distributed_db": False,
+                        "db_size_threshold_mb": 800
+                    }
+                    config_file.write_text(
+                        json.dumps(default_config, indent=2, ensure_ascii=False),
+                        encoding="utf-8"
+                    )
+                    logger.info(f"Created default config for agent {agent_id}: {config_file}")
+
+                db_file = memory_dir / f"human_thinking_memory_{agent_id}.db"
+                if not db_file.exists():
+                    try:
+                        from qwenpaw.agents.tools.HumanThinking.core.database import HumanThinkingDB
+                        db = HumanThinkingDB(db_path=str(db_file))
+                        logger.info(f"Created database for agent {agent_id}: {db_file}")
+                    except Exception as e:
+                        logger.warning(f"Failed to create database for agent {agent_id}: {e}")
+
+            logger.info("Auto-initialization completed")
+        except Exception as e:
+            logger.warning(f"Failed to auto-initialize agent DBs/configs: {e}")
 
         try:
             logger.info("=== Registering API Routes ===")
