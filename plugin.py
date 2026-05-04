@@ -380,6 +380,30 @@ class HumanThinkingMemoryPlugin:
                     }
                 logger.info("Health endpoint registered directly to FastAPI app")
 
+            async def db_version(agent_id: str = None):
+                from .core.database import HumanThinkingDB, CURRENT_SCHEMA_VERSION
+                agent_id = validate_agent_id(agent_id)
+                working_dir = _resolve_agent_workspace_dir(agent_id or "default")
+                db_path = Path(str(working_dir)) / "memory" / f"human_thinking_memory_{agent_id or 'default'}.db"
+                if not db_path.exists():
+                    return {
+                        "exists": False, "code_schema_version": CURRENT_SCHEMA_VERSION,
+                        "db_schema_version": None, "needs_migration": False,
+                        "migration_history": [], "db_path": str(db_path),
+                    }
+                db = HumanThinkingDB(str(db_path))
+                try:
+                    await db.initialize()
+                    info = db.get_version_info()
+                    info["exists"] = True
+                    info["migration_history"] = db.get_migration_history()
+                    info["db_path"] = str(db_path)
+                    return info
+                finally:
+                    await db.close()
+            app.add_api_route("/api/plugins/humanthinking/db/version", db_version, methods=["GET"])
+            logger.info("DB version endpoint registered directly to FastAPI app")
+
             has_uninstall = any('humanthinking/uninstall' in p for p in existing_paths)
             if not has_uninstall:
                 try:

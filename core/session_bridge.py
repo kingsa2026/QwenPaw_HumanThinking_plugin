@@ -104,72 +104,133 @@ class SessionBridgeEngine:
         new_session_id: str,
         trigger_context: str
     ) -> List[str]:
-        """
-        识别相关历史 Session
-        
-        基于：
-        1. 同一用户
-        2. 时间接近性
-        3. 内容相关性
-        """
-        # 获取所有活跃 Session
         sessions = await self.db.get_active_sessions(agent_id)
-        
-        # 过滤同一用户
+
         user_sessions = [
             s for s in sessions
             if s.get("user_id") == user_id or user_id is None
         ]
-        
-        # 按时间排序（最近优先）
-        user_sessions.sort(
-            key=lambda s: s.get("last_activity", ""),
-            reverse=True
-        )
-        
-        # 返回最近5个Session
-        return [s["session_id"] for s in user_sessions[:5]]
-    
+
+        if not user_sessions:
+            return []
+
+        scored = []
+        for s in user_sessions:
+            score = 0.0
+            recency = s.get("last_activity", "")
+            if recency:
+                score += 0.3
+            if not trigger_context:
+                scored.append((s["session_id"], score))
+                continue
+            try:
+                results = await self.db.search_memories(
+                    query=trigger_context,
+                    agent_id=agent_id,
+                    session_id=s["session_id"],
+                    user_id=user_id,
+                    max_results=3,
+                    include_frozen=True,
+                )
+                if results:
+                    avg_importance = sum(
+                        getattr(r, "importance", 0) or 0 for r in results
+                    ) / max(len(results), 1)
+                    score += 0.4 + avg_importance * 0.1
+            except Exception:
+                pass
+            scored.append((s["session_id"], score))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [sid for sid, _ in scored[:5]]
+
     def generate_transition_summary(
         self,
         memories: List,
         trigger_context: str
     ) -> str:
-        """生成过渡摘要"""
         if not memories:
-            return "没有找到相关的历史记忆"
-        
-        # 提取重要话题
+            return "\u6ca1\u6709\u627e\u5230\u76f8\u5173\u7684\u5386\u53f2\u8bb0\u5fc6"
+
         topics = []
         for m in memories[:5]:
-            # 简单提取：取内容前50字符
             content = m.content if hasattr(m, 'content') else m.get('content', '')
-            topics.append(content[:50])
-        
-        summary = f"基于之前的对话：{'；'.join(topics)}"
-        
-        return summary
-    
+            topics.append(content[:60])
+
+        return f"\u57fa\u4e8e\u4e4b\u524d\u7684\u5bf9\u8bdd\uff1a{';\u3002'.join(topics)}"
+
     async def build_emotional_bridge(
         self,
         agent_id: str,
         user_id: str,
         related_sessions: List[str]
     ) -> Dict:
-        """
-        构建情感桥接
-        
-        Returns:
-            情感上下文
-        """
-        # 默认情感上下文
-        emotional_context = {
-            "primary_emotion": "neutral",
-            "continuity_score": 0.0,
-            "recommended_approach": "保持中性语气，根据用户反应调整",
-            "emotional_memory_cues": []
-        }
-        
-        # TODO: 从 session_emotional_continuity 表读取情感历史
-        
-        return emotional_context
+        if not related_sessions:
+            return {
+                "primary_emotion": "neutral",
+                "continuity_score": 0.0,
+                "recommended_approach": "\u4fdd\u6301\u4e2d\u6027\u8bed\u6c14\uff0c\u6839\u636e\u7528\u6237\u53cd\u5e94\u8c03\u6574",
+                "emotional_memory_cues": [],
+            }
+
+        try:
+            placeholders = ",".join(["?" for _ in related_sessions])
+            self.db.cursor.execute(
+                f"SELECT emotional_state, continuity_from_previous "
+                f"FROM session_emotional_continuity "
+                f"WHERE agent_id = ? AND session_id IN ({placeholders}) "
+                f"ORDER BY created_at DESC LIMIT 10",
+                [agent_id] + related_sessions,
+            )
+            rows = self.db.cursor.fetchall()
+
+            if not rows:
+                return {
+                    "primary_emotion": "neutral",
+                    "continuity_score": 0.0,
+                    "recommended_approach": "\u4fdd\u6301\u4e2d\u6027\u8bed\u6c14\uff0c\u6839\u636e\u7528\u6237\u53cd\u5e94\u8c03\u6574",
+                    "emotional_memory_cues": [],
+                }
+
+            import json
+            emotion_counts = {}
+            total_continuity = 0.0
+            cues = []
+
+            for state_json, continuity in rows:
+                total_continuity += continuity or 0.0
+                try:
+                    state = json.loads(state_json) if state_json else {}
+                except (json.JSONDecodeError, TypeError):
+                    state = {}
+                primary = state.get("primary_emotion", "neutral")
+                emotion_counts[primary] = emotion_counts.get(primary, 0) + 1
+                if state.get("cues"):
+                    cues.extend(state["cues"])
+
+            dominant = max(emotion_counts, key=emotion_counts.get) if emotion_counts else "neutral"
+            avg_continuity = total_continuity / len(rows)
+
+            approaches = {
+                "positive": "\u4fdd\u6301\u79ef\u6781\u4e50\u89c2\uff0c\u53ef\u9002\u5f53\u5f00\u73a9\u7b11",
+                "negative": "\u8c28\u614e\u56de\u5e94\uff0c\u5148\u8868\u793a\u7406\u89e3\u518d\u63d0\u4f9b\u5efa\u8bae",
+                "neutral": "\u4fdd\u6301\u4e2d\u6027\u8bed\u6c14\uff0c\u6839\u636e\u7528\u6237\u53cd\u5e94\u8c03\u6574",
+                "anxious": "\u5b89\u629a\u4e3a\u4e3b\uff0c\u51cf\u5c11\u4e0d\u786e\u5b9a\u6027\u56de\u7b54",
+                "angry": "\u5148\u8ba4\u540c\u60c5\u7eea\uff0c\u907f\u514d\u6fc0\u5316\u77db\u76fe",
+            }
+            recommended = approaches.get(dominant, approaches["neutral"])
+
+            return {
+                "primary_emotion": dominant,
+                "continuity_score": round(avg_continuity, 2),
+                "recommended_approach": recommended,
+                "emotional_memory_cues": list(set(cues))[:5],
+            }
+        except Exception as e:
+            logger.warning(f"build_emotional_bridge failed: {e}")
+            return {
+                "primary_emotion": "neutral",
+                "continuity_score": 0.0,
+                "recommended_approach": "\u4fdd\u6301\u4e2d\u6027\u8bed\u6c14\uff0c\u6839\u636e\u7528\u6237\u53cd\u5e94\u8c03\u6574",
+                "emotional_memory_cues": [],
+            }

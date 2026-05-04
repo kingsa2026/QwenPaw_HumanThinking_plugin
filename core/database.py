@@ -16,6 +16,34 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
+CURRENT_SCHEMA_VERSION = "1.1.0"
+
+
+@dataclass
+class MigrationStep:
+    from_version: str
+    to_version: str
+    description: str
+    sql_commands: str = ""              # 纯DDL（CREATE/ALTER），用分号分隔
+    recreate_tables: Optional[Dict[str, str]] = None  # {旧表名: 重建的CREATE TABLE SQL}
+    data_migration_sql: str = ""         # 数据迁移SQL（INSERT INTO ... SELECT）
+
+
+MIGRATIONS: List[MigrationStep] = [
+    MigrationStep(
+        from_version="1.0.0",
+        to_version="1.1.0",
+        description="添加记忆合并和时间列",
+        sql_commands="""
+            ALTER TABLE qwenpaw_memory ADD COLUMN last_consolidated_at DATETIME;
+            ALTER TABLE qwenpaw_memory ADD COLUMN merge_count INTEGER DEFAULT 0;
+            ALTER TABLE qwenpaw_memory ADD COLUMN merged_from TEXT DEFAULT '[]';
+            ALTER TABLE qwenpaw_memory ADD COLUMN last_merged_at DATETIME;
+            ALTER TABLE qwenpaw_memory ADD COLUMN merge_similarity REAL DEFAULT 0.0;
+        """
+    ),
+]
+
 
 @dataclass
 class MemoryRecord:
@@ -278,6 +306,7 @@ class HumanThinkingDB:
         await self._create_indexes()
         await self._init_version()
         await self.migrate_if_needed()
+        await self._ensure_fts5_ready()
         
         # 初始化分片管理器
         self._init_shard_manager()
@@ -532,6 +561,17 @@ class HumanThinkingDB:
             );
         """)
         
+        self.cursor.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS qwenpaw_memory_fts USING fts5(
+                content,
+                indexed_content,
+                memory_id UNINDEXED,
+                agent_id UNINDEXED,
+                session_id UNINDEXED,
+                tokenize='unicode61 remove_diacritics 2'
+            )
+        """)
+        
         self.conn.commit()
     
     async def _create_indexes(self) -> None:
@@ -557,66 +597,204 @@ class HumanThinkingDB:
         self.conn.commit()
     
     async def _init_version(self) -> None:
-        """初始化版本"""
         self.cursor.execute("SELECT COUNT(*) FROM qwenpaw_memory_version")
         if self.cursor.fetchone()[0] == 0:
             self.cursor.execute("""
                 INSERT INTO qwenpaw_memory_version 
                 (db_version, schema_version, min_compatible_version)
-                VALUES ('1.0.0', '1.0.0', '1.0.0')
-            """)
+                VALUES (?, ?, ?)
+            """, (CURRENT_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION))
             self.conn.commit()
-        else:
-            self.cursor.execute("SELECT schema_version FROM qwenpaw_memory_version LIMIT 1")
-            row = self.cursor.fetchone()
-            if row:
-                current_version = row[0]
-                if current_version != "1.1.0":
-                    logger.debug(f"Database schema version: {current_version}, expected: 1.1.0")
-    
-    async def migrate_if_needed(self) -> None:
-        """数据库迁移"""
+            logger.info(f"Database version initialized: {CURRENT_SCHEMA_VERSION}")
+
+    def _get_db_schema_version(self) -> str:
         self.cursor.execute("SELECT schema_version FROM qwenpaw_memory_version LIMIT 1")
         row = self.cursor.fetchone()
-        current_version = row[0] if row else "1.0.0"
-        
-        if current_version == "1.0.0":
-            try:
-                self.cursor.execute("ALTER TABLE qwenpaw_memory ADD COLUMN last_consolidated_at DATETIME")
+        return row[0] if row else "0.0.0"
+
+    def _get_migration_chain(self, from_version: str, to_version: str) -> List[MigrationStep]:
+        chain = []
+        current = from_version
+        while current != to_version:
+            found = None
+            for m in MIGRATIONS:
+                if m.from_version == current:
+                    found = m
+                    break
+            if not found:
+                available = [m.from_version for m in MIGRATIONS]
+                raise RuntimeError(
+                    f"无法找到从 {current} 的迁移路径。可用迁移起点: {available}"
+                )
+            chain.append(found)
+            current = found.to_version
+        return chain
+
+    async def _backup_before_migration(self) -> Optional[Path]:
+        import shutil
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = self.db_path.with_suffix(f".db.backup_{timestamp}")
+        try:
+            shutil.copy2(str(self.db_path), str(backup_path))
+            logger.info(f"迁移前备份: {backup_path}")
+            return backup_path
+        except Exception as e:
+            logger.error(f"迁移前备份失败: {e}", exc_info=True)
+            return None
+
+    async def _execute_migration_step(self, step: MigrationStep) -> None:
+        logger.info(f"执行迁移 {step.from_version} → {step.to_version}: {step.description}")
+
+        if step.recreate_tables:
+            for old_table, create_sql in step.recreate_tables.items():
+                temp_table = f"{old_table}_temp_migration"
+                self.cursor.executescript(create_sql.replace(old_table, temp_table, 1))
+                self.cursor.executescript(step.data_migration_sql)
+                self.cursor.executescript(f"DROP TABLE IF EXISTS {old_table}")
+                self.cursor.executescript(f"ALTER TABLE {temp_table} RENAME TO {old_table}")
                 self.conn.commit()
-                logger.info("Migration 1.0.0→1.1.0: added last_consolidated_at column")
-            except sqlite3.OperationalError as e:
-                if "duplicate column" not in str(e).lower():
-                    raise
-            
-            try:
-                self.cursor.execute("ALTER TABLE qwenpaw_memory ADD COLUMN merge_count INTEGER DEFAULT 0")
-                self.cursor.execute("ALTER TABLE qwenpaw_memory ADD COLUMN merged_from TEXT DEFAULT '[]'")
-                self.cursor.execute("ALTER TABLE qwenpaw_memory ADD COLUMN last_merged_at DATETIME")
-                self.cursor.execute("ALTER TABLE qwenpaw_memory ADD COLUMN merge_similarity REAL DEFAULT 0.0")
-                self.conn.commit()
-                logger.info("Migration 1.0.0→1.1.0: added memory merge columns")
-            except sqlite3.OperationalError as e:
-                if "duplicate column" not in str(e).lower():
-                    raise
-            
-            self.cursor.execute("SELECT upgrade_history FROM qwenpaw_memory_version LIMIT 1")
-            hist_row = self.cursor.fetchone()
-            try:
-                history = json.loads(hist_row[0]) if hist_row and hist_row[0] else []
-            except (json.JSONDecodeError, TypeError):
-                history = []
-            history.append({"from": "1.0.0", "to": "1.1.0", "at": datetime.now().isoformat()})
-            
-            self.cursor.execute("""
-                UPDATE qwenpaw_memory_version 
-                SET schema_version = '1.1.0', 
-                    updated_at = CURRENT_TIMESTAMP,
-                    upgrade_history = ?
-            """, (json.dumps(history),))
+        elif step.sql_commands:
+            for stmt in step.sql_commands.split(";"):
+                stmt = stmt.strip()
+                if stmt:
+                    try:
+                        self.cursor.execute(stmt)
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column" in str(e).lower():
+                            logger.info(f"列已存在，跳过: {e}")
+                        else:
+                            raise
             self.conn.commit()
-            logger.info("Migration complete: schema 1.0.0 → 1.1.0")
-    
+
+        self.cursor.execute("SELECT upgrade_history FROM qwenpaw_memory_version LIMIT 1")
+        hist_row = self.cursor.fetchone()
+        try:
+            history = json.loads(hist_row[0]) if hist_row and hist_row[0] else []
+        except (json.JSONDecodeError, TypeError):
+            history = []
+
+        history.append({
+            "from": step.from_version,
+            "to": step.to_version,
+            "description": step.description,
+            "at": datetime.now().isoformat(),
+        })
+
+        self.cursor.execute("""
+            UPDATE qwenpaw_memory_version 
+            SET schema_version = ?, db_version = ?, updated_at = CURRENT_TIMESTAMP, upgrade_history = ?
+        """, (step.to_version, step.to_version, json.dumps(history, ensure_ascii=False)))
+        self.conn.commit()
+
+        logger.info(f"迁移完成: {step.from_version} → {step.to_version}")
+
+    async def migrate_if_needed(self) -> None:
+        db_version = self._get_db_schema_version()
+        code_version = CURRENT_SCHEMA_VERSION
+
+        if db_version == code_version:
+            logger.debug(f"数据库版本一致: {db_version}")
+            return
+
+        if db_version == "0.0.0":
+            await self._init_version()
+            return
+
+        try:
+            chain = self._get_migration_chain(db_version, code_version)
+        except RuntimeError as e:
+            logger.error(f"数据库迁移链构建失败: {e}")
+            return
+
+        if not chain:
+            logger.debug("无需迁移")
+            return
+
+        logger.info(f"数据库需要迁移: {db_version} → {code_version}, 共 {len(chain)} 步")
+        for i, step in enumerate(chain):
+            logger.info(f"  步骤 {i+1}: {step.from_version} → {step.to_version} ({step.description})")
+
+        backup_path = await self._backup_before_migration()
+
+        for step in chain:
+            try:
+                await self._execute_migration_step(step)
+            except Exception as e:
+                if backup_path:
+                    logger.error(
+                        f"迁移失败! 步骤: {step.from_version} → {step.to_version}. "
+                        f"备份文件: {backup_path}. 请手动恢复。错误: {e}",
+                        exc_info=True,
+                    )
+                else:
+                    logger.error(f"迁移失败且无备份: {e}", exc_info=True)
+                raise
+
+        logger.info(f"全部迁移完成: {db_version} → {code_version}")
+
+    def get_version_info(self) -> Dict[str, Any]:
+        return {
+            "db_schema_version": self._get_db_schema_version(),
+            "code_schema_version": CURRENT_SCHEMA_VERSION,
+            "needs_migration": self._get_db_schema_version() != CURRENT_SCHEMA_VERSION,
+        }
+
+    def get_migration_history(self) -> List[Dict[str, Any]]:
+        self.cursor.execute("SELECT upgrade_history FROM qwenpaw_memory_version LIMIT 1")
+        row = self.cursor.fetchone()
+        if not row or not row[0]:
+            return []
+        try:
+            return json.loads(row[0])
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    def _search_fts(self, query: str, limit: int = 25) -> list:
+        try:
+            fts_query = self._build_fts_query(query)
+            self.cursor.execute(
+                "SELECT memory_id FROM qwenpaw_memory_fts WHERE qwenpaw_memory_fts MATCH ? ORDER BY rank LIMIT ?",
+                (fts_query, limit),
+            )
+            return [row[0] for row in self.cursor.fetchall()]
+        except Exception:
+            return []
+
+    def _build_fts_query(self, query: str) -> str:
+        import re
+        terms = []
+        for word in query.strip().split():
+            word = re.sub(r'[^\w\u4e00-\u9fff]', '', word)
+            if len(word) >= 2:
+                terms.append(f'"{word}"*')
+            elif len(word) == 1:
+                terms.append(word)
+        if not terms:
+            return query.strip()
+        return " OR ".join(terms)
+
+    async def _ensure_fts5_ready(self) -> None:
+        try:
+            self.cursor.execute("SELECT COUNT(*) FROM qwenpaw_memory_fts")
+            if self.cursor.fetchone()[0] == 0:
+                await self.rebuild_fts_index()
+            else:
+                logger.debug("FTS5 index ready")
+        except Exception:
+            pass
+
+    async def rebuild_fts_index(self) -> int:
+        self.cursor.execute("DELETE FROM qwenpaw_memory_fts")
+        self.cursor.execute(
+            "INSERT INTO qwenpaw_memory_fts(content, indexed_content, memory_id, agent_id, session_id) "
+            "SELECT content, COALESCE(indexed_content, content), id, agent_id, session_id "
+            "FROM qwenpaw_memory WHERE deleted_at IS NULL"
+        )
+        self.conn.commit()
+        count = self.cursor.rowcount
+        logger.info(f"FTS5 index rebuilt: {count} records")
+        return count
+
     async def add_memory(
         self,
         agent_id: str,
@@ -667,7 +845,12 @@ class HumanThinkingDB:
         
         memory_id = self.cursor.lastrowid
         
-        # 写入分片索引（如果启用分布式）
+        self.cursor.execute(
+            "INSERT INTO qwenpaw_memory_fts(content, indexed_content, memory_id, agent_id, session_id) VALUES(?,?,?,?,?)",
+            (content, content, memory_id, agent_id, session_id)
+        )
+        self.conn.commit()
+        
         if self.enable_distributed and memory_id:
             self.cursor.execute("""
                 INSERT INTO qwenpaw_memory_shard_index 
@@ -793,66 +976,55 @@ class HumanThinkingDB:
         """
         results = []
         
-        # 1. 搜索活跃记忆
-        sql = "SELECT * FROM qwenpaw_memory WHERE agent_id = ? AND deleted_at IS NULL"
-        params = [agent_id]
+        fts_memory_ids = self._search_fts(query, max_results * 5)
         
-        if target_id:
-            sql += " AND target_id = ?"
-            params.append(target_id)
+        def _build_sql_and_params(base_condition, filter_params, tier_clause=""):
+            sql = base_condition + " AND agent_id = ? AND deleted_at IS NULL"
+            params = [agent_id]
+            if tier_clause:
+                sql += tier_clause
+            if target_id:
+                sql += " AND target_id = ?"
+                params.append(target_id)
+            if cross_session:
+                pass
+            elif session_id:
+                sql += " AND session_id = ?"
+                params.append(session_id)
+            if user_id:
+                sql += " AND user_id = ?"
+                params.append(user_id)
+            if role:
+                sql += " AND role = ?"
+                params.append(role)
+            if fts_memory_ids:
+                placeholders = ",".join(["?" for _ in fts_memory_ids])
+                sql += f" AND id IN ({placeholders})"
+                params.extend(fts_memory_ids)
+            else:
+                sql += " AND content LIKE ?"
+                params.append(f"%{query}%")
+            if exclude_recent_rounds > 0:
+                exclude_seconds = exclude_recent_rounds * round_duration_seconds
+                sql += " AND created_at < datetime('now', '-' || ? || ' seconds')"
+                params.append(exclude_seconds)
+            sql += " ORDER BY importance DESC, created_at DESC LIMIT ?"
+            params.append(max_results * 2)
+            return sql, params
         
-        if cross_session:
-            pass
-        elif session_id:
-            sql += " AND session_id = ?"
-            params.append(session_id)
-        
-        if user_id:
-            sql += " AND user_id = ?"
-            params.append(user_id)
-        
-        if role:
-            sql += " AND role = ?"
-            params.append(role)
-        
-        sql += " AND content LIKE ?"
-        params.append(f"%{query}%")
-        
-        if exclude_recent_rounds > 0:
-            exclude_seconds = exclude_recent_rounds * round_duration_seconds
-            sql += " AND created_at < datetime('now', '-' || ? || ' seconds')"
-            params.append(exclude_seconds)
-        
-        sql += " ORDER BY importance DESC, created_at DESC"
-        sql += " LIMIT ?"
-        params.append(max_results * 2)
-        
-        self.cursor.execute(sql, params)
+        active_sql, active_params = _build_sql_and_params("SELECT * FROM qwenpaw_memory")
+        self.cursor.execute(active_sql, active_params)
         active_results = [self._row_to_record(row) for row in self.cursor.fetchall()]
         results.extend(active_results)
         
-        # 2. 如果活跃记忆不够，搜索冷藏记忆并唤醒
         if include_frozen and len(results) < max_results:
-            frozen_sql = "SELECT * FROM qwenpaw_memory WHERE agent_id = ? AND deleted_at IS NULL AND memory_tier = 'frozen'"
-            frozen_params = [agent_id]
-            
-            if target_id:
-                frozen_sql += " AND target_id = ?"
-                frozen_params.append(target_id)
-            if user_id:
-                frozen_sql += " AND user_id = ?"
-                frozen_params.append(user_id)
-            frozen_sql += " AND content LIKE ?"
-            frozen_params.append(f"%{query}%")
-            frozen_sql += " ORDER BY importance DESC LIMIT ?"
-            frozen_params.append(max_results)
-            
+            frozen_sql, frozen_params = _build_sql_and_params(
+                "SELECT * FROM qwenpaw_memory", " AND memory_tier = 'frozen'"
+            )
             self.cursor.execute(frozen_sql, frozen_params)
             frozen_rows = self.cursor.fetchall()
-            
             for row in frozen_rows:
                 memory = self._row_to_record(row)
-                # 唤醒冷藏记忆
                 await self.wakeup_memory(memory.id)
                 results.append(memory)
         

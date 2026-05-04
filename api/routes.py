@@ -718,6 +718,7 @@ async def update_config(request: Request, agent_id: Optional[str] = None):
             'max_memory_chars': data.get('max_memory_chars'),
             'enable_distributed_db': data.get('enable_distributed_db'),
             'db_size_threshold_mb': data.get('db_size_threshold_mb'),
+            'compression_mode': data.get('compression_mode'),
         }
         
         for field_name, value in field_mapping.items():
@@ -770,6 +771,42 @@ async def update_config(request: Request, agent_id: Optional[str] = None):
     except Exception as e:
         logger.error(f"配置更新异常 agent={agent_id or 'default'}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/db/version")
+async def get_db_version(request: Request, agent_id: Optional[str] = None):
+    """获取数据库版本和迁移状态"""
+    agent_id = validate_agent_id(agent_id)
+    try:
+        from pathlib import Path
+        if agent_id:
+            working_dir = str(_resolve_agent_workspace_dir(agent_id))
+        else:
+            working_dir = str(_resolve_agent_workspace_dir("default"))
+        db_path = Path(working_dir) / "memory" / f"human_thinking_memory_{agent_id or 'default'}.db"
+
+        if not db_path.exists():
+            from ..core.database import CURRENT_SCHEMA_VERSION as csv
+            return {
+                "exists": False,
+                "code_schema_version": csv,
+                "db_schema_version": None,
+                "needs_migration": False,
+                "migration_history": [],
+            }
+
+        from ..core.database import HumanThinkingDB
+        db = HumanThinkingDB(str(db_path))
+        await db.initialize()
+        version_info = db.get_version_info()
+        version_info["exists"] = True
+        version_info["migration_history"] = db.get_migration_history()
+        version_info["db_path"] = str(db_path)
+        await db.close()
+        return version_info
+    except Exception as e:
+        logger.error(f"获取数据库版本失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/dreams")

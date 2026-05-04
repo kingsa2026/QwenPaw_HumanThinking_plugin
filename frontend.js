@@ -2862,6 +2862,14 @@
                         <input type="range" id="ht-delete-days" min="90" max="730" value="180" style="width: 100%;">
                         <span id="ht-delete-days-value">180</span>${t('common.day', 'days')}
                     </div>
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 8px;">${t('htConfig.compressionMode', 'Compression Mode')}</label>
+                        <select id="ht-compression-mode" style="width: 100%; padding: 6px 12px; border: 1px solid #d9d9d9; border-radius: 4px;">
+                            <option value="auto">${t('htConfig.compressionAuto', 'Auto (LLM with simple fallback)')}</option>
+                            <option value="llm">${t('htConfig.compressionLLM', 'LLM Only')}</option>
+                            <option value="simple">${t('htConfig.compressionSimple', 'Simple Concatenation Only')}</option>
+                        </select>
+                    </div>
                     <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #eae9e7;">
                         <button id="ht-save-config" style="padding: 8px 24px; background: #1890ff; color: white; border: none; border-radius: 4px; cursor: pointer;">
                             ${t('htConfig.save', 'Save Config')}
@@ -2926,6 +2934,9 @@
             if (frozenDays) { frozenDays.value = data.frozen_days || 30; container.querySelector('#ht-frozen-days-value').textContent = frozenDays.value; }
             if (archiveDays) { archiveDays.value = data.archive_days || 90; container.querySelector('#ht-archive-days-value').textContent = archiveDays.value; }
             if (deleteDays) { deleteDays.value = data.delete_days || 180; container.querySelector('#ht-delete-days-value').textContent = deleteDays.value; }
+
+            const compressionMode = container.querySelector('#ht-compression-mode');
+            if (compressionMode) compressionMode.value = data.compression_mode || 'auto';
         })
         .catch(err => {
             console.error('[HumanThinking] 加载配置失败:', err);
@@ -2947,6 +2958,7 @@
             frozen_days: parseInt(container.querySelector('#ht-frozen-days')?.value || '30'),
             archive_days: parseInt(container.querySelector('#ht-archive-days')?.value || '90'),
             delete_days: parseInt(container.querySelector('#ht-delete-days')?.value || '180'),
+            compression_mode: container.querySelector('#ht-compression-mode')?.value || 'auto',
         };
 
         fetch(`${apiBase}/config`, {

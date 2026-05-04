@@ -39,6 +39,7 @@ class HumanThinkingConfig:
     delete_days: int = 180   # 删除天数
     enable_distributed_db: bool = False  # 分布式数据库开关
     db_size_threshold_mb: int = 800     # 分布式阈值（MB）
+    compression_mode: str = "auto"      # 压缩模式: auto/llm/simple
     # API 降级配置
     enable_api_fallback: bool = False  # 默认关闭API降级模式
 
@@ -196,6 +197,7 @@ def save_config(config: HumanThinkingConfig, agent_id: str = None, working_dir: 
             "delete_days": getattr(config, 'delete_days', 180),
             "enable_distributed_db": getattr(config, 'enable_distributed_db', False),
             "db_size_threshold_mb": getattr(config, 'db_size_threshold_mb', 800),
+            "compression_mode": getattr(config, 'compression_mode', 'auto'),
         }
         
         with open(config_path, "w", encoding="utf-8") as f:
@@ -805,6 +807,7 @@ HumanThinking 是你的记忆管理系统，具有以下能力：
                     "enable_emotion": True,
                     "enable_distributed_db": False,
                     "db_size_threshold_mb": 800,
+                    "compression_mode": "auto",
                     "frozen_days": 30,
                     "archive_days": 90,
                     "delete_days": 180
@@ -1044,7 +1047,11 @@ After reading, please save key points to your memory database using `store_memor
         if not messages:
             return ""
         
-        # 使用配置的 LLM 进行摘要（如果可用）
+        mode = getattr(self.config, 'compression_mode', 'auto')
+
+        if mode == "simple":
+            return self._simple_compact(messages, previous_summary)
+
         if self.chat_model and self.formatter:
             try:
                 return await self._llm_compact_memory(
@@ -1054,8 +1061,9 @@ After reading, please save key points to your memory database using `store_memor
                 )
             except Exception as e:
                 logger.warning(f"LLM compact failed, falling back to simple: {e}")
+                if mode == "llm":
+                    logger.error("llm mode configured but LLM compact failed")
         
-        # 回退方案：简单拼接
         return self._simple_compact(messages, previous_summary)
     
     async def _llm_compact_memory(
