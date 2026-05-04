@@ -689,6 +689,7 @@ async def get_config(agent_id: Optional[str] = None):
             "enable_distributed_db": config.enable_distributed_db,
             "db_size_threshold_mb": config.db_size_threshold_mb,
             "disable_file_memory": config.disable_file_memory,
+            "compression_mode": getattr(config, 'compression_mode', 'auto'),
         }
     except Exception as e:
         logger.error(f"Failed to get config: {e}")

@@ -556,6 +556,8 @@ class SleepManager:
         current_time = time.time()
         
         if not state.is_active:
+            if state.forced_state:
+                return False
             if state.is_deep_sleep:
                 logger.info(f"Agent {agent_id} woke up from deep sleep by new message")
                 self._write_memory_md(agent_id, state)
@@ -1018,10 +1020,11 @@ def record_agent_activity(agent_id: str) -> None:
     state.last_active_time = current_time
     
     if not state.is_active:
+        if state.forced_state:
+            return
+    
         logger.info(f"Agent {agent_id} woke up by new activity")
         _sleep_manager._reset_to_active(state)
-    
-    state.forced_state = None
 
 
 def pulse_agent(agent_id: str) -> None:

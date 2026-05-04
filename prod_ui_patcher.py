@@ -472,9 +472,79 @@ def patch_js_file(filepath: str) -> bool:
         return False
 
 
+def patch_index_html(qwenpaw_root: str, plugin_dir: str = None) -> dict:
+    """
+    修补 index.html，注入 frontend.js 脚本标签
+    
+    frontend.js 包含完整的 HT Config UI（压缩模式、跨会话记忆等设置面板）
+    以及记忆管理器下拉菜单增强和 HT 配置标签页。
+    
+    这是核心注入点——之前的实现只是修补 bundled JS 添加 dropdown 选项，
+    但 frontend.js 本身从未被加载，导致 showHTConfigTab() 等函数无法运行。
+    """
+    results = {"success": False, "errors": []}
+    
+    console_dir = find_qwenpaw_console_static_dir(qwenpaw_root)
+    if not console_dir:
+        results["errors"].append("Cannot find console directory")
+        return results
+    
+    index_html = os.path.join(console_dir, "index.html")
+    if not os.path.isfile(index_html):
+        results["errors"].append(f"index.html not found: {index_html}")
+        return results
+    
+    try:
+        with open(index_html, "r", encoding="utf-8") as f:
+            content = f.read()
+        
+        if 'frontend.js' in content:
+            logger.info("[patch_index_html] Already injected")
+            results["success"] = True
+            return results
+        
+        # 复制 frontend.js 到 assets 目录
+        if plugin_dir and os.path.isdir(plugin_dir):
+            source_js = os.path.join(plugin_dir, "frontend.js")
+        else:
+            source_js = os.path.join(qwenpaw_root, "plugins", "HumanThinking", "frontend.js")
+            if not os.path.isfile(source_js):
+                source_js = os.path.join(os.path.expanduser("~"), ".qwenpaw", "plugins", "HumanThinking", "frontend.js")
+        
+        assets_dir = os.path.join(console_dir, "assets")
+        os.makedirs(assets_dir, exist_ok=True)
+        target_js = os.path.join(assets_dir, "frontend.js")
+        
+        if os.path.isfile(source_js):
+            shutil.copy2(source_js, target_js)
+            logger.info(f"[patch_index_html] Copied frontend.js to {target_js}")
+        else:
+            logger.warning(f"[patch_index_html] frontend.js source not found: {source_js}")
+            results["errors"].append(f"Source frontend.js not found: {source_js}")
+        
+        _make_backup(index_html)
+        
+        script_tag = '    <script defer src="/assets/frontend.js"></script>\n  </body>'
+        new_content = content.replace('</body>', script_tag)
+        
+        if new_content != content:
+            with open(index_html, "w", encoding="utf-8") as f:
+                f.write(new_content)
+            logger.info("[patch_index_html] ✓ Injected frontend.js script into index.html")
+            results["success"] = True
+        else:
+            results["errors"].append("Content unchanged after replacement")
+    
+    except Exception as e:
+        results["errors"].append(str(e))
+        logger.error(f"[patch_index_html] Failed: {e}", exc_info=True)
+    
+    return results
+
+
 def patch_human_thinking_config_tab(qwenpaw_root: str) -> dict:
     """
-    修补前端JS，在选择 HumanThinking 时添HT记忆配置" tab
+    修补前端JS，在选择 HumanThinking 时添加"HT记忆配置" tab
     
     问题：原生UI只支持一个记忆管理tab。选择 HumanThinking 后，
     需要显示两个tab?长期记忆" + "HT记忆配置"
@@ -1297,13 +1367,22 @@ def patch_production_ui(qwenpaw_root: str) -> dict:
         results["success"] = False
         results["error"] = "Not found到包remelight 选项对象JS 文件"
     
+    # 注入 frontend.js 脚本到 index.html（核心：加载完整的HT Config UI）
+    logger.info("[patch_production_ui] Injecting frontend.js into index.html...")
+    index_result = patch_index_html(qwenpaw_root)
+    if index_result.get("success"):
+        logger.info("[patch_production_ui] ✓ frontend.js injected into index.html")
+        results["frontend_injected"] = True
+    else:
+        logger.warning(f"[patch_production_ui] ✗ index.html injection failed: {index_result.get('errors', [])}")
+
     # 额外注入 HT记忆配置 tab
     logger.info("[patch_production_ui] Injecting HT记忆配置 tab...")
     ht_result = patch_human_thinking_config_tab(qwenpaw_root)
     if ht_result.get("success"):
-        logger.info("[patch_production_ui] ?HT记忆配置 tab injected")
+        logger.info("[patch_production_ui] ✓ HT记忆配置 tab injected")
     else:
-        logger.warning(f"[patch_production_ui] ?HT记忆配置 tab injection failed: {ht_result.get('errors', [])}")
+        logger.warning(f"[patch_production_ui] ✗ HT记忆配置 tab injection failed: {ht_result.get('errors', [])}")
 
     # 修改注释文字：记忆管理器的后端类型，目前only when支remelight -> 记忆管理器的后端类型，目前可支持 remelight ?HumanThinking
     logger.info("[patch_production_ui] Updating tooltip text...")
@@ -1415,15 +1494,19 @@ def patch_plugins_router(qwenpaw_root: str) -> dict:
     results = {"success": False, "patched": False, "errors": []}
     
     try:
-        # 找到 plugins.py 文件
-        plugins_py = os.path.join(qwenpaw_root, "app", "routers", "plugins.py")
+        plugins_py = None
+        search_paths = [
+            os.path.join(qwenpaw_root, "app", "routers", "plugins.py"),
+            os.path.join(qwenpaw_root, "site-packages", "qwenpaw", "app", "routers", "plugins.py"),
+            os.path.join(qwenpaw_root, "venv", "lib", "python3.12", "site-packages", "qwenpaw", "app", "routers", "plugins.py"),
+        ]
+        for p in search_paths:
+            if os.path.isfile(p):
+                plugins_py = p
+                break
         
-        if not os.path.isfile(plugins_py):
-            # 尝试备用路径
-            plugins_py = os.path.join(qwenpaw_root, "site-packages", "qwenpaw", "app", "routers", "plugins.py")
-        
-        if not os.path.isfile(plugins_py):
-            results["errors"].append(f"plugins.py not found: {plugins_py}")
+        if not plugins_py:
+            results["errors"].append(f"plugins.py not found in: {search_paths}")
             return results
         
         with open(plugins_py, "r", encoding="utf-8") as f:
@@ -1472,563 +1555,10 @@ def patch_plugins_router(qwenpaw_root: str) -> dict:
         
         _make_backup(plugins_py)
         
-        # 在文件末尾添加我们的路由
-        ht_routes = '''
-
-# ── HumanThinking Plugin Routes [BEGIN v1.1.5-beta.1] ───────────────────────────
-# 警告：此区块HumanThinking 插件自动注入
-# 卸载插件时会自动删除此区块或从备份恢
-# 请勿手动修改此标记之间的代码
-from typing import Optional
-
-@router.get("/humanthinking/stats")
-async def humanthinking_stats(agent_id: Optional[str] = None):
-    """Get HumanThinking memory statistics"""
-    import re
-    if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
-        return {
-            "total_memories": 0,
-            "cross_session_memories": 0,
-            "frozen_memories": 0,
-            "active_sessions": 0,
-            "emotional_states": 0
-        }
-    try:
-        from qwenpaw.agents.tools.HumanThinking.core.database import HumanThinkingDB
-        from pathlib import Path
-        if not agent_id:
-            return {
-                "total_memories": 0,
-                "cross_session_memories": 0,
-                "frozen_memories": 0,
-                "active_sessions": 0,
-                "emotional_states": 0
-            }
-        db_path = str(Path.home() / ".qwenpaw" / "workspaces" / agent_id / "memory" / f"human_thinking_memory_{agent_id}.db")
-        db = HumanThinkingDB(db_path)
-        await db.initialize()
-        stats = await db.get_stats(agent_id)
-        return {
-            "total_memories": stats.get("total_memories", 0),
-            "cross_session_memories": stats.get("active_memories", 0),
-            "frozen_memories": stats.get("frozen_memories", 0),
-            "active_sessions": stats.get("total_sessions", 0),
-            "emotional_states": 0
-        }
-    except Exception as e:
-        import logging
-        logging.getLogger("qwenpaw.humanthinking").warning(f"Failed to get stats: {e}")
-        return {
-            "total_memories": 0,
-            "cross_session_memories": 0,
-            "frozen_memories": 0,
-            "active_sessions": 0,
-            "emotional_states": 0
-        }
-
-@router.get("/humanthinking/config")
-async def humanthinking_get_config():
-    """Get HumanThinking configuration"""
-    return {
-        "enable_cross_session": True,
-        "enable_emotion": True,
-        "frozen_days": 30,
-        "archive_days": 90,
-        "delete_days": 180,
-        "max_results": 5,
-        "session_idle_timeout": 180,
-    }
-
-@router.post("/humanthinking/config")
-async def humanthinking_update_config(request: Request):
-    """Update HumanThinking configuration"""
-    data = await request.json()
-    return {"success": True}
-
-@router.post("/humanthinking/search")
-async def humanthinking_search(request: Request, agent_id: Optional[str] = None):
-    """Search memories"""
-    data = await request.json()
-    import re
-    if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
-        return {"memories": [], "total": 0, "query": data.get("query", "")}
-    try:
-        from qwenpaw.agents.tools.HumanThinking.core.database import HumanThinkingDB
-        from pathlib import Path
-        if not agent_id:
-            return {"memories": [], "total": 0, "query": data.get("query", "")}
-        db_path = str(Path.home() / ".qwenpaw" / "workspaces" / agent_id / "memory" / f"human_thinking_memory_{agent_id}.db")
-        db = HumanThinkingDB(db_path)
-        await db.initialize()
-        query = data.get("query", "")
-        limit = data.get("limit", 10)
-        results = await db.search_memories(query=query, agent_id=agent_id, limit=limit)
-        return {"memories": results, "total": len(results), "query": query}
-    except Exception as e:
-        import logging
-        logging.getLogger("qwenpaw.humanthinking").warning(f"Failed to search memories: {e}")
-        return {"memories": [], "total": 0, "query": data.get("query", "")}
-
-@router.get("/humanthinking/emotion")
-async def humanthinking_emotion():
-    """Get emotional state"""
-    return {
-        "current_emotion": "neutral",
-        "intensity": 0.5,
-        "history": []
-    }
-
-@router.get("/humanthinking/sessions")
-async def humanthinking_sessions(agent_id: Optional[str] = None):
-    """Get session list"""
-    import re
-    if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
-        return []
-    try:
-        from qwenpaw.agents.tools.HumanThinking.core.database import HumanThinkingDB
-        from pathlib import Path
-        if not agent_id:
-            return []
-        db_path = str(Path.home() / ".qwenpaw" / "workspaces" / agent_id / "memory" / f"human_thinking_memory_{agent_id}.db")
-        db = HumanThinkingDB(db_path)
-        await db.initialize()
-        sessions = await db.get_active_sessions(agent_id)
-        return sessions if sessions else []
-    except Exception as e:
-        import logging
-        logging.getLogger("qwenpaw.humanthinking").warning(f"Failed to get sessions: {e}")
-        return []
-
-@router.get("/humanthinking/memories/recent")
-async def humanthinking_recent_memories(agent_id: Optional[str] = None, limit: int = 20):
-    """Get recent memories"""
-    import re
-    if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
-        return {"memories": [], "total": 0}
-    try:
-        from qwenpaw.agents.tools.HumanThinking.core.database import HumanThinkingDB
-        from pathlib import Path
-        if not agent_id:
-            return {"memories": [], "total": 0}
-        db_path = str(Path.home() / ".qwenpaw" / "workspaces" / agent_id / "memory" / f"human_thinking_memory_{agent_id}.db")
-        db = HumanThinkingDB(db_path)
-        await db.initialize()
-        memories = await db.get_recent_memories(agent_id, days=7)
-        return {"memories": memories[:limit] if memories else [], "total": len(memories) if memories else 0}
-    except Exception as e:
-        import logging
-        logging.getLogger("qwenpaw.humanthinking").warning(f"Failed to get recent memories: {e}")
-        return {"memories": [], "total": 0}
-
-@router.get("/humanthinking/memories")
-async def humanthinking_memories(agent_id: Optional[str] = None, limit: Optional[int] = 20):
-    """Get memories list"""
-    import re
-    if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
-        return {"memories": [], "total": 0, "error": "Invalid agent_id format"}
-    try:
-        from qwenpaw.agents.tools.HumanThinking.core.database import HumanThinkingDB
-        from pathlib import Path
-        if not agent_id:
-            return {"memories": [], "total": 0}
-        db_path = str(Path.home() / ".qwenpaw" / "workspaces" / agent_id / "memory" / f"human_thinking_memory_{agent_id}.db")
-        db = HumanThinkingDB(db_path)
-        await db.initialize()
-        memories = await db.get_recent_memories(agent_id, days=7)
-        return {"memories": memories[:limit] if limit else memories, "total": len(memories)}
-    except Exception as e:
-        import logging
-        logging.getLogger("qwenpaw.humanthinking").warning(f"Failed to get memories: {e}")
-        return {"memories": [], "total": 0, "error": str(e)}
-
-@router.get("/humanthinking/memories/timeline")
-async def humanthinking_timeline():
-    """Get memory timeline"""
-    return []
-
-@router.post("/humanthinking/sessions/bridge")
-async def humanthinking_bridge_sessions(request: Request):
-    """Bridge two sessions"""
-    return {"success": True}
-
-@router.get("/humanthinking/dreams")
-async def humanthinking_dreams(limit: int = 10):
-    """Get dream records"""
-    return []
-
-@router.put("/humanthinking/memories/{memory_id}")
-async def humanthinking_update_memory(memory_id: str, request: Request):
-    """Update memory content/type/importance"""
-    data = await request.json()
-    return {"success": True, "memory_id": memory_id, "updated": data}
-
-@router.delete("/humanthinking/memories/batch")
-async def humanthinking_batch_delete_memories(request: Request):
-    """Batch delete memories"""
-    data = await request.json()
-    return {"success": True, "deleted_count": len(data.get("memory_ids", []))}
-
-@router.get("/humanthinking/sleep/status")
-async def humanthinking_sleep_status(agent_id: Optional[str] = None):
-    """Get sleep status (lazy evaluation from database)"""
-    try:
-        from qwenpaw.agents.tools.HumanThinking.core.sleep_manager import check_and_trigger_sleep
-        if agent_id:
-            return await check_and_trigger_sleep(agent_id)
-        return {
-            "agent_id": "default",
-            "status": "active",
-            "status_text": "活跃",
-            "icon": "sun",
-            "color": "#52c41a",
-            "idle_time": 0,
-            "next_sleep_in": -1
-        }
-    except Exception as e:
-        logger.warning(f"Failed to get sleep status: {e}")
-        return {"status": "active", "sleep_type": None, "last_active_time": __import__('time').time()}
-
-@router.get("/humanthinking/sleep/config")
-async def humanthinking_sleep_config(agent_id: Optional[str] = None):
-    """Get sleep configuration"""
-    try:
-        from qwenpaw.agents.tools.HumanThinking.core.sleep_manager import get_sleep_manager, get_agent_sleep_config
-        import re
-        if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
-            return {"error": "Invalid agent_id format"}
-        
-        if agent_id:
-            cfg = get_agent_sleep_config(agent_id)
-        else:
-            manager = get_sleep_manager()
-            cfg = manager.config if manager and manager.config else None
-            return {
-                "enable_agent_sleep": cfg.enable_agent_sleep,
-                "light_sleep_minutes": cfg.light_sleep_minutes,
-                "rem_minutes": cfg.rem_minutes,
-                "deep_sleep_minutes": cfg.deep_sleep_minutes,
-                "consolidate_days": cfg.consolidate_days,
-                "frozen_days": cfg.frozen_days,
-                "archive_days": cfg.archive_days,
-                "delete_days": cfg.delete_days,
-                "enable_insight": cfg.enable_insight,
-                "enable_dream_log": cfg.enable_dream_log,
-                "enable_merge": cfg.enable_merge,
-                "merge_similarity_threshold": cfg.merge_similarity_threshold,
-                "merge_max_distance_hours": cfg.merge_max_distance_hours,
-                "enable_contradiction_detection": cfg.enable_contradiction_detection,
-                "contradiction_threshold": cfg.contradiction_threshold,
-                "contradiction_resolution_strategy": cfg.contradiction_resolution_strategy,
-                "enable_semantic_contradiction_check": cfg.enable_semantic_contradiction_check,
-                "enable_temporal_contradiction_check": cfg.enable_temporal_contradiction_check,
-                "enable_confidence_scoring": cfg.enable_confidence_scoring,
-                "auto_resolve_contradiction": cfg.auto_resolve_contradiction,
-                "min_confidence_for_auto_resolve": cfg.min_confidence_for_auto_resolve,
-            }
-    except Exception as e:
-        logger.warning(f"Failed to get sleep config: {e}")
-    return {
-        "enable_agent_sleep": True,
-        "light_sleep_minutes": 30,
-        "rem_minutes": 60,
-        "deep_sleep_minutes": 120,
-        "consolidate_days": 7,
-        "frozen_days": 30,
-        "archive_days": 90,
-        "delete_days": 180,
-        "enable_insight": True,
-        "enable_dream_log": True,
-        "enable_merge": True,
-        "merge_similarity_threshold": 0.8,
-        "merge_max_distance_hours": 72,
-        "enable_contradiction_detection": True,
-        "contradiction_threshold": 0.7,
-        "contradiction_resolution_strategy": "keep_latest",
-        "enable_semantic_contradiction_check": True,
-        "enable_temporal_contradiction_check": True,
-        "enable_confidence_scoring": True,
-        "auto_resolve_contradiction": True,
-        "min_confidence_for_auto_resolve": 0.85,
-    }
-
-@router.post("/humanthinking/sleep/config")
-async def humanthinking_sleep_update_config(request: Request, agent_id: Optional[str] = None):
-    """Update sleep configuration"""
-    data = await request.json()
-    try:
-        from qwenpaw.agents.tools.HumanThinking.core.sleep_manager import get_sleep_manager, SleepConfig, get_agent_sleep_config, save_agent_sleep_config
-        import re
-        if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
-            return {"success": False, "error": "Invalid agent_id format"}
-        
-        old_config = get_agent_sleep_config(agent_id)
-        config_dict = {}
-        for key in [
-            "enable_agent_sleep", "light_sleep_minutes", "rem_minutes", "deep_sleep_minutes",
-            "auto_consolidate", "consolidate_days", "frozen_days", "archive_days", "delete_days",
-            "enable_insight", "enable_dream_log", "enable_merge", "merge_similarity_threshold",
-            "merge_max_distance_hours", "enable_contradiction_detection", "contradiction_threshold",
-            "contradiction_resolution_strategy", "enable_semantic_contradiction_check",
-            "enable_temporal_contradiction_check", "enable_confidence_scoring",
-            "auto_resolve_contradiction", "min_confidence_for_auto_resolve"
-        ]:
-            config_dict[key] = data[key] if key in data else getattr(old_config, key, None)
-        
-        config = SleepConfig(**{k: v for k, v in config_dict.items() if v is not None})
-        
-        if agent_id:
-            save_agent_sleep_config(agent_id, config)
-        else:
-            manager = get_sleep_manager()
-            if manager:
-                manager.update_config(config)
-        
-        return {"success": True, "config": data}
-    except Exception as e:
-        logger.warning(f"Failed to update sleep config: {e}")
-        return {"success": False, "error": str(e)}
-
-@router.post("/humanthinking/sleep/force")
-async def humanthinking_sleep_force(request: Request, agent_id: Optional[str] = None):
-    """Force sleep"""
-    data = await request.json()
-    import re
-    if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
-        return {"success": False, "error": "Invalid agent_id format"}
-    try:
-        from qwenpaw.agents.tools.HumanThinking.core.sleep_manager import get_sleep_manager
-        manager = get_sleep_manager()
-        
-        sleep_type = data.get("sleep_type", "light")
-        if not agent_id:
-            return {"success": False, "error": "agent_id is required"}
-        
-        if sleep_type == "light":
-            result = await manager.force_light_sleep(agent_id)
-        elif sleep_type == "rem":
-            result = await manager.force_rem(agent_id)
-        elif sleep_type == "deep":
-            result = await manager.force_deep_sleep(agent_id)
-        else:
-            return {"success": False, "error": f"Unknown sleep type: {sleep_type}"}
-        
-        return result
-    except Exception as e:
-        logger.warning(f"Failed to force sleep: {e}")
-        return {"success": False, "error": str(e)}
-
-@router.post("/humanthinking/sleep/wakeup")
-async def humanthinking_sleep_wakeup(agent_id: Optional[str] = None):
-    """Force wakeup"""
-    import re
-    if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
-        return {"success": False, "error": "Invalid agent_id format"}
-    try:
-        from qwenpaw.agents.tools.HumanThinking.core.sleep_manager import get_sleep_manager
-        manager = get_sleep_manager()
-        
-        if not agent_id:
-            return {"success": False, "error": "agent_id is required"}
-        
-        result = await manager.wakeup(agent_id)
-        return result
-    except Exception as e:
-        logger.warning(f"Failed to wakeup: {e}")
-        return {"success": False, "error": str(e)}
-
-@router.post("/humanthinking/sleep/activity")
-async def humanthinking_sleep_activity(agent_id: Optional[str] = None):
-    """Record agent activity"""
-    import re
-    if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
-        return {"success": False, "error": "Invalid agent_id format"}
-    try:
-        from qwenpaw.agents.tools.HumanThinking.core.sleep_manager import record_agent_activity
-        if agent_id:
-            record_agent_activity(agent_id)
-            return {"success": True, "agent_id": agent_id, "action": "activity_recorded"}
-        return {"success": False, "message": "agent_id is required"}
-    except Exception as e:
-        import logging
-        logging.getLogger("qwenpaw.humanthinking").warning(f"Failed to record activity: {e}")
-        return {"success": False, "message": "Internal error"}
-
-@router.post("/humanthinking/uninstall")
-async def humanthinking_uninstall(request: Request, agent_id: Optional[str] = None):
-    """Uninstall HumanThinking plugin"""
-    import re
-    if agent_id and not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
-        return {"success": False, "message": "Invalid agent_id format"}
-    try:
-        data = await request.json()
-    except:
-        data = {}
-    keep_data = data.get('keep_data', True)
-    
-    import shutil
-    from pathlib import Path
-    import os
-    import sys
-    
-    # 导入环境检测模
-    sys.path.insert(0, str(Path(__file__).parent))
-    from utils.env_detector import detect_qwenpaw_env
-    
-    # 自动检测环
-    env = detect_qwenpaw_env()
-    qwenpaw_dir = env.working_dir or Path("/root/.qwenpaw")
-    plugin_dir = (env.plugins_dir or qwenpaw_dir / "plugins") / "HumanThinking"
-    config_file = qwenpaw_dir / "config.json"
-    qwenpaw_packages_dir = env.qwenpaw_package_dir
-    
-    try:
-        exported_files = []
-        workspaces_dir = qwenpaw_dir / "workspaces"
-        
-        if not keep_data and workspaces_dir.exists():
-            for workspace in workspaces_dir.iterdir():
-                if workspace.is_dir():
-                    memory_dir = workspace / "memory"
-                    if memory_dir.exists():
-                        import datetime
-                        backup_name = f"memory_backup_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-                        backup_path = workspace / "Memory" / backup_name
-                        backup_path.parent.mkdir(exist_ok=True)
-                        
-                        try:
-                            from qwenpaw.agents.tools.HumanThinking.api.routes import export_memories_to_md
-                            await export_memories_to_md(memory_dir, backup_path, workspace.name)
-                            exported_files.append(str(backup_path))
-                        except Exception as export_err:
-                            exported_files.append(str(backup_path))
-                        
-                        shutil.rmtree(memory_dir)
-                    
-                    config_file = workspace / "human_thinking_config.json"
-                    if config_file.exists():
-                        config_file.unlink()
-        
-        # Restore QwenPaw files from backups (before deleting plugin dir)
-        restored_files = []
-        if qwenpaw_packages_dir and qwenpaw_packages_dir.exists():
-            try:
-                for root, dirs, files in os.walk(qwenpaw_packages_dir):
-                    for f in files:
-                        if f.endswith(".humanthinking.bak"):
-                            bak_path = os.path.join(root, f)
-                            original_path = bak_path.replace(".humanthinking.bak", "")
-                            if os.path.exists(original_path):
-                                shutil.copy2(bak_path, original_path)
-                                os.remove(bak_path)
-                                rel_path = os.path.relpath(original_path, qwenpaw_packages_dir)
-                                restored_files.append(rel_path)
-            except Exception as e:
-                print(f"Warning: Failed to restore some files: {e}")
-        
-        # Remove plugin directory (after restoring files)
-        if plugin_dir.exists():
-            shutil.rmtree(plugin_dir)
-        
-        # Remove from config
-        if config_file.exists():
-            try:
-                import json
-                with open(config_file, 'r') as f:
-                    config = json.load(f)
-                
-                # 支持多种配置结构
-                if 'plugins' in config:
-                    if isinstance(config['plugins'], dict) and 'humanthinking' in config['plugins']:
-                        del config['plugins']['humanthinking']
-                    elif isinstance(config['plugins'], list):
-                        config['plugins'] = [p for p in config['plugins'] 
-                                           if (isinstance(p, dict) and p.get('id') != 'humanthinking')]
-                
-                with open(config_file, 'w') as f:
-                    json.dump(config, f, indent=2)
-            except Exception as cfg_err:
-                print(f"Warning: Failed to update config: {cfg_err}")
-        
-        # Build response message
-        message = "HumanThinking plugin uninstalled.\\n\\nData preserved.\\n\\nPlease refresh the page or restart QwenPaw."
-        if restored_files:
-            message += f"\\n\\nRestored {len(restored_files)} QwenPaw system files."
-        
-        return {
-            "success": True,
-            "message": message,
-            "keep_data": keep_data,
-            "exported_files": exported_files,
-            "restored_files": restored_files
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"Uninstall failed: {str(e)}"
-        }
-
-# ── HumanThinking Plugin Routes [END v1.1.5-beta.1] ─────────────────────────────
-'''
-        
-        # 添加路由代码 - 必须插入/{plugin_id}/files/{file_path:path} 路由之前
-        # 否则 /humanthinking/uninstall 会被通配路由拦截，导405 Method Not Allowed
-        wildcard_route_pattern = '@router.get("/{plugin_id}/files/{file_path:path}")'
-        if wildcard_route_pattern in content:
-            insert_pos = content.find(wildcard_route_pattern)
-            new_content = content[:insert_pos] + ht_routes + "\n" + content[insert_pos:]
-        else:
-            # 查找 /{plugin_id}/files/{file_path:path} 路由的位置，在其之前插入
-            # 使用正则匹配 @router.get("/{plugin_id}/files/{file_path:path}") 或类似模
-            import re
-            pattern = r'(@router\.get\(\s*\n?\s*"/\{plugin_id\}/files/\{file_path:path\}"\s*\n?\s*,?)'
-            match = re.search(pattern, content)
-            if match:
-                insert_pos = match.start()
-                new_content = content[:insert_pos] + ht_routes + "\n" + content[insert_pos:]
-                logger.info("[PluginsRouter] Inserted routes before /{plugin_id}/files/{file_path:path}")
-            else:
-                # 回退：追加到文件末尾
-                new_content = content + ht_routes
-                logger.warning("[PluginsRouter] Could not find /{plugin_id}/files route, appending to end")
-        
+        logger.info("[PluginsRouter] HumanThinking routes now handled by plugin.py include_router, skipping injection")
         with open(plugins_py, "w", encoding="utf-8") as f:
-            f.write(new_content)
-        
-        logger.info("[PluginsRouter] ?Patched plugins.py with HumanThinking routes")
-        
-        # 清除 Python 缓存，确保新路由立即生效
-        try:
-            from utils.env_detector import get_cache_dirs
-            
-            env = detect_qwenpaw_env()
-            cache_dirs = get_cache_dirs(env)
-            
-            for cache_dir in cache_dirs:
-                if os.path.exists(cache_dir):
-                    # 删除所.pyc 文件
-                    for root, dirs, files in os.walk(cache_dir):
-                        for f in files:
-                            if f.endswith(".pyc"):
-                                try:
-                                    os.remove(os.path.join(root, f))
-                                except:
-                                    pass
-                    # 删除所__pycache__ 目录
-                    for root, dirs, files in os.walk(cache_dir):
-                        if "__pycache__" in dirs:
-                            try:
-                                pycache_dir = os.path.join(root, "__pycache__")
-                                shutil.rmtree(pycache_dir)
-                                dirs.remove("__pycache__")
-                            except:
-                                pass
-                    logger.info(f"[PluginsRouter] ?Cleared Python cache: {cache_dir}")
-        except Exception as cache_err:
-            logger.warning(f"[PluginsRouter] Failed to clear cache: {cache_err}")
-        
-        results["success"] = True
-        results["patched"] = True
-        
+            f.write(content)
+        return {"success": True, "patched": False, "note": "Routes handled by plugin.py include_router"}
     except Exception as e:
         results["errors"].append(str(e))
         logger.error(f"[PluginsRouter] Failed to patch plugins.py: {e}", exc_info=True)

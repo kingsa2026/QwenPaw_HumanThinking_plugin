@@ -1144,10 +1144,25 @@
                                 onChange: value => setConfig({ ...config, max_results: value }),
                                 marks: { 5: '5', 25: '25', 50: '50' }
                             })
+                        ),
+                        React.createElement(ConfigItem, {
+                            label: t('config.compressionMode', 'Compression Mode'),
+                            description: t('config.compressionModeDesc', 'Choose how memories are compressed during context assembly')
+                        },
+                            React.createElement(Select, {
+                                value: config.compression_mode || 'auto',
+                                onChange: value => setConfig({ ...config, compression_mode: value }),
+                                style: { width: '100%' },
+                                defaultValue: 'auto'
+                            },
+                                React.createElement(Select.Option, { value: 'auto' }, t('config.compressionAuto', 'Auto (LLM with simple fallback)')),
+                                React.createElement(Select.Option, { value: 'llm' }, t('config.compressionLLM', 'LLM Only')),
+                                React.createElement(Select.Option, { value: 'simple' }, t('config.compressionSimple', 'Simple Concatenation Only'))
+                            ),
                         )
                     ),
 
-                    React.createElement(ConfigSection, { title: t('config.lifecycleSettings', 'Lifecycle Settings'), icon: '📅' },
+                    React.createElement(ConfigSection, { title: t('config.lifecycleSettings', 'Lifecycle Settings'), icon: '\ud83d\udcc5' },
                         React.createElement(ConfigItem, {
                             label: t('config.frozenDays', 'Frozen Days'),
                             description: t('config.frozenDaysDesc', 'Days before memories are frozen')

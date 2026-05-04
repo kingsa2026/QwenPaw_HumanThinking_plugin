@@ -7,6 +7,8 @@ import os
 import sys
 import json
 from pathlib import Path
+from typing import Optional
+from starlette.requests import Request
 
 logger = logging.getLogger("qwenpaw.humanthinking")
 
@@ -176,6 +178,73 @@ class HumanThinkingMemoryPlugin:
                     logger.info("Health endpoint registered in register()")
                 else:
                     logger.info("Health endpoint already in FastAPI app")
+
+                existing_paths2 = [getattr(r, 'path', '') for r in app.routes]
+                has_config = any('humanthinking/config' in p for p in existing_paths2)
+
+                if not has_config:
+                    @app.get("/api/plugins/humanthinking/config")
+                    async def get_ht_config(agent_id: str = None):
+                        try:
+                            from .core.memory_manager import get_config as _get_config
+                            config = _get_config(agent_id=agent_id)
+                            return {
+                                "enable_cross_session": config.enable_cross_session,
+                                "enable_emotion": config.enable_emotion,
+                                "frozen_days": config.frozen_days,
+                                "archive_days": config.archive_days,
+                                "delete_days": config.delete_days,
+                                "max_results": getattr(config, 'max_results', 10),
+                                "session_idle_timeout": getattr(config, 'session_idle_timeout', 1800),
+                                "max_memory_chars": getattr(config, 'max_memory_chars', 50000),
+                                "enable_distributed_db": getattr(config, 'enable_distributed_db', False),
+                                "db_size_threshold_mb": getattr(config, 'db_size_threshold_mb', 100),
+                                "compression_mode": getattr(config, 'compression_mode', 'auto'),
+                            }
+                        except Exception:
+                            return {
+                                "enable_cross_session": True,
+                                "enable_emotion": True,
+                                "frozen_days": 30,
+                                "archive_days": 90,
+                                "delete_days": 180,
+                                "max_results": 5,
+                                "session_idle_timeout": 180,
+                                "compression_mode": "auto",
+                            }
+
+                    @app.post("/api/plugins/humanthinking/config")
+                    async def post_ht_config(request: Request, agent_id: str = None):
+                        try:
+                            data = await request.json()
+                            from .core.memory_manager import get_config as _get_config, save_config as _save_config
+                            config = _get_config(agent_id=agent_id)
+                            field_mapping = {
+                                'enable_cross_session', 'enable_emotion', 'frozen_days',
+                                'archive_days', 'delete_days', 'max_results',
+                                'session_idle_timeout', 'max_memory_chars',
+                                'enable_distributed_db', 'db_size_threshold_mb', 'compression_mode'
+                            }
+                            for key, value in data.items():
+                                if key in field_mapping and hasattr(config, key):
+                                    setattr(config, key, value)
+                            _save_config(config, agent_id=agent_id)
+                            return {"success": True}
+                        except Exception as e:
+                            logger.warning(f"Config save failed: {e}")
+                            return {"success": False, "error": str(e)}
+
+                    @app.get("/api/plugins/humanthinking/stats")
+                    async def get_ht_stats(agent_id: str = None):
+                        try:
+                            from .core.memory_manager import get_stats as _get_stats
+                            return (await _get_stats(agent_id)) if agent_id else {"status": "ok"}
+                        except Exception as e:
+                            return {"status": "ok", "note": str(e)}
+
+                    logger.info("API routes registered in register()")
+                else:
+                    logger.info("API routes already registered")
 
                 verify_paths = [getattr(r, 'path', '') for r in app.routes]
                 verify_health = [p for p in verify_paths if 'humanthinking/health' in p]
@@ -426,6 +495,27 @@ class HumanThinkingMemoryPlugin:
                 logger.info(f"  - {p}")
 
             logger.info(f"App object id: {id(app)}, routes count: {len(app.routes)}")
+
+            try:
+                spa_idx = None
+                for i, r in enumerate(app.routes):
+                    if getattr(r, 'path', '') == '/{full_path:path}':
+                        spa_idx = i
+                        break
+                if spa_idx is not None:
+                    ht_routes = []
+                    i = 0
+                    while i < len(app.routes):
+                        path = getattr(app.routes[i], 'path', '')
+                        if ('humanthinking' in path or 'human_thinking' in path) and i >= spa_idx:
+                            ht_routes.append(app.routes.pop(i))
+                        else:
+                            i += 1
+                    for route in reversed(ht_routes):
+                        app.routes.insert(spa_idx, route)
+                    logger.info(f"[RouteReorder] Moved {len(ht_routes)} HT routes before SPA catch-all")
+            except Exception as e:
+                logger.warning(f"[RouteReorder] Failed: {e}")
         except Exception as e:
             logger.error(f"Failed to register API routes: {e}", exc_info=True)
 
