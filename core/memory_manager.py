@@ -306,45 +306,51 @@ class ContextLoadingInMemory(InMemoryMemory):
         return await super().get_memory(prepend_summary=prepend_summary, **kwargs)
     
     async def _load_context_from_cache(self):
-        """从数据库加载相关历史记忆到长期记忆
+        """走缓存池优先级链加载历史记忆
         
-        流程：
-        1. 从当前对话提取查询词
-        2. 直接查询数据库（排除最近N轮，防止与原生压缩重复）
-        3. 构建长期记忆（包含渠道来源标识）
+        优先级链：SessionBuffer → WriteQueue → ReadCache → DB回退
         
-        注：不使用读缓存，直接查DB更简洁
+        与直接查DB的区别：
+        - SessionBuffer/WriteQueue 能读到其他session还没落盘的记忆（最新数据）
+        - ReadCache 命中时无需DB查询（速度快）
+        - 只有缓存层都未命中时才回退DB
         """
         manager = self._memory_manager_ref
-        if not manager or not manager.db:
+        if not manager:
             return
         
-        # 1. 从当前对话内容提取查询词
         query = self._build_query_from_context()
         if not query:
             return
         
-        # 获取配置
         config = get_config(manager.agent_id, manager.working_dir)
         
-        # 2. 直接查询数据库（排除最近N轮，防止与原生压缩重复）
-        db_results = await manager.db.search_memories(
-            query=query,
-            agent_id=manager.agent_id,
-            session_id=None if config.enable_cross_session else manager._current_session_id,
-            user_id=manager.user_id,
-            role=None,
-            cross_session=config.enable_cross_session,
-            max_results=self.MAX_RESULTS_FINAL,  # 5
-            exclude_recent_rounds=self.EXCLUDE_RECENT_ROUNDS,
-            round_duration_seconds=self.ROUND_DURATION_SECONDS
-        )
-        
-        if not db_results:
-            return
-        
-        # 3. 构建长期记忆
-        self._build_long_term_memory(db_results, manager.agent_id, manager)
+        if manager.cache_pool:
+            cache_results = await manager.cache_pool.search(
+                query=query,
+                session_id=None if config.enable_cross_session else manager._current_session_id,
+                user_id=manager.user_id,
+                max_results=self.MAX_RESULTS_FINAL,
+                cross_session=config.enable_cross_session,
+                exclude_recent_rounds=self.EXCLUDE_RECENT_ROUNDS,
+                round_duration_seconds=self.ROUND_DURATION_SECONDS,
+            )
+            
+            if cache_results:
+                self._build_long_term_memory(cache_results, manager.agent_id, manager)
+        elif manager.db:
+            db_results = await manager.db.search_memories(
+                query=query,
+                agent_id=manager.agent_id,
+                session_id=None if config.enable_cross_session else manager._current_session_id,
+                user_id=manager.user_id,
+                cross_session=config.enable_cross_session,
+                max_results=self.MAX_RESULTS_FINAL,
+                exclude_recent_rounds=self.EXCLUDE_RECENT_ROUNDS,
+                round_duration_seconds=self.ROUND_DURATION_SECONDS,
+            )
+            if db_results:
+                self._build_long_term_memory(db_results, manager.agent_id, manager)
     
     def _build_long_term_memory(self, memories: list, agent_id: str = None, manager = None):
         """构建长期记忆字符串"""

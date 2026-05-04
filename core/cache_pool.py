@@ -449,26 +449,29 @@ class AgentCachePool:
     
     # ====== 读取路径 ======
     
-    async def search(self, query: str, session_id: Optional[str] = None) -> List[MemoryItem]:
+    async def search(self, query: str, session_id: Optional[str] = None,
+                     user_id: Optional[str] = None, max_results: int = 5,
+                     cross_session: bool = True, exclude_recent_rounds: int = 0,
+                     round_duration_seconds: int = 300) -> List[MemoryItem]:
         """
-        搜索记忆 - 简化版
+        搜索记忆 - 完整优先级链
         
         优先级：
-        1. 写缓存（SessionBuffer）- 当前 session 未持久化
-        2. 写队列（WriteQueue）- 待持久化
-        3. 读缓存（ReadCache）- 已持久化
-        
-        注：不查DB，DB查询由 memory_search 直接调用
+        1. 写缓存（SessionBuffer）- 当前 session 未持久化，能读到其他session还没落盘的数据
+        2. 写队列（WriteQueue）- 待持久化批量
+        3. 读缓存（ReadCache）- 已持久化热数据
+        4. 回退DB - 冷数据兜底
         """
         results = []
         seen_ids = set()
         
+        query_lower = query.lower()
+        
         for sid, session in self._sessions.items():
             if session_id and sid != session_id:
                 continue
-            
             for memory in session.get_memories():
-                if memory.temp_id not in seen_ids and query.lower() in memory.content.lower():
+                if memory.temp_id not in seen_ids and query_lower in memory.content.lower():
                     results.append(memory)
                     seen_ids.add(memory.temp_id)
         
@@ -476,7 +479,7 @@ class AgentCachePool:
             if memory.temp_id not in seen_ids:
                 if session_id and memory.session_id != session_id:
                     continue
-                if query.lower() in memory.content.lower():
+                if query_lower in memory.content.lower():
                     results.append(memory)
                     seen_ids.add(memory.temp_id)
         
@@ -485,6 +488,34 @@ class AgentCachePool:
             if memory.temp_id not in seen_ids:
                 results.append(memory)
                 seen_ids.add(memory.temp_id)
+        
+        remaining = max_results - len(results)
+        if remaining > 0:
+            db_records = await self.db.search_memories(
+                query=query,
+                agent_id=self.agent_id,
+                session_id=session_id,
+                user_id=user_id,
+                cross_session=cross_session,
+                max_results=remaining,
+                exclude_recent_rounds=exclude_recent_rounds,
+                round_duration_seconds=round_duration_seconds,
+            )
+            for r in db_records:
+                temp_id = f"db_{r.id}"
+                if temp_id not in seen_ids:
+                    item = MemoryItem(
+                        content=r.content,
+                        agent_id=r.agent_id,
+                        session_id=r.session_id,
+                        user_id=r.user_id,
+                        role=r.role,
+                        importance=r.importance,
+                        memory_type=r.memory_type,
+                        metadata=r.metadata or {}
+                    )
+                    results.append(item)
+                    seen_ids.add(temp_id)
         
         return results
     
