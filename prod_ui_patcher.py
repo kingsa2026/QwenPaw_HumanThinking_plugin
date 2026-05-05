@@ -1318,54 +1318,84 @@ def patch_runtime_config_model() -> dict:
 def inject_persistent_config() -> dict:
     """注入 QwenPaw 持久配置：memory_manager_backend + auto_memory_interval
     
-    修改 /root/.qwenpaw/config.json：
-    1. memory_manager_backend → "human_thinking"
-    2. auto_memory_interval → 3（每3轮用户消息触发一次summarize写入链）
+    1. memory_manager_backend → "human_thinking"（全局 config.json）
+    2. auto_memory_interval → 3（每个 agent 的 agent.json，per-agent 独立配置）
     
     配合 inject_registry_preload()，需要重启两次生效。
     """
     import json
     import os
+    import glob as glob_mod
     
+    result = {"success": True, "injected": False, "changes": [], "errors": []}
+    
+    # ── 1. 注入全局 memory_manager_backend ──
     config_path = "/root/.qwenpaw/config.json"
-    if not os.path.exists(config_path):
-        return {"success": False, "injected": False, "error": f"config.json not found at {config_path}"}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r") as f:
+                config = json.load(f)
+            
+            agents = config.get("agents", {})
+            running = agents.get("running", {})
+            
+            backend_current = running.get("memory_manager_backend")
+            if backend_current != "human_thinking":
+                running["memory_manager_backend"] = "human_thinking"
+                if "agents" not in config:
+                    config["agents"] = {}
+                config["agents"]["running"] = running
+                with open(config_path, "w") as f:
+                    json.dump(config, f, indent=2, ensure_ascii=False)
+                result["changes"].append(f"memory_manager_backend: {backend_current} -> human_thinking")
+                result["injected"] = True
+                logger.info(f"Persistent config: memory_manager_backend -> human_thinking")
+        except Exception as e:
+            result["errors"].append(f"config.json: {e}")
+            logger.error(f"Failed to inject memory_manager_backend: {e}")
     
-    try:
-        with open(config_path, "r") as f:
-            config = json.load(f)
-        
-        agents = config.get("agents", {})
-        running = agents.get("running", {})
-        changes = []
-        
-        backend_current = running.get("memory_manager_backend")
-        if backend_current != "human_thinking":
-            running["memory_manager_backend"] = "human_thinking"
-            changes.append(f"memory_manager_backend: {backend_current} -> human_thinking")
-        
-        rlmc = running.get("reme_light_memory_config", {})
-        if not isinstance(rlmc, dict):
-            rlmc = {}
-            running["reme_light_memory_config"] = rlmc
-        
-        interval_current = rlmc.get("auto_memory_interval")
-        if interval_current is None or interval_current <= 0:
-            rlmc["auto_memory_interval"] = 3
-            changes.append(f"auto_memory_interval: {interval_current} -> 3")
-        
-        if not changes:
-            return {"success": True, "injected": False, "message": "All config values already correct, no change needed"}
-        
-        with open(config_path, "w") as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
-        
-        logger.info(f"Persistent config injected: {', '.join(changes)}")
-        return {"success": True, "injected": True, "changes": changes}
+    # ── 2. 注入每个 agent 的 auto_memory_interval ──
+    agent_json_pattern = "/root/.qwenpaw/workspaces/*/agent.json"
+    agent_files = glob_mod.glob(agent_json_pattern)
     
-    except Exception as e:
-        logger.error(f"Failed to inject persistent config: {e}", exc_info=True)
-        return {"success": False, "injected": False, "error": str(e)}
+    if not agent_files:
+        result["errors"].append("No agent.json files found")
+        logger.warning("No agent.json files found for auto_memory_interval injection")
+        return result
+    
+    for agent_path in agent_files:
+        try:
+            agent_name = agent_path.split("/")[-2]
+            with open(agent_path, "r") as f:
+                agent_config = json.load(f)
+            
+            running = agent_config.get("running", {})
+            rlmc = running.get("reme_light_memory_config", {})
+            if not isinstance(rlmc, dict):
+                rlmc = {}
+            
+            interval_current = rlmc.get("auto_memory_interval")
+            if interval_current is None or interval_current <= 0:
+                if "running" not in agent_config:
+                    agent_config["running"] = {}
+                if "reme_light_memory_config" not in agent_config["running"]:
+                    agent_config["running"]["reme_light_memory_config"] = {}
+                agent_config["running"]["reme_light_memory_config"]["auto_memory_interval"] = 3
+                
+                with open(agent_path, "w") as f:
+                    json.dump(agent_config, f, indent=2, ensure_ascii=False)
+                
+                result["changes"].append(f"agent[{agent_name}] auto_memory_interval: {interval_current} -> 3")
+                result["injected"] = True
+                logger.info(f"agent.json [{agent_name}]: auto_memory_interval -> 3")
+        except Exception as e:
+            result["errors"].append(f"agent.json {agent_path}: {e}")
+            logger.error(f"Failed to inject auto_memory_interval for {agent_path}: {e}")
+    
+    if not result["changes"]:
+        result["message"] = "All config values already correct, no change needed"
+    
+    return result
 
 
 def inject_registry_preload() -> dict:

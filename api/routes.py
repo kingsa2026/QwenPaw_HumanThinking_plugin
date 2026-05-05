@@ -103,31 +103,29 @@ class _DBContext:
         return False
 
 
-def _read_qwenpaw_auto_memory_interval() -> Optional[int]:
-    """从 QwenPaw config.json 读取 auto_memory_interval"""
+def _read_qwenpaw_auto_memory_interval(agent_id: str) -> Optional[int]:
     import json
-    config_path = "/root/.qwenpaw/config.json"
+    agent_json_path = f"/root/.qwenpaw/workspaces/{agent_id}/agent.json"
     try:
-        with open(config_path, "r") as f:
+        with open(agent_json_path, "r") as f:
             config = json.load(f)
-        return config.get("agents", {}).get("running", {}).get("reme_light_memory_config", {}).get("auto_memory_interval")
+        return config.get("running", {}).get("reme_light_memory_config", {}).get("auto_memory_interval")
     except Exception:
         return None
 
 
-def _write_qwenpaw_auto_memory_interval(value: int) -> bool:
-    """写入 auto_memory_interval 到 QwenPaw config.json"""
+def _write_qwenpaw_auto_memory_interval(agent_id: str, value: int) -> bool:
     import json
-    config_path = "/root/.qwenpaw/config.json"
+    agent_json_path = f"/root/.qwenpaw/workspaces/{agent_id}/agent.json"
     try:
-        with open(config_path, "r") as f:
+        with open(agent_json_path, "r") as f:
             config = json.load(f)
-        config.setdefault("agents", {}).setdefault("running", {}).setdefault("reme_light_memory_config", {})["auto_memory_interval"] = value
-        with open(config_path, "w") as f:
+        config.setdefault("running", {}).setdefault("reme_light_memory_config", {})["auto_memory_interval"] = value
+        with open(agent_json_path, "w") as f:
             json.dump(config, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
-        logger.error(f"Failed to write auto_memory_interval to QwenPaw config: {e}")
+        logger.error(f"Failed to write auto_memory_interval to agent.json for {agent_id}: {e}")
         return False
 
 
@@ -936,7 +934,7 @@ async def get_sleep_config(agent_id: Optional[str] = None):
         "auto_resolve_contradiction": config.auto_resolve_contradiction,
         "min_confidence_for_auto_resolve": config.min_confidence_for_auto_resolve,
         # QwenPaw 写入链开关
-        "auto_memory_interval": _read_qwenpaw_auto_memory_interval(),
+        "auto_memory_interval": _read_qwenpaw_auto_memory_interval(agent_id or "default"),
     }
 
 
@@ -994,9 +992,9 @@ async def update_sleep_config(request: SleepConfigUpdateRequest, agent_id: Optio
             return {"success": False, "message": "配置保存失败，请检查日志"}
     
     if request.auto_memory_interval is not None:
-        qwenpaw_ok = _write_qwenpaw_auto_memory_interval(request.auto_memory_interval)
+        qwenpaw_ok = _write_qwenpaw_auto_memory_interval(agent_id or "default", request.auto_memory_interval)
         if not qwenpaw_ok:
-            logger.warning("HumanThinking config saved but failed to sync auto_memory_interval to QwenPaw config")
+            logger.warning("HumanThinking config saved but failed to sync auto_memory_interval to agent.json")
     
     logger.info(f"Sleep config updated for agent {agent_id}: {request.model_dump(exclude_unset=True)}")
     return {"success": True, "config": request.model_dump(exclude_unset=True)}
