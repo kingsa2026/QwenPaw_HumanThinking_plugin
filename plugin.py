@@ -237,6 +237,14 @@ class HumanThinkingMemoryPlugin:
                 router_result = patcher_module.patch_plugins_router(qwenpaw_root)
                 logger.info(f"Plugins router patch result: {router_result}")
 
+                logger.info("Step 7: Injecting persistent config (config.json -> human_thinking)...")
+                persist_result = patcher_module.inject_persistent_config()
+                logger.info(f"Persistent config injection: {persist_result}")
+
+                logger.info("Step 8: Injecting registry preload (sitecustomize.py)...")
+                preload_result = patcher_module.inject_registry_preload()
+                logger.info(f"Registry preload injection: {preload_result}")
+
                 logger.info("=" * 60)
                 return True
             else:
