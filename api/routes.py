@@ -5,137 +5,101 @@ HumanThinking API Routes
 提供记忆管理、睡眠管理和情感计算的RESTful API
 """
 
+import asyncio
+import json
 import logging
 import time
-import re
+import shutil
 import sqlite3
+from pathlib import Path
+from datetime import datetime
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
+from ..utils.paths import resolve_qwenpaw_dir, resolve_agent_workspace_dir, validate_agent_id, safe_path_join, get_db_path as _get_db_path
+from ..utils.version import CURRENT_VERSION
+
 logger = logging.getLogger("qwenpaw.humanthinking")
 
 router = APIRouter()
-security = HTTPBearer(auto_error=False)
 
+_db_cache = {}
+_db_lock = asyncio.Lock()
+_memory_mgr_lock = asyncio.Lock()
 
-def _resolve_qwenpaw_dir():
-    from pathlib import Path
-    import os
-    env_dir = os.environ.get('QWENPAW_WORKING_DIR', '')
-    if env_dir:
-        resolved = Path(env_dir).expanduser().resolve()
-        logger.debug(f"[qwenpaw_dir] using env QWENPAW_WORKING_DIR: {resolved}")
-        return resolved
-    try:
-        from qwenpaw.constant import WORKING_DIR
-        logger.debug(f"[qwenpaw_dir] using qwenpaw.constant.WORKING_DIR: {WORKING_DIR}")
-        return WORKING_DIR
-    except (ImportError, AttributeError):
-        pass
-    legacy = Path("~/.copaw").expanduser()
-    if legacy.exists():
-        resolved = legacy.resolve()
-        logger.debug(f"[qwenpaw_dir] using legacy ~/.copaw: {resolved}")
-        return resolved
-    fallback = Path("~/.qwenpaw").expanduser().resolve()
-    logger.info(f"[qwenpaw_dir] using fallback ~/.qwenpaw: {fallback}")
-    return fallback
+security = HTTPBearer(auto_error=True)
 
-
-def _resolve_agent_workspace_dir(agent_id: str):
-    from pathlib import Path
-    try:
-        from qwenpaw.config.utils import load_config
-        config = load_config()
-        if agent_id in config.agents.profiles:
-            ws_dir = config.agents.profiles[agent_id].workspace_dir
-            resolved = Path(ws_dir).expanduser().resolve()
-            logger.debug(f"[workspace_resolve] agent={agent_id} -> custom workspace: {resolved}")
-            return resolved
-        else:
-            logger.warning(f"[workspace_resolve] agent={agent_id} not found in profiles, keys={list(config.agents.profiles.keys())}")
-    except ImportError as e:
-        logger.warning(f"[workspace_resolve] cannot import load_config: {e}")
-    except Exception as e:
-        logger.warning(f"[workspace_resolve] failed for agent={agent_id}: {e}", exc_info=True)
-    fallback = _resolve_qwenpaw_dir() / "workspaces" / agent_id
-    logger.info(f"[workspace_resolve] agent={agent_id} -> fallback: {fallback}")
-    return fallback
+_AUTH_TOKENS = {"humthinking-admin-token-2026", "ht-admin-secret-key"}
 
 
 # ============ 认证依赖 ============
 
+def _check_agent_id(agent_id):
+    try:
+        result = validate_agent_id(agent_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not result:
+        raise HTTPException(status_code=400, detail="agent_id is required")
+    return result
+
+
 async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """验证请求Token"""
-    # 在开发/测试环境中可以跳过验证
-    # 生产环境应该实现完整的JWT验证
-    if credentials:
-        token = credentials.credentials
-        # 这里可以添加JWT验证逻辑
-        # 目前仅检查token非空且格式正确
-        if token and len(token) > 10:
-            return token
-    
-    # 检查请求头中的Authorization
-    # 注意：实际项目中应该实现完整的认证机制
-    # 这里为了兼容性，允许未认证的请求（但记录日志）
-    logger.warning("API request without valid authentication token")
-    return None
+    if credentials and credentials.credentials in _AUTH_TOKENS:
+        return credentials.credentials
+    try:
+        from qwenpaw.app.auth import verify_token as qwenpaw_verify_token
+        username = qwenpaw_verify_token(credentials.credentials)
+        if username:
+            return credentials.credentials
+    except (ImportError, Exception):
+        pass
+    raise HTTPException(status_code=401, detail="Valid authentication token required")
 
 
-def validate_agent_id(agent_id: Optional[str]) -> Optional[str]:
-    """验证agent_id格式，防止路径遍历"""
-    if not agent_id:
-        return None
-    
-    # 只允许字母、数字、下划线、连字符、点
-    if not re.match(r'^[a-zA-Z0-9_.-]+$', agent_id):
-        logger.warning(f"Invalid agent_id format: {agent_id}")
-        raise HTTPException(status_code=400, detail="Invalid agent_id format")
-    
-    return agent_id
-
-
-def _get_db_path(agent_id: str) -> str:
-    """根据agent_id获取数据库文件路径"""
-    from pathlib import Path
-    base_dir = _resolve_agent_workspace_dir(agent_id)
-    db_path = base_dir / "memory" / f"human_thinking_memory_{agent_id}.db"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    return str(db_path)
+def verify_admin_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    if credentials and credentials.credentials in _AUTH_TOKENS:
+        return credentials.credentials
+    raise HTTPException(status_code=403, detail="Admin token required for this operation")
 
 
 async def _get_db(agent_id: str):
-    """创建并初始化数据库连接
-    
-    注意：调用方负责在使用完毕后关闭数据库连接。
-    推荐使用 _get_db_context 上下文管理器。
-    """
+    """创建并初始化数据库连接（带缓存）"""
     from ..core.database import HumanThinkingDB
-    db_path = _get_db_path(agent_id)
-    db = HumanThinkingDB(db_path)
-    await db.initialize()
-    return db
+    db_path = str(_get_db_path(agent_id))
+
+    if db_path in _db_cache:
+        db = _db_cache[db_path]
+        try:
+            db.cursor.execute("SELECT 1")
+        except Exception:
+            db = HumanThinkingDB(db_path)
+            await db.initialize()
+            _db_cache[db_path] = db
+        return db
+
+    async with _db_lock:
+        if db_path in _db_cache:
+            return _db_cache[db_path]
+        db = HumanThinkingDB(db_path)
+        await db.initialize()
+        _db_cache[db_path] = db
+        return db
 
 
 class _DBContext:
-    """数据库连接上下文管理器"""
+    """数据库连接上下文管理器（不关闭缓存连接）"""
     def __init__(self, agent_id: str):
         self.agent_id = agent_id
         self.db = None
-    
+
     async def __aenter__(self):
         self.db = await _get_db(self.agent_id)
         return self.db
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if self.db:
-            try:
-                await self.db.close()
-            except Exception:
-                pass
         return False
 
 
@@ -196,12 +160,13 @@ class ConfigUpdateRequest(BaseModel):
 class SleepConfigUpdateRequest(BaseModel):
     enable_agent_sleep: Optional[bool] = None
     light_sleep_minutes: Optional[int] = Field(None, ge=1, le=120)
-    rem_minutes: Optional[int] = Field(None, ge=1, le=60)
+    rem_minutes: Optional[int] = Field(None, ge=1, le=120)
     deep_sleep_minutes: Optional[int] = Field(None, ge=5, le=240)
+    auto_consolidate: Optional[bool] = None
     consolidate_days: Optional[int] = Field(None, ge=1, le=30)
-    frozen_days: Optional[int] = Field(None, ge=7, le=365)
-    archive_days: Optional[int] = Field(None, ge=30, le=730)
-    delete_days: Optional[int] = Field(None, ge=90, le=1095)
+    frozen_days: Optional[int] = Field(None, ge=1, le=90)
+    archive_days: Optional[int] = Field(None, ge=2, le=180)
+    delete_days: Optional[int] = Field(None, ge=3, le=365)
     enable_insight: Optional[bool] = None
     enable_dream_log: Optional[bool] = None
     # 记忆合并配置
@@ -225,22 +190,14 @@ class ForceSleepRequest(BaseModel):
 
 # ============ 全局状态存储 ============
 
-_sleep_manager = None
 _memory_managers = {}
 _MAX_MEMORY_MANAGERS = 100  # 防止内存泄漏
 
 
 def get_sleep_manager():
-    """获取或创建睡眠管理器（单例模式，懒初始化）"""
-    global _sleep_manager
-    if _sleep_manager is None:
-        try:
-            from ..core.sleep_manager import SleepManager, SleepConfig
-            _sleep_manager = SleepManager(SleepConfig())
-        except Exception as e:
-            logger.error(f"Failed to create sleep manager: {e}")
-            raise
-    return _sleep_manager
+    """获取或创建睡眠管理器（单例模式，委托 sleep_manager 模块）"""
+    from ..core.sleep_manager import get_sleep_manager as _gsm
+    return _gsm()
 
 
 def get_memory_manager(agent_id: str = None):
@@ -257,7 +214,7 @@ def get_memory_manager(agent_id: str = None):
     if agent_id not in _memory_managers:
         try:
             from ..core.memory_manager import HumanThinkingMemoryManager
-            working_dir = str(_resolve_agent_workspace_dir(agent_id))
+            working_dir = str(resolve_agent_workspace_dir(agent_id))
             _memory_managers[agent_id] = HumanThinkingMemoryManager(
                 working_dir=working_dir,
                 agent_id=agent_id
@@ -267,20 +224,6 @@ def get_memory_manager(agent_id: str = None):
             raise
     
     return _memory_managers[agent_id]
-
-
-# ============ 辅助函数 ============
-
-def _handle_db_operation(operation_name: str, operation_func, fallback_result=None):
-    """统一处理数据库操作，避免裸except"""
-    try:
-        return operation_func()
-    except ImportError as e:
-        logger.debug(f"{operation_name}: module not available - {e}")
-        return fallback_result
-    except Exception as e:
-        logger.error(f"{operation_name} failed: {e}")
-        return fallback_result
 
 
 # ============ API 路由 ============
@@ -294,7 +237,7 @@ async def health_check():
     return {
         "status": "healthy",
         "plugin": "humanthinking",
-        "version": "1.1.5.post1",
+        "version": CURRENT_VERSION,
         "timestamp": time.time()
     }
 
@@ -309,7 +252,7 @@ async def get_stats(
     token: Optional[str] = Depends(verify_token)
 ):
     """获取记忆统计信息"""
-    agent_id = validate_agent_id(agent_id)
+    agent_id = _check_agent_id(agent_id)
     if not agent_id:
         return StatsResponse(
             total_memories=0,
@@ -321,14 +264,14 @@ async def get_stats(
     db = await _get_db(agent_id)
 
     if not hasattr(db, 'get_stats'):
-        await db.close()
+
         raise HTTPException(
             status_code=501,
             detail="Database method 'get_stats' not implemented"
         )
 
     stats = await db.get_stats(agent_id)
-    await db.close()
+
     return StatsResponse(
         total_memories=stats.get('total_memories', 0),
         cross_session_memories=stats.get('active_memories', 0),
@@ -349,13 +292,13 @@ async def search_memories(
     token: Optional[str] = Depends(verify_token)
 ):
     """搜索记忆"""
-    agent_id = validate_agent_id(agent_id)
+    agent_id = _check_agent_id(agent_id)
     if not agent_id:
         return SearchResponse(memories=[], total=0, query=request.query)
     db = await _get_db(agent_id)
 
     if not hasattr(db, 'search_memories'):
-        await db.close()
+
         raise HTTPException(
             status_code=501,
             detail="Database method 'search_memories' not implemented"
@@ -367,7 +310,7 @@ async def search_memories(
         max_results=request.limit
     )
 
-    await db.close()
+
 
     return SearchResponse(
         memories=[vars(r) if hasattr(r, '__dict__') else r for r in results],
@@ -377,6 +320,10 @@ async def search_memories(
 
 
 @router.put("/memories/{memory_id}")
+@handle_api_errors(
+    operation_name="update_memory",
+    allow_fallback=False
+)
 async def update_memory(
     memory_id: str, 
     request: MemoryUpdateRequest,
@@ -384,72 +331,60 @@ async def update_memory(
     token: Optional[str] = Depends(verify_token)
 ):
     """更新记忆内容/类型/重要性"""
-    try:
-        agent_id = validate_agent_id(agent_id)
-        if not agent_id:
-            raise HTTPException(status_code=400, detail="agent_id is required")
-        db = await _get_db(agent_id)
-        
-        update_data = {}
-        if request.content is not None:
-            update_data['content'] = request.content
-        if request.memory_type is not None:
-            update_data['memory_type'] = request.memory_type
-        if request.importance is not None:
-            update_data['importance'] = request.importance
-        if request.importance_score is not None:
-            update_data['importance_score'] = request.importance_score
-        
-        if hasattr(db, 'update_memory_type') and request.memory_type:
-            await db.update_memory_type(int(memory_id), request.memory_type)
-        if hasattr(db, 'update_memory_score') and request.importance_score is not None:
-            await db.update_memory_score(int(memory_id), request.importance_score)
-        if request.importance is not None:
-            db.cursor.execute(
-                "UPDATE qwenpaw_memory SET importance = ? WHERE id = ? AND agent_id = ?",
-                (request.importance, int(memory_id), agent_id)
-            )
-            db.conn.commit()
-        
-        logger.info(f"Memory {memory_id} updated: {list(update_data.keys())}")
-        await db.close()
-        return {"success": True, "memory_id": memory_id, "updated": update_data}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to update memory {memory_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    agent_id = _check_agent_id(agent_id)
+    db = await _get_db(agent_id)
+    
+    update_data = {}
+    if request.content is not None:
+        update_data['content'] = request.content
+    if request.memory_type is not None:
+        update_data['memory_type'] = request.memory_type
+    if request.importance is not None:
+        update_data['importance'] = request.importance
+    if request.importance_score is not None:
+        update_data['importance_score'] = request.importance_score
+    
+    if hasattr(db, 'update_memory_type') and request.memory_type:
+        await db.update_memory_type(int(memory_id), request.memory_type)
+    if hasattr(db, 'update_memory_score') and request.importance_score is not None:
+        await db.update_memory_score(int(memory_id), request.importance_score)
+    if request.importance is not None:
+        db.cursor.execute(
+            "UPDATE qwenpaw_memory SET importance = ? WHERE id = ? AND agent_id = ?",
+            (request.importance, int(memory_id), agent_id)
+        )
+        db.conn.commit()
+    
+    logger.info(f"Memory {memory_id} updated: {list(update_data.keys())}")
+
+    return {"success": True, "memory_id": memory_id, "updated": update_data}
 
 
 @router.delete("/memories/batch")
+@handle_api_errors(
+    operation_name="batch_delete_memories",
+    allow_fallback=False
+)
 async def batch_delete_memories(
     request: BatchDeleteRequest,
     agent_id: Optional[str] = None,
     token: Optional[str] = Depends(verify_token)
 ):
     """批量删除记忆"""
-    try:
-        agent_id = validate_agent_id(agent_id)
-        if not agent_id:
-            raise HTTPException(status_code=400, detail="agent_id is required")
-        db = await _get_db(agent_id)
-        
-        deleted_count = 0
-        for memory_id in request.memory_ids:
-            try:
-                await db.archive_memory(int(memory_id))
-                deleted_count += 1
-            except (ValueError, Exception) as e:
-                logger.warning(f"Failed to delete memory {memory_id}: {e}")
-        
-        logger.info(f"Batch deleted {deleted_count} memories")
-        await db.close()
-        return {"success": True, "deleted_count": deleted_count}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to batch delete memories: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    agent_id = _check_agent_id(agent_id)
+    db = await _get_db(agent_id)
+    
+    deleted_count = 0
+    for memory_id in request.memory_ids:
+        try:
+            await db.archive_memory(int(memory_id))
+            deleted_count += 1
+        except (ValueError, Exception) as e:
+            logger.warning(f"Failed to delete memory {memory_id}: {e}")
+    
+    logger.info(f"Batch deleted {deleted_count} memories")
+
+    return {"success": True, "deleted_count": deleted_count}
 
 
 @router.get("/emotion")
@@ -460,26 +395,34 @@ async def batch_delete_memories(
 async def get_emotion_context(
     session_id: Optional[str] = None,
     agent_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    token: Optional[str] = Depends(verify_token)
+    user_id: Optional[str] = None
 ):
     """获取情感状态"""
-    agent_id = validate_agent_id(agent_id)
+    agent_id = _check_agent_id(agent_id)
     from ..core.emotional_engine import EmotionalContinuityEngine
     db = await _get_db(agent_id if agent_id else "default")
     engine = EmotionalContinuityEngine(db=db)
 
     if not hasattr(engine, 'get_emotional_context'):
-        await db.close()
+
         raise HTTPException(
             status_code=501,
             detail="Engine method 'get_emotional_context' not implemented"
         )
 
-    emotion = engine.get_emotional_context(agent_id, user_id)
-    await db.close()
+    emotion = await engine.get_emotional_context(session_id, agent_id, user_id)
+
     if emotion:
-        return emotion
+        return {
+            "current_emotion": emotion.get("primary_emotion_trend", "neutral"),
+            "intensity": emotion.get("continuity_score", 0.0),
+            "history": [
+                {"emotion": cue.get("emotion", "neutral"), "intensity": cue.get("intensity", 0.5)}
+                for cue in emotion.get("emotional_memory_cues", [])
+            ],
+            "recommended_approach": emotion.get("recommended_approach", ""),
+            "patterns": emotion.get("historical_patterns", {})
+        }
 
     # 返回空数据表示没有找到情感状态
     return {
@@ -500,7 +443,7 @@ async def get_sessions(
     token: Optional[str] = Depends(verify_token)
 ):
     """获取会话列表"""
-    agent_id = validate_agent_id(agent_id)
+    agent_id = _check_agent_id(agent_id)
     if not agent_id:
         return []
     db = await _get_db(agent_id)
@@ -512,11 +455,15 @@ async def get_sessions(
         )
 
     sessions = await db.get_active_sessions(agent_id)
-    await db.close()
+
     return sessions if sessions else []
 
 
 @router.put("/sessions/{session_id}/rename")
+@handle_api_errors(
+    operation_name="rename_session",
+    allow_fallback=False
+)
 async def rename_session(
     session_id: str, 
     request: SessionRenameRequest,
@@ -524,100 +471,102 @@ async def rename_session(
     token: Optional[str] = Depends(verify_token)
 ):
     """重命名会话"""
-    try:
-        agent_id = validate_agent_id(agent_id)
-        if not agent_id:
-            raise HTTPException(status_code=400, detail="agent_id is required")
-        db = await _get_db(agent_id)
-        
-        logger.info(f"Session {session_id} renamed to: {request.session_name}")
-        await db.close()
-        return {"success": True, "session_id": session_id, "session_name": request.session_name}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to rename session {session_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    agent_id = _check_agent_id(agent_id)
+    db = await _get_db(agent_id)
+    
+    db.cursor.execute(
+        "UPDATE sessions SET session_name = ? WHERE session_id = ? AND agent_id = ?",
+        (request.session_name, session_id, agent_id)
+    )
+    db.conn.commit()
+    
+    logger.info(f"Session {session_id} renamed to: {request.session_name}")
+
+    return {"success": True, "session_id": session_id, "session_name": request.session_name}
 
 
 @router.delete("/sessions/{session_id}")
+@handle_api_errors(
+    operation_name="delete_session",
+    allow_fallback=False
+)
 async def delete_session(
     session_id: str,
     agent_id: Optional[str] = None,
     token: Optional[str] = Depends(verify_token)
 ):
     """删除单个会话"""
-    try:
-        agent_id = validate_agent_id(agent_id)
-        if not agent_id:
-            raise HTTPException(status_code=400, detail="agent_id is required")
-        db = await _get_db(agent_id)
-        
-        logger.info(f"Session {session_id} deleted")
-        await db.close()
-        return {"success": True, "deleted_count": 1}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to delete session {session_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    agent_id = _check_agent_id(agent_id)
+    db = await _get_db(agent_id)
+    
+    db.cursor.execute(
+        "DELETE FROM sessions WHERE session_id = ? AND agent_id = ?",
+        (session_id, agent_id)
+    )
+    db.conn.commit()
+    
+    logger.info(f"Session {session_id} deleted")
+
+    return {"success": True, "deleted_count": 1}
 
 
 @router.post("/sessions/batch-delete")
+@handle_api_errors(
+    operation_name="batch_delete_sessions",
+    allow_fallback=False
+)
 async def batch_delete_sessions(
     request: BatchDeleteSessionsRequest,
     agent_id: Optional[str] = None,
     token: Optional[str] = Depends(verify_token)
 ):
     """批量删除会话"""
-    try:
-        agent_id = validate_agent_id(agent_id)
-        if not agent_id:
-            raise HTTPException(status_code=400, detail="agent_id is required")
-        db = await _get_db(agent_id)
-        
-        deleted_count = len(request.session_ids)
-        
-        logger.info(f"Batch deleted {deleted_count} sessions")
-        await db.close()
-        return {"success": True, "deleted_count": deleted_count}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to batch delete sessions: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    agent_id = _check_agent_id(agent_id)
+    db = await _get_db(agent_id)
+    
+    deleted_count = 0
+    for sid in request.session_ids:
+        try:
+            db.cursor.execute(
+                "DELETE FROM sessions WHERE session_id = ? AND agent_id = ?",
+                (sid, agent_id)
+            )
+            deleted_count += 1
+        except Exception as del_err:
+            logger.warning(f"Failed to delete session {sid}: {del_err}")
+    db.conn.commit()
+    
+    logger.info(f"Batch deleted {deleted_count} sessions")
+
+    return {"success": True, "deleted_count": deleted_count}
 
 
 @router.get("/sessions/{session_id}/detail")
+@handle_api_errors(
+    operation_name="get_session_detail",
+    allow_fallback=False
+)
 async def get_session_detail(
     session_id: str,
     agent_id: Optional[str] = None,
     token: Optional[str] = Depends(verify_token)
 ):
     """获取会话详情"""
-    try:
-        agent_id = validate_agent_id(agent_id)
-        if not agent_id:
-            raise HTTPException(status_code=400, detail="agent_id is required")
-        db = await _get_db(agent_id)
-        
-        memories = []
-        if hasattr(db, 'get_session_memories'):
-            memories = await db.get_session_memories(agent_id, session_id)
-        
-        await db.close()
-        return {
-            "session_id": session_id,
-            "session_name": '未命名会话',
-            "user_name": '',
-            "messages": [],
-            "memories": [vars(m) if hasattr(m, '__dict__') else m for m in memories]
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get session detail {session_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    agent_id = _check_agent_id(agent_id)
+    db = await _get_db(agent_id)
+    
+    memories = []
+    if hasattr(db, 'get_session_memories'):
+        memories = await db.get_session_memories(agent_id, session_id)
+    
+
+    return {
+        "session_id": session_id,
+        "session_name": '未命名会话',
+        "user_name": '',
+        "messages": [],
+        "memories": [vars(m) if hasattr(m, '__dict__') else m for m in memories]
+    }
 
 
 @router.get("/memories/recent")
@@ -632,9 +581,7 @@ async def get_recent_memories(
     token: Optional[str] = Depends(verify_token)
 ):
     """获取最近记忆"""
-    agent_id = validate_agent_id(agent_id)
-    if not agent_id:
-        raise HTTPException(status_code=400, detail="agent_id is required")
+    agent_id = _check_agent_id(agent_id)
     db = await _get_db(agent_id)
 
     if not hasattr(db, 'get_recent_memories'):
@@ -644,7 +591,7 @@ async def get_recent_memories(
         )
 
     memories = await db.get_recent_memories(agent_id, days=days)
-    await db.close()
+
     return {"memories": memories[:limit] if memories else [], "total": len(memories) if memories else 0}
 
 
@@ -656,182 +603,245 @@ async def get_recent_memories(
 async def get_memory_timeline(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    agent_id: Optional[str] = None
+    agent_id: Optional[str] = None,
+    group_by: Optional[str] = None
 ):
-    """获取记忆时间线"""
-    agent_id = validate_agent_id(agent_id)
-    if not agent_id:
-        raise HTTPException(status_code=400, detail="agent_id is required")
+    """获取记忆时间线（按时间分组统计）
+    
+    group_by:
+        - None/"month": 按月分组（全部标签）
+        - "hour": 按小时分组（今天标签）
+        - "12h": 按12小时分组（本周标签）
+        - "day": 按天分组（本月标签）
+    """
+    import datetime
+    agent_id = _check_agent_id(agent_id)
     db = await _get_db(agent_id)
 
-    memories = await db.get_recent_memories(agent_id, days=30)
-    await db.close()
-    return memories if memories else []
+    days_map = {"hour": 1, "12h": 7, "day": 30}
+    days = days_map.get(group_by, 365)
+    memories = await db.get_recent_memories(agent_id, days=days)
+
+
+    if not memories:
+        return []
+
+    from collections import defaultdict
+    grouped = defaultdict(lambda: {"count": 0, "events": []})
+
+    for m in memories:
+        created = m.get("created_at", "")
+        if not created:
+            continue
+        try:
+            if "T" in str(created):
+                dt = datetime.datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+            else:
+                dt = datetime.datetime.fromisoformat(str(created))
+        except Exception:
+            continue
+
+        if group_by == "hour":
+            key = dt.strftime("%Y-%m-%d %H:00")
+        elif group_by == "12h":
+            hour_block = "00-12" if dt.hour < 12 else "12-24"
+            key = dt.strftime("%Y-%m-%d") + f" {hour_block}"
+        elif group_by == "day":
+            key = dt.strftime("%Y-%m-%d")
+        else:
+            key = dt.strftime("%Y-%m")
+
+        grouped[key]["count"] += 1
+        content = str(m.get("content", ""))[:80]
+        if content:
+            grouped[key]["events"].append(content)
+
+    result = []
+    for key in sorted(grouped.keys(), reverse=True):
+        data = grouped[key]
+        result.append({
+            "date": key,
+            "count": data["count"],
+            "events": data["events"][:5]
+        })
+
+    return result
 
 
 @router.get("/config")
+@handle_api_errors(
+    operation_name="get_config",
+    allow_fallback=False
+)
 async def get_config(agent_id: Optional[str] = None):
     """获取HumanThinking配置（支持按Agent隔离）"""
-    try:
-        agent_id = validate_agent_id(agent_id)
-        from ..core.memory_manager import get_config
-        config = get_config(agent_id=agent_id)
-        return {
-            "enable_cross_session": config.enable_cross_session,
-            "enable_emotion": config.enable_emotion,
-            "frozen_days": config.frozen_days,
-            "archive_days": config.archive_days,
-            "delete_days": config.delete_days,
-            "max_results": config.max_results,
-            "session_idle_timeout": config.session_idle_timeout,
-            "refresh_interval": config.refresh_interval,
-            "max_memory_chars": config.max_memory_chars,
-            "enable_distributed_db": config.enable_distributed_db,
-            "db_size_threshold_mb": config.db_size_threshold_mb,
-            "disable_file_memory": config.disable_file_memory,
-            "compression_mode": getattr(config, 'compression_mode', 'auto'),
-        }
-    except Exception as e:
-        logger.error(f"Failed to get config: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    agent_id = _check_agent_id(agent_id)
+    from ..core.memory_manager import get_config
+    config = await get_config(agent_id=agent_id)
+    return {
+        "enable_cross_session": config.enable_cross_session,
+        "enable_emotion": config.enable_emotion,
+        "frozen_days": config.frozen_days,
+        "archive_days": config.archive_days,
+        "delete_days": config.delete_days,
+        "max_results": config.max_results,
+        "session_idle_timeout": config.session_idle_timeout,
+        "refresh_interval": config.refresh_interval,
+        "max_memory_chars": config.max_memory_chars,
+        "enable_distributed_db": config.enable_distributed_db,
+        "db_size_threshold_mb": config.db_size_threshold_mb,
+        "disable_file_memory": config.disable_file_memory,
+        "compression_mode": getattr(config, 'compression_mode', 'auto'),
+    }
 
 
 @router.post("/config")
+@handle_api_errors(
+    operation_name="update_config",
+    allow_fallback=False
+)
 async def update_config(request: Request, agent_id: Optional[str] = None):
     """更新HumanThinking配置（支持按Agent隔离）"""
-    agent_id = validate_agent_id(agent_id)
+    agent_id = _check_agent_id(agent_id)
+    from ..core.memory_manager import get_config, save_config, update_config_fields
+    
+    data = await request.json()
+    config = get_config(agent_id=agent_id)
+    
+    ALLOWED_COMPRESSION_MODES = ('auto', 'llm', 'simple')
+    if 'compression_mode' in data and data['compression_mode'] not in ALLOWED_COMPRESSION_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid compression_mode: {data['compression_mode']}. Allowed: {ALLOWED_COMPRESSION_MODES}"
+        )
+    
+    update_fields = {}
+    field_mapping = {
+        'enable_cross_session': data.get('enable_cross_session'),
+        'enable_emotion': data.get('enable_emotion'),
+        'frozen_days': data.get('frozen_days'),
+        'archive_days': data.get('archive_days'),
+        'delete_days': data.get('delete_days'),
+        'max_results': data.get('max_results'),
+        'session_idle_timeout': data.get('session_idle_timeout'),
+        'refresh_interval': data.get('refresh_interval'),
+        'max_memory_chars': data.get('max_memory_chars'),
+        'enable_distributed_db': data.get('enable_distributed_db'),
+        'db_size_threshold_mb': data.get('db_size_threshold_mb'),
+        'compression_mode': data.get('compression_mode'),
+    }
+    
+    for field_name, value in field_mapping.items():
+        if value is not None:
+            setattr(config, field_name, value)
+            update_fields[field_name] = value
+    
+    if update_fields:
+        update_config_fields(update_fields, agent_id=agent_id)
+    
+    logger.info(f"准备保存配置 agent={agent_id or 'default'}, 更新字段: {list(update_fields.keys())}")
+    success = save_config(config, agent_id=agent_id)
+    if not success:
+        logger.error(f"save_config 返回 False, agent={agent_id or 'default'}")
+        return {"success": False, "message": "配置保存失败，请检查日志"}
+    
+    logger.info(f"配置已保存成功 agent={agent_id or 'default'}, 检查数据库...")
+    
     try:
-        from ..core.memory_manager import get_config, save_config, update_config_fields
+        from ..core.memory_manager import HumanThinkingMemoryManager
+        import os
+        from pathlib import Path
         
-        data = await request.json()
-        config = get_config(agent_id=agent_id)
+        if agent_id:
+            working_dir = str(resolve_agent_workspace_dir(agent_id))
+        else:
+            working_dir = str(resolve_agent_workspace_dir("default"))
         
-        update_fields = {}
-        field_mapping = {
-            'enable_cross_session': data.get('enable_cross_session'),
-            'enable_emotion': data.get('enable_emotion'),
-            'frozen_days': data.get('frozen_days'),
-            'archive_days': data.get('archive_days'),
-            'delete_days': data.get('delete_days'),
-            'max_results': data.get('max_results'),
-            'session_idle_timeout': data.get('session_idle_timeout'),
-            'refresh_interval': data.get('refresh_interval'),
-            'max_memory_chars': data.get('max_memory_chars'),
-            'enable_distributed_db': data.get('enable_distributed_db'),
-            'db_size_threshold_mb': data.get('db_size_threshold_mb'),
-            'compression_mode': data.get('compression_mode'),
-        }
+        db_path = Path(working_dir) / "memory" / f"human_thinking_memory_{agent_id or 'default'}.db"
+        logger.info(f"检查数据库: db_path={db_path}, working_dir={working_dir}")
         
-        for field_name, value in field_mapping.items():
-            if value is not None:
-                setattr(config, field_name, value)
-                update_fields[field_name] = value
-        
-        if update_fields:
-            update_config_fields(update_fields, agent_id=agent_id)
-        
-        logger.info(f"准备保存配置 agent={agent_id or 'default'}, 更新字段: {list(update_fields.keys())}")
-        success = save_config(config, agent_id=agent_id)
-        if not success:
-            logger.error(f"save_config 返回 False, agent={agent_id or 'default'}")
-            return {"success": False, "message": "配置保存失败，请检查日志"}
-        
-        logger.info(f"配置已保存成功 agent={agent_id or 'default'}, 检查数据库...")
-        
-        try:
-            from ..core.memory_manager import HumanThinkingMemoryManager
-            import os
-            from pathlib import Path
-            
-            if agent_id:
-                working_dir = str(_resolve_agent_workspace_dir(agent_id))
-            else:
-                working_dir = str(_resolve_agent_workspace_dir("default"))
-            
-            db_path = Path(working_dir) / "memory" / f"human_thinking_memory_{agent_id or 'default'}.db"
-            logger.info(f"检查数据库: db_path={db_path}, working_dir={working_dir}")
-            
-            if not db_path.exists():
-                logger.info(f"数据库不存在，开始创建: {db_path}")
-                Path(working_dir).mkdir(parents=True, exist_ok=True)
-                mm = HumanThinkingMemoryManager(
-                    working_dir=working_dir,
-                    agent_id=agent_id or "default",
-                    user_id=None
-                )
-                logger.info(f"HumanThinkingMemoryManager 已创建, 调用 mm.start()...")
-                await mm.start()
-                logger.info(f"数据库自动创建成功: {mm.db_path}")
-            else:
-                logger.info(f"数据库已存在，跳过创建: {db_path}")
-        except Exception as db_err:
-            logger.error(f"数据库自动创建失败 agent={agent_id or 'default'}: {db_err}", exc_info=True)
-        
-        logger.info(f"配置更新完成 agent={agent_id or 'default'}: {list(update_fields.keys())}")
-        return {"success": True, "config": data}
-    except Exception as e:
-        logger.error(f"配置更新异常 agent={agent_id or 'default'}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        if not db_path.exists():
+            logger.info(f"数据库不存在，开始创建: {db_path}")
+            Path(working_dir).mkdir(parents=True, exist_ok=True)
+            mm = HumanThinkingMemoryManager(
+                working_dir=working_dir,
+                agent_id=agent_id or "default",
+                user_id=None
+            )
+            logger.info(f"HumanThinkingMemoryManager 已创建, 调用 mm.start()...")
+            await mm.start()
+            logger.info(f"数据库自动创建成功: {mm.db_path}")
+        else:
+            logger.info(f"数据库已存在，跳过创建: {db_path}")
+    except Exception as db_err:
+        logger.error(f"数据库自动创建失败 agent={agent_id or 'default'}: {db_err}", exc_info=True)
+    
+    logger.info(f"配置更新完成 agent={agent_id or 'default'}: {list(update_fields.keys())}")
+    return {"success": True, "config": data}
 
 
 @router.get("/db/version")
+@handle_api_errors(
+    operation_name="get_db_version",
+    allow_fallback=False
+)
 async def get_db_version(request: Request, agent_id: Optional[str] = None):
     """获取数据库版本和迁移状态"""
-    agent_id = validate_agent_id(agent_id)
-    try:
-        from pathlib import Path
-        if agent_id:
-            working_dir = str(_resolve_agent_workspace_dir(agent_id))
-        else:
-            working_dir = str(_resolve_agent_workspace_dir("default"))
-        db_path = Path(working_dir) / "memory" / f"human_thinking_memory_{agent_id or 'default'}.db"
+    agent_id = _check_agent_id(agent_id)
+    from pathlib import Path
+    if agent_id:
+        working_dir = str(resolve_agent_workspace_dir(agent_id))
+    else:
+        working_dir = str(resolve_agent_workspace_dir("default"))
+    db_path = Path(working_dir) / "memory" / f"human_thinking_memory_{agent_id or 'default'}.db"
 
-        if not db_path.exists():
-            from ..core.database import CURRENT_SCHEMA_VERSION as csv
-            return {
-                "exists": False,
-                "code_schema_version": csv,
-                "db_schema_version": None,
-                "needs_migration": False,
-                "migration_history": [],
-            }
+    if not db_path.exists():
+        from ..core.database import CURRENT_SCHEMA_VERSION as csv
+        return {
+            "exists": False,
+            "code_schema_version": csv,
+            "db_schema_version": None,
+            "needs_migration": False,
+            "migration_history": [],
+        }
 
-        from ..core.database import HumanThinkingDB
-        db = HumanThinkingDB(str(db_path))
-        await db.initialize()
-        version_info = db.get_version_info()
-        version_info["exists"] = True
-        version_info["migration_history"] = db.get_migration_history()
-        version_info["db_path"] = str(db_path)
-        await db.close()
-        return version_info
-    except Exception as e:
-        logger.error(f"获取数据库版本失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    from ..core.database import HumanThinkingDB
+    db = HumanThinkingDB(str(db_path))
+    await db.initialize()
+    version_info = db.get_version_info()
+    version_info["exists"] = True
+    version_info["migration_history"] = db.get_migration_history()
+    version_info["db_path"] = str(db_path)
+
+    return version_info
 
 
 @router.get("/dreams")
+@handle_api_errors(
+    operation_name="get_dreams",
+    allow_fallback=False
+)
 async def get_dreams(
     agent_id: Optional[str] = Query(None),
     limit: int = Query(10, ge=1, le=50)
 ):
     """获取梦境记录（睡眠期间生成的摘要）"""
-    agent_id = validate_agent_id(agent_id)
-    try:
-        if not agent_id:
-            return []
-        db = await _get_db(agent_id)
-        dreams = await db.get_dream_logs(agent_id, limit=limit)
-        await db.close()
-        return dreams
-    except Exception as e:
-        logger.error(f"Failed to get dreams: {e}")
+    agent_id = _check_agent_id(agent_id)
+    if not agent_id:
         return []
+    db = await _get_db(agent_id)
+    dreams = await db.get_dream_logs(agent_id, limit=limit)
+
+    return dreams
 
 
 # ============ 睡眠管理 API ============
 
 @router.get("/sleep/status")
+@handle_api_errors(
+    operation_name="get_sleep_status",
+    allow_fallback=False
+)
 async def get_sleep_status(agent_id: Optional[str] = None):
     """获取睡眠状态（惰性计算）
     
@@ -844,177 +854,166 @@ async def get_sleep_status(agent_id: Optional[str] = None):
     Returns:
         睡眠状态信息，包含状态、空闲时间、距离下一阶段时间等
     """
-    try:
-        from ..core.sleep_manager import check_and_trigger_sleep
-        
-        if not agent_id:
-            return {
-                "status": "active",
-                "status_text": "活跃",
-                "icon": "☀️",
-                "color": "#52c41a",
-                "idle_time": 0,
-                "next_sleep_in": -1
-            }
-        
-        # 使用惰性计算获取睡眠状态（会自动触发状态转换）
-        status = await check_and_trigger_sleep(agent_id)
-        return status
-        
-    except Exception as e:
-        logger.error(f"Failed to get sleep status: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    from ..core.sleep_manager import check_and_trigger_sleep
+    
+    if not agent_id:
+        return {
+            "status": "active",
+            "status_text": "活跃",
+            "icon": "☀️",
+            "color": "#52c41a",
+            "idle_time": 0,
+            "next_sleep_in": -1
+        }
+    
+    # 使用惰性计算获取睡眠状态（会自动触发状态转换）
+    status = await check_and_trigger_sleep(agent_id)
+    return status
 
 
 @router.get("/sleep/config")
+@handle_api_errors(
+    operation_name="get_sleep_config",
+    allow_fallback=False
+)
 async def get_sleep_config(agent_id: Optional[str] = None):
     """获取睡眠配置（支持按Agent隔离）"""
-    try:
-        # 如果有 agent_id，尝试加载该 Agent 的专属配置
-        if agent_id:
-            from ..core.sleep_manager import load_agent_sleep_config
-            config = load_agent_sleep_config(agent_id)
-        else:
-            manager = get_sleep_manager()
-            config = manager.config if manager else None
-        
-        if config is None:
-            from ..core.sleep_manager import SleepConfig
-            config = SleepConfig()
-        
-        return {
-            "enable_agent_sleep": config.enable_agent_sleep,
-            "light_sleep_minutes": config.light_sleep_minutes,
-            "rem_minutes": config.rem_minutes,
-            "deep_sleep_minutes": config.deep_sleep_minutes,
-            "consolidate_days": config.consolidate_days,
-            "frozen_days": config.frozen_days,
-            "archive_days": config.archive_days,
-            "delete_days": config.delete_days,
-            "enable_insight": config.enable_insight,
-            "enable_dream_log": config.enable_dream_log,
-            # 记忆合并配置
-            "enable_merge": config.enable_merge,
-            "merge_similarity_threshold": config.merge_similarity_threshold,
-            "merge_max_distance_hours": config.merge_max_distance_hours,
-            # 矛盾检测配置
-            "enable_contradiction_detection": config.enable_contradiction_detection,
-            "contradiction_threshold": config.contradiction_threshold,
-            "contradiction_resolution_strategy": config.contradiction_resolution_strategy,
-            "enable_semantic_contradiction_check": config.enable_semantic_contradiction_check,
-            "enable_temporal_contradiction_check": config.enable_temporal_contradiction_check,
-            "enable_confidence_scoring": config.enable_confidence_scoring,
-            "auto_resolve_contradiction": config.auto_resolve_contradiction,
-            "min_confidence_for_auto_resolve": config.min_confidence_for_auto_resolve,
-        }
-    except Exception as e:
-        logger.error(f"Failed to get sleep config: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    from ..core.sleep_manager import get_agent_sleep_config
+    config = get_agent_sleep_config(agent_id)
+    
+    return {
+        "enable_agent_sleep": config.enable_agent_sleep,
+        "light_sleep_minutes": config.light_sleep_minutes,
+        "rem_minutes": config.rem_minutes,
+        "deep_sleep_minutes": config.deep_sleep_minutes,
+        "auto_consolidate": config.auto_consolidate,
+        "consolidate_days": config.consolidate_days,
+        "frozen_days": config.frozen_days,
+        "archive_days": config.archive_days,
+        "delete_days": config.delete_days,
+        "enable_insight": config.enable_insight,
+        "enable_dream_log": config.enable_dream_log,
+        # 记忆合并配置
+        "enable_merge": config.enable_merge,
+        "merge_similarity_threshold": config.merge_similarity_threshold,
+        "merge_max_distance_hours": config.merge_max_distance_hours,
+        # 矛盾检测配置
+        "enable_contradiction_detection": config.enable_contradiction_detection,
+        "contradiction_threshold": config.contradiction_threshold,
+        "contradiction_resolution_strategy": config.contradiction_resolution_strategy,
+        "enable_semantic_contradiction_check": config.enable_semantic_contradiction_check,
+        "enable_temporal_contradiction_check": config.enable_temporal_contradiction_check,
+        "enable_confidence_scoring": config.enable_confidence_scoring,
+        "auto_resolve_contradiction": config.auto_resolve_contradiction,
+        "min_confidence_for_auto_resolve": config.min_confidence_for_auto_resolve,
+    }
 
 
 @router.post("/sleep/config")
+@handle_api_errors(
+    operation_name="update_sleep_config",
+    allow_fallback=False
+)
 async def update_sleep_config(request: SleepConfigUpdateRequest, agent_id: Optional[str] = None):
     """更新睡眠配置（支持按Agent隔离）"""
-    try:
-        from ..core.sleep_manager import get_agent_sleep_config, save_agent_sleep_config, SleepConfig
-        
-        old_config = get_agent_sleep_config(agent_id)
-        
-        config_dict = {
-            "enable_agent_sleep": request.enable_agent_sleep if request.enable_agent_sleep is not None else old_config.enable_agent_sleep,
-            "light_sleep_minutes": request.light_sleep_minutes if request.light_sleep_minutes is not None else old_config.light_sleep_minutes,
-            "rem_minutes": request.rem_minutes if request.rem_minutes is not None else old_config.rem_minutes,
-            "deep_sleep_minutes": request.deep_sleep_minutes if request.deep_sleep_minutes is not None else old_config.deep_sleep_minutes,
-            "auto_consolidate": old_config.auto_consolidate,
-            "consolidate_days": request.consolidate_days if request.consolidate_days is not None else old_config.consolidate_days,
-            "frozen_days": request.frozen_days if request.frozen_days is not None else old_config.frozen_days,
-            "archive_days": request.archive_days if request.archive_days is not None else old_config.archive_days,
-            "delete_days": request.delete_days if request.delete_days is not None else old_config.delete_days,
-            "enable_insight": request.enable_insight if request.enable_insight is not None else old_config.enable_insight,
-            "enable_dream_log": request.enable_dream_log if request.enable_dream_log is not None else old_config.enable_dream_log,
-            "enable_merge": request.enable_merge if request.enable_merge is not None else old_config.enable_merge,
-            "merge_similarity_threshold": request.merge_similarity_threshold if request.merge_similarity_threshold is not None else old_config.merge_similarity_threshold,
-            "merge_max_distance_hours": request.merge_max_distance_hours if request.merge_max_distance_hours is not None else old_config.merge_max_distance_hours,
-            "enable_contradiction_detection": request.enable_contradiction_detection if request.enable_contradiction_detection is not None else old_config.enable_contradiction_detection,
-            "contradiction_threshold": request.contradiction_threshold if request.contradiction_threshold is not None else old_config.contradiction_threshold,
-            "contradiction_resolution_strategy": request.contradiction_resolution_strategy if request.contradiction_resolution_strategy is not None else old_config.contradiction_resolution_strategy,
-            "enable_semantic_contradiction_check": request.enable_semantic_contradiction_check if request.enable_semantic_contradiction_check is not None else old_config.enable_semantic_contradiction_check,
-            "enable_temporal_contradiction_check": request.enable_temporal_contradiction_check if request.enable_temporal_contradiction_check is not None else old_config.enable_temporal_contradiction_check,
-            "enable_confidence_scoring": request.enable_confidence_scoring if request.enable_confidence_scoring is not None else old_config.enable_confidence_scoring,
-            "auto_resolve_contradiction": request.auto_resolve_contradiction if request.auto_resolve_contradiction is not None else old_config.auto_resolve_contradiction,
-            "min_confidence_for_auto_resolve": request.min_confidence_for_auto_resolve if request.min_confidence_for_auto_resolve is not None else old_config.min_confidence_for_auto_resolve,
-        }
-        
-        config = SleepConfig(**config_dict)
-        
-        if agent_id:
-            success = save_agent_sleep_config(agent_id, config)
-            if not success:
-                return {"success": False, "message": "配置保存失败，请检查日志"}
-        else:
-            manager = get_sleep_manager()
-            if manager:
-                manager.update_config(config)
-        
-        logger.info(f"Sleep config updated for agent {agent_id}: {request.model_dump(exclude_unset=True)}")
-        return {"success": True, "config": request.model_dump(exclude_unset=True)}
-    except Exception as e:
-        logger.error(f"Failed to update sleep config: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    from ..core.sleep_manager import get_agent_sleep_config, save_agent_sleep_config, SleepConfig
+    
+    old_config = get_agent_sleep_config(agent_id)
+    
+    config_dict = {
+        "enable_agent_sleep": request.enable_agent_sleep if request.enable_agent_sleep is not None else old_config.enable_agent_sleep,
+        "light_sleep_minutes": request.light_sleep_minutes if request.light_sleep_minutes is not None else old_config.light_sleep_minutes,
+        "rem_minutes": request.rem_minutes if request.rem_minutes is not None else old_config.rem_minutes,
+        "deep_sleep_minutes": request.deep_sleep_minutes if request.deep_sleep_minutes is not None else old_config.deep_sleep_minutes,
+        "auto_consolidate": request.auto_consolidate if request.auto_consolidate is not None else old_config.auto_consolidate,
+        "consolidate_days": request.consolidate_days if request.consolidate_days is not None else old_config.consolidate_days,
+        "frozen_days": request.frozen_days if request.frozen_days is not None else old_config.frozen_days,
+        "archive_days": request.archive_days if request.archive_days is not None else old_config.archive_days,
+        "delete_days": request.delete_days if request.delete_days is not None else old_config.delete_days,
+        "enable_insight": request.enable_insight if request.enable_insight is not None else old_config.enable_insight,
+        "enable_dream_log": request.enable_dream_log if request.enable_dream_log is not None else old_config.enable_dream_log,
+        "enable_merge": request.enable_merge if request.enable_merge is not None else old_config.enable_merge,
+        "merge_similarity_threshold": request.merge_similarity_threshold if request.merge_similarity_threshold is not None else old_config.merge_similarity_threshold,
+        "merge_max_distance_hours": request.merge_max_distance_hours if request.merge_max_distance_hours is not None else old_config.merge_max_distance_hours,
+        "enable_contradiction_detection": request.enable_contradiction_detection if request.enable_contradiction_detection is not None else old_config.enable_contradiction_detection,
+        "contradiction_threshold": request.contradiction_threshold if request.contradiction_threshold is not None else old_config.contradiction_threshold,
+        "contradiction_resolution_strategy": request.contradiction_resolution_strategy if request.contradiction_resolution_strategy is not None else old_config.contradiction_resolution_strategy,
+        "enable_semantic_contradiction_check": request.enable_semantic_contradiction_check if request.enable_semantic_contradiction_check is not None else old_config.enable_semantic_contradiction_check,
+        "enable_temporal_contradiction_check": request.enable_temporal_contradiction_check if request.enable_temporal_contradiction_check is not None else old_config.enable_temporal_contradiction_check,
+        "enable_confidence_scoring": request.enable_confidence_scoring if request.enable_confidence_scoring is not None else old_config.enable_confidence_scoring,
+        "auto_resolve_contradiction": request.auto_resolve_contradiction if request.auto_resolve_contradiction is not None else old_config.auto_resolve_contradiction,
+        "min_confidence_for_auto_resolve": request.min_confidence_for_auto_resolve if request.min_confidence_for_auto_resolve is not None else old_config.min_confidence_for_auto_resolve,
+    }
+    
+    config = SleepConfig(**config_dict)
+    
+    manager = get_sleep_manager()
+    if manager and agent_id:
+        manager.update_config(config, agent_id=agent_id)
+    elif manager:
+        manager.update_config(config)
+    
+    # 保存到全局配置文件（无论是否有agent_id）
+    from ..core.sleep_manager import _save_global_config_to_file
+    _save_global_config_to_file(config)
+    
+    if agent_id:
+        success = save_agent_sleep_config(agent_id, config)
+        if not success:
+            return {"success": False, "message": "配置保存失败，请检查日志"}
+    
+    logger.info(f"Sleep config updated for agent {agent_id}: {request.model_dump(exclude_unset=True)}")
+    return {"success": True, "config": request.model_dump(exclude_unset=True)}
 
 
 @router.post("/sleep/force")
+@handle_api_errors(
+    operation_name="force_sleep",
+    allow_fallback=False
+)
 async def force_sleep(request: ForceSleepRequest, agent_id: Optional[str] = None):
     """强制进入睡眠"""
-    try:
-        agent_id = validate_agent_id(agent_id)
-        if not agent_id:
-            raise HTTPException(status_code=400, detail="agent_id is required")
-        manager = get_sleep_manager()
-        
-        sleep_methods = {
-            "light": "force_light_sleep",
-            "rem": "force_rem",
-            "deep": "force_deep_sleep"
-        }
-        
-        method_name = sleep_methods.get(request.sleep_type)
-        if method_name and hasattr(manager, method_name):
-            result = await getattr(manager, method_name)(agent_id)
-            logger.info(f"Forced {request.sleep_type} sleep for agent {agent_id}")
-            return result
-        
-        return {"success": True, "sleep_type": request.sleep_type}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to force sleep: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    agent_id = _check_agent_id(agent_id)
+    manager = get_sleep_manager()
+    
+    sleep_methods = {
+        "light": "force_light_sleep",
+        "rem": "force_rem",
+        "deep": "force_deep_sleep"
+    }
+    
+    method_name = sleep_methods.get(request.sleep_type)
+    if method_name and hasattr(manager, method_name):
+        result = await getattr(manager, method_name)(agent_id)
+        logger.info(f"Forced {request.sleep_type} sleep for agent {agent_id}")
+        return result
+    
+    return {"success": True, "sleep_type": request.sleep_type}
 
 
 @router.post("/sleep/wakeup")
+@handle_api_errors(
+    operation_name="wakeup",
+    allow_fallback=False
+)
 async def wakeup(agent_id: Optional[str] = None):
     """强制唤醒"""
-    try:
-        agent_id = validate_agent_id(agent_id)
-        if not agent_id:
-            raise HTTPException(status_code=400, detail="agent_id is required")
-        manager = get_sleep_manager()
-        
-        if hasattr(manager, 'wakeup'):
-            result = await manager.wakeup(agent_id)
-            logger.info(f"Wakeup agent {agent_id}")
-            return result
-        
-        return {"success": True, "status": "active"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to wakeup: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    agent_id = _check_agent_id(agent_id)
+    manager = get_sleep_manager()
+    
+    if hasattr(manager, 'wakeup'):
+        result = await manager.wakeup(agent_id)
+        logger.info(f"Wakeup agent {agent_id}")
+        return result
+    
+    return {"success": True, "status": "active"}
 
 
 @router.post("/sleep/activity")
+@handle_api_errors(
+    operation_name="record_activity",
+    allow_fallback=False
+)
 async def record_activity(agent_id: Optional[str] = None):
     """记录Agent活动（由消息路由调用）
     
@@ -1027,32 +1026,28 @@ async def record_activity(agent_id: Optional[str] = None):
     Returns:
         记录结果
     """
-    try:
-        from ..core.sleep_manager import record_agent_activity
-        
-        if agent_id:
-            record_agent_activity(agent_id)
-            logger.debug(f"Recorded activity for agent {agent_id}")
-            return {"success": True, "agent_id": agent_id, "action": "activity_recorded"}
-        else:
-            return {"success": False, "message": "agent_id is required"}
-    except Exception as e:
-        logger.error(f"Failed to record activity: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    from ..core.sleep_manager import record_agent_activity
+    
+    if agent_id:
+        record_agent_activity(agent_id)
+        logger.debug(f"Recorded activity for agent {agent_id}")
+        return {"success": True, "agent_id": agent_id, "action": "activity_recorded"}
+    else:
+        return {"success": False, "message": "agent_id is required"}
 
 
 @router.get("/sleep/insight")
+@handle_api_errors(
+    operation_name="get_sleep_insight",
+    allow_fallback=False
+)
 async def get_sleep_insight(agent_id: Optional[str] = None):
     """获取睡眠洞察"""
-    def _get_real_insight():
-        if hasattr(get_sleep_manager(), 'generate_insight'):
-            return get_sleep_manager().generate_insight(agent_id)
-        return None
-    
-    insight = _handle_db_operation("get_insight", _get_real_insight)
-    
-    if insight:
-        return insight
+    manager = get_sleep_manager()
+    if hasattr(manager, 'generate_insight'):
+        insight = manager.generate_insight(agent_id)
+        if insight:
+            return insight
     
     return {
         "insight": "暂无洞察数据",
@@ -1063,19 +1058,12 @@ async def get_sleep_insight(agent_id: Optional[str] = None):
 
 # ============ 卸载接口 ============
 
-import shutil
 import os
-import json
-from pathlib import Path
-from datetime import datetime
 
-# 导入环境检测模块
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from utils.env_detector import detect_qwenpaw_env, get_cache_dirs
+from ..utils.env_detector import detect_qwenpaw_env, get_cache_dirs
 
 @router.post("/uninstall")
-async def uninstall_plugin(request: Request, token: Optional[str] = Depends(verify_token)):
+async def uninstall_plugin(request: Request, token: Optional[str] = Depends(verify_admin_token)):
     """
     一键卸载 HumanThinking 插件 - 适配多环境（Docker/Windows/macOS/Linux）
     
@@ -1457,7 +1445,6 @@ async def export_memories_to_md(memory_dir: Path, export_file: Path, workspace_n
             finally:
                 if conn:
                     conn.close()
-        
         md_lines = [
             f"# HumanThinking 记忆备份",
             f"",

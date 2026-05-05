@@ -15,53 +15,14 @@ HumanThinking 睡眠管理器 - 事件驱动模式
 import logging
 import time
 import os
+import asyncio
 from pathlib import Path
-from typing import Dict, Optional, List, TYPE_CHECKING
+from typing import Dict, Optional, List
 from dataclasses import dataclass, field
-
-
-def _resolve_qwenpaw_dir():
-    env_dir = os.environ.get('QWENPAW_WORKING_DIR', '')
-    if env_dir:
-        resolved = Path(env_dir).expanduser().resolve()
-        logger.debug(f"[qwenpaw_dir] using env QWENPAW_WORKING_DIR: {resolved}")
-        return resolved
-    try:
-        from qwenpaw.constant import WORKING_DIR
-        logger.debug(f"[qwenpaw_dir] using qwenpaw.constant.WORKING_DIR: {WORKING_DIR}")
-        return WORKING_DIR
-    except (ImportError, AttributeError):
-        pass
-    legacy = Path("~/.copaw").expanduser()
-    if legacy.exists():
-        resolved = legacy.resolve()
-        logger.debug(f"[qwenpaw_dir] using legacy ~/.copaw: {resolved}")
-        return resolved
-    fallback = Path("~/.qwenpaw").expanduser().resolve()
-    logger.info(f"[qwenpaw_dir] using fallback ~/.qwenpaw: {fallback}")
-    return fallback
-
-
-def _resolve_agent_workspace_dir(agent_id: str) -> Path:
-    try:
-        from qwenpaw.config.utils import load_config
-        config = load_config()
-        if agent_id in config.agents.profiles:
-            ws_dir = config.agents.profiles[agent_id].workspace_dir
-            resolved = Path(ws_dir).expanduser().resolve()
-            logger.debug(f"[workspace_resolve] agent={agent_id} -> custom workspace: {resolved}")
-            return resolved
-        else:
-            logger.warning(f"[workspace_resolve] agent={agent_id} not found in profiles, keys={list(config.agents.profiles.keys())}")
-    except ImportError as e:
-        logger.warning(f"[workspace_resolve] cannot import load_config: {e}")
-    except Exception as e:
-        logger.warning(f"[workspace_resolve] failed for agent={agent_id}: {e}", exc_info=True)
-    fallback = _resolve_qwenpaw_dir() / "workspaces" / agent_id
-    logger.info(f"[workspace_resolve] agent={agent_id} -> fallback: {fallback}")
-    return fallback
 from datetime import datetime, timedelta
 import re
+
+from ..utils.paths import resolve_qwenpaw_dir as _resolve_qwenpaw_dir, resolve_agent_workspace_dir as _resolve_agent_workspace_dir, validate_agent_id, safe_path_join, get_db_path as _get_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -73,98 +34,17 @@ except ImportError:
     HumanThinkingDB = None
 
 
-# ========== 安全工具函数 ==========
-
-_AGENT_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_.-]+$')
-_MAX_AGENT_ID_LENGTH = 128
-
-
-def _get_db_path(agent_id: str) -> str:
-    """根据agent_id获取数据库文件路径
-    
-    Args:
-        agent_id: Agent ID
-        
-    Returns:
-        数据库文件路径字符串
-    """
-    base_dir = _resolve_agent_workspace_dir(agent_id)
-    db_path = base_dir / "memory" / f"human_thinking_memory_{agent_id}.db"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    return str(db_path)
-
-
 def _get_db(agent_id: str):
-    """创建并初始化数据库连接
-    
-    Args:
-        agent_id: Agent ID
-        
-    Returns:
-        初始化后的HumanThinkingDB实例
-    """
     if HumanThinkingDB is None:
         from .database import HumanThinkingDB as DBClass
     else:
         DBClass = HumanThinkingDB
     
-    db_path = _get_db_path(agent_id)
+    db_path = str(_get_db_path(agent_id))
+    db_path_obj = Path(db_path)
+    db_path_obj.parent.mkdir(parents=True, exist_ok=True)
     db = DBClass(db_path)
-    return db
-
-def validate_agent_id(agent_id: Optional[str]) -> Optional[str]:
-    """验证 agent_id 格式，防止路径遍历攻击
-    
-    Args:
-        agent_id: Agent ID
-        
-    Returns:
-        验证通过的 agent_id，或 None
-        
-    Raises:
-        ValueError: 如果 agent_id 格式无效
-    """
-    if not agent_id:
-        return None
-    
-    # 检查长度
-    if len(agent_id) > _MAX_AGENT_ID_LENGTH:
-        raise ValueError(f"agent_id too long: {len(agent_id)} > {_MAX_AGENT_ID_LENGTH}")
-    
-    # 检查格式：只允许字母、数字、下划线、连字符
-    if not _AGENT_ID_PATTERN.match(agent_id):
-        raise ValueError(f"Invalid agent_id format: {agent_id}")
-    
-    # 检查路径遍历特征
-    if '..' in agent_id or '/' in agent_id or '\\' in agent_id:
-        raise ValueError(f"agent_id contains path traversal characters: {agent_id}")
-    
-    return agent_id
-
-
-def safe_path_join(base: Path, *parts: str) -> Path:
-    """安全地拼接路径，防止路径遍历
-    
-    Args:
-        base: 基础路径
-        *parts: 路径组件
-        
-    Returns:
-        解析后的安全路径
-        
-    Raises:
-        ValueError: 如果结果路径超出基础路径范围
-    """
-    result = base.joinpath(*parts).resolve()
-    base_resolved = base.resolve()
-    
-    # 确保结果路径在基础路径范围内
-    try:
-        result.relative_to(base_resolved)
-    except ValueError:
-        raise ValueError(f"Path traversal detected: {result} is outside {base_resolved}")
-    
-    return result
+    return db, db_path
 
 
 class SleepConfig:
@@ -237,7 +117,7 @@ class AgentSleepState:
         self.is_light_sleep = False
         self.is_rem = False
         self.is_deep_sleep = False
-        self.last_active_time = time.time()
+        self.last_active_time = 0.0
         self.last_light_sleep_time: Optional[float] = None
         self.last_rem_time: Optional[float] = None
         self.last_deep_sleep_time: Optional[float] = None
@@ -253,9 +133,28 @@ class AgentSleepState:
         self._deep_sleep_executed = False
         
         self.forced_state: Optional[str] = None
+        self.actual_status: str = "active"
 
     def to_dict(self) -> dict:
         """将睡眠状态转换为字典"""
+        if self.forced_state:
+            status_map = {
+                "light_sleep": ("light_sleep", "浅睡（强制）", "🌛", "#faad14"),
+                "rem": ("rem", "REM睡眠（强制）", "🌙", "#1890ff"),
+                "deep_sleep": ("deep_sleep", "深度睡眠（强制）", "🌑", "#722ed1"),
+            }
+            if self.forced_state in status_map:
+                status, status_text, icon, color = status_map[self.forced_state]
+                return {
+                    "agent_id": self.agent_id,
+                    "status": status,
+                    "status_text": status_text,
+                    "icon": icon,
+                    "color": color,
+                    "last_active_time": self.last_active_time,
+                    "forced": True,
+                }
+        
         if self.is_deep_sleep:
             status = "deep_sleep"
             status_text = "深度睡眠"
@@ -290,26 +189,61 @@ class AgentSleepState:
 class SleepManager:
     """睡眠管理器 - 基于数据库查询的惰性计算模式
     
-    支持Agent隔离：每个Agent独立维护自己的睡眠状态
+    支持Agent隔离：每个Agent独立维护自己的睡眠状态和配置
     触发机制：
     1. 查询时触发：每次查询睡眠状态时，从数据库获取最后活动时间，实时计算
     2. 状态转换时执行对应的睡眠任务（每个阶段只执行一次）
     """
     
     def __init__(self, config: SleepConfig = None):
-        self.config = config or SleepConfig()
+        self._default_config = config or SleepConfig()
+        self._agent_configs: Dict[str, SleepConfig] = {}
         self._agent_states: Dict[str, AgentSleepState] = {}
+        self._db_cache: Dict[str, Any] = {}
         
-        logger.info(f"SleepManager initialized: {self.config.__dict__}")
+        logger.info(f"SleepManager initialized: {self._default_config.__dict__}")
     
-    def update_config(self, config: SleepConfig):
-        """更新配置"""
-        self.config = config
-        logger.info(f"SleepManager config updated: {config.__dict__}")
+    def _get_agent_config(self, agent_id: str) -> SleepConfig:
+        """获取Agent的配置（支持Agent隔离）"""
+        if agent_id in self._agent_configs:
+            return self._agent_configs[agent_id]
+        # 尝试从Agent专属文件加载
+        try:
+            config = _load_config_from_file(agent_id)
+            if config is not None:
+                self._agent_configs[agent_id] = config
+                return config
+        except Exception as e:
+            logger.warning(f"Failed to load config for agent {agent_id}: {e}")
+        # 尝试从全局文件加载
+        try:
+            config = _load_global_config_from_file()
+            if config is not None:
+                return config
+        except Exception as e:
+            logger.warning(f"Failed to load global config: {e}")
+        return self._default_config
+    
+    def update_config(self, config: SleepConfig, agent_id: str = None):
+        """更新配置
+        
+        Args:
+            config: 新的睡眠配置
+            agent_id: Agent ID（可选，如果提供则只更新该agent的配置）
+        """
+        if agent_id:
+            self._agent_configs[agent_id] = config
+            _save_config_to_file(agent_id, config)
+            logger.info(f"SleepManager config updated for agent {agent_id}: {config.__dict__}")
+        else:
+            self._default_config = config
+            _save_global_config_to_file(config)
+            logger.info(f"SleepManager default config updated: {config.__dict__}")
     
     async def get_sleep_status(self, agent_id: str) -> dict:
         """获取Agent的睡眠状态（基于数据库查询的惰性计算）"""
-        if not self.config.enable_agent_sleep:
+        config = self._get_agent_config(agent_id)
+        if not config.enable_agent_sleep:
             return {
                 "agent_id": agent_id,
                 "status": "active",
@@ -328,51 +262,80 @@ class SleepManager:
         
         if state.forced_state:
             result = state.to_dict()
-            result["idle_time"] = int(current_time - state.last_active_time)
-            result["next_sleep_in"] = -1
+            result["idle_time"] = int(current_time - max(state.last_active_time, 0))
+            if state.last_light_sleep_time:
+                result["light_sleep_elapsed"] = int(current_time - state.last_light_sleep_time)
+            if state.last_rem_time:
+                result["rem_elapsed"] = int(current_time - state.last_rem_time)
+            if state.last_deep_sleep_time:
+                result["deep_sleep_elapsed"] = int(current_time - state.last_deep_sleep_time)
+            result["actual_status"] = state.actual_status
+            idle_time = max(0, current_time - state.last_active_time)
+            if state.actual_status == "active":
+                result["next_sleep_in"] = max(0, config.light_sleep_seconds - idle_time)
+            elif state.actual_status == "light_sleep":
+                elapsed_in_stage = current_time - (state.last_light_sleep_time or state.last_active_time)
+                result["next_sleep_in"] = max(0, config.rem_seconds - config.light_sleep_seconds - elapsed_in_stage)
+            elif state.actual_status == "rem":
+                elapsed_in_stage = current_time - (state.last_rem_time or state.last_active_time)
+                result["next_sleep_in"] = max(0, config.deep_sleep_seconds - config.rem_seconds - elapsed_in_stage)
+            else:
+                result["next_sleep_in"] = -1
             return result
         
         last_activity_time = await self._get_last_activity_time(agent_id)
         if last_activity_time and last_activity_time > state.last_active_time:
             state.last_active_time = last_activity_time
+        elif state.last_active_time <= 0:
+            state.last_active_time = current_time
         
-        idle_time = current_time - state.last_active_time
+        idle_time = max(0, current_time - state.last_active_time)
         
         await self._update_sleep_state(agent_id, state, idle_time, current_time)
         
         result = state.to_dict()
         result["idle_time"] = int(idle_time)
         
+        if state.last_light_sleep_time:
+            result["light_sleep_elapsed"] = int(current_time - state.last_light_sleep_time)
+        if state.last_rem_time:
+            result["rem_elapsed"] = int(current_time - state.last_rem_time)
+        if state.last_deep_sleep_time:
+            result["deep_sleep_elapsed"] = int(current_time - state.last_deep_sleep_time)
         if state.is_active:
-            result["next_sleep_in"] = max(0, self.config.light_sleep_seconds - idle_time)
+            result["next_sleep_in"] = max(0, config.light_sleep_seconds - idle_time)
         elif state.is_light_sleep:
             elapsed_in_stage = current_time - (state.last_light_sleep_time or state.last_active_time)
-            result["next_sleep_in"] = max(0, self.config.rem_seconds - self.config.light_sleep_seconds - elapsed_in_stage)
+            result["next_sleep_in"] = max(0, config.rem_seconds - config.light_sleep_seconds - elapsed_in_stage)
         elif state.is_rem:
             elapsed_in_stage = current_time - (state.last_rem_time or state.last_active_time)
-            result["next_sleep_in"] = max(0, self.config.deep_sleep_seconds - self.config.rem_seconds - elapsed_in_stage)
+            result["next_sleep_in"] = max(0, config.deep_sleep_seconds - config.rem_seconds - elapsed_in_stage)
         else:
             result["next_sleep_in"] = -1
         
         return result
     
-    async def _get_last_activity_time(self, agent_id: str) -> Optional[float]:
-        """从数据库获取Agent的最后活动时间
+    async def _get_or_create_db(self, agent_id: str):
+        """获取或创建缓存的数据库连接"""
+        db_path_str = str(_get_db_path(agent_id))
+        if db_path_str in self._db_cache:
+            return self._db_cache[db_path_str]
         
-        Returns:
-            最后活动时间戳，如果没有记录则返回None
-        """
-        db = None
+        if HumanThinkingDB is None:
+            from .database import HumanThinkingDB as DBClass
+        else:
+            DBClass = HumanThinkingDB
+        
+        db = DBClass(db_path_str)
+        await db.initialize()
+        self._db_cache[db_path_str] = db
+        return db
+    
+    async def _get_last_activity_time(self, agent_id: str) -> Optional[float]:
+        """从数据库获取Agent的最后活动时间"""
         try:
-            if HumanThinkingDB is None:
-                from .database import HumanThinkingDB as DBClass
-            else:
-                DBClass = HumanThinkingDB
-            
-            db = DBClass(_get_db_path(agent_id))
-            await db.initialize()
-            
-            recent = await db.get_recent_memories(agent_id, days=365)
+            db = await self._get_or_create_db(agent_id)
+            recent = await db.get_recent_memories(agent_id, days=7, limit=1)
             if recent and len(recent) > 0:
                 ts = recent[0].get("created_at") or recent[0].get("timestamp")
                 if ts:
@@ -383,12 +346,6 @@ class SleepManager:
         except Exception as e:
             logger.warning(f"Failed to get last activity time for {agent_id}: {e}")
             return None
-        finally:
-            if db:
-                try:
-                    await db.close()
-                except Exception:
-                    pass
     
     async def _update_sleep_state(self, agent_id: str, state: AgentSleepState, idle_time: float, current_time: float):
         """根据空闲时间更新睡眠状态并执行对应任务
@@ -399,47 +356,51 @@ class SleepManager:
             idle_time: 空闲时间（秒）
             current_time: 当前时间戳
         """
-        if not self.config.enable_agent_sleep:
+        config = self._get_agent_config(agent_id)
+        if not config.enable_agent_sleep:
             return
         
-        # 状态转换逻辑 - 按顺序执行，不跳过中间阶段
-        if idle_time >= self.config.light_sleep_seconds and state.is_active:
-            logger.info(f"Agent {agent_id} entering light sleep (idle {idle_time:.0f}s)")
-            await self._enter_light_sleep(state, current_time)
-        
-        if idle_time >= self.config.rem_seconds and state.is_light_sleep and not state.is_rem and not state.is_deep_sleep:
-            logger.info(f"Agent {agent_id} entering REM (idle {idle_time:.0f}s)")
-            await self._enter_rem(state, current_time)
-        
-        if idle_time >= self.config.deep_sleep_seconds and state.is_rem and not state.is_deep_sleep:
-            logger.info(f"Agent {agent_id} entering deep sleep (idle {idle_time:.0f}s)")
-            await self._enter_deep_sleep(state, current_time)
-        
-        # 如果空闲时间超过深睡阈值但跳过了中间阶段，按顺序补执行
-        if idle_time >= self.config.deep_sleep_seconds and not state.is_deep_sleep:
-            if state.is_active:
-                logger.info(f"Agent {agent_id} fast-forwarding: active -> light sleep (idle {idle_time:.0f}s)")
+        try:
+            # 状态转换逻辑 - 按顺序执行，不跳过中间阶段
+            if idle_time >= config.light_sleep_seconds and state.is_active:
+                logger.info(f"Agent {agent_id} entering light sleep (idle {idle_time:.0f}s)")
                 await self._enter_light_sleep(state, current_time)
-            if state.is_light_sleep and not state.is_rem:
-                logger.info(f"Agent {agent_id} fast-forwarding: light sleep -> REM (idle {idle_time:.0f}s)")
+            
+            if idle_time >= config.rem_seconds and state.is_light_sleep and not state.is_rem and not state.is_deep_sleep:
+                logger.info(f"Agent {agent_id} entering REM (idle {idle_time:.0f}s)")
                 await self._enter_rem(state, current_time)
-            if state.is_rem and not state.is_deep_sleep:
-                logger.info(f"Agent {agent_id} fast-forwarding: REM -> deep sleep (idle {idle_time:.0f}s)")
+            
+            if idle_time >= config.deep_sleep_seconds and state.is_rem and not state.is_deep_sleep:
+                logger.info(f"Agent {agent_id} entering deep sleep (idle {idle_time:.0f}s)")
                 await self._enter_deep_sleep(state, current_time)
-        
-        # 如果空闲时间超过REM但未到深睡，且跳过了浅睡
-        if idle_time >= self.config.rem_seconds and not state.is_rem and not state.is_deep_sleep:
-            if state.is_active:
-                logger.info(f"Agent {agent_id} fast-forwarding: active -> light sleep (idle {idle_time:.0f}s)")
-                await self._enter_light_sleep(state, current_time)
-            if state.is_light_sleep and not state.is_rem:
-                logger.info(f"Agent {agent_id} fast-forwarding: light sleep -> REM (idle {idle_time:.0f}s)")
-                await self._enter_rem(state, current_time)
-        
-        # 如果空闲时间低于浅睡阈值，恢复活跃状态
-        if idle_time < self.config.light_sleep_seconds and not state.is_active:
-            logger.info(f"Agent {agent_id} waking up to active")
-            self._reset_to_active(state)
+            
+            # 如果空闲时间超过深睡阈值但跳过了中间阶段，按顺序补执行
+            if idle_time >= config.deep_sleep_seconds and not state.is_deep_sleep:
+                if state.is_active:
+                    logger.info(f"Agent {agent_id} fast-forwarding: active -> light sleep (idle {idle_time:.0f}s)")
+                    await self._enter_light_sleep(state, current_time)
+                if state.is_light_sleep and not state.is_rem:
+                    logger.info(f"Agent {agent_id} fast-forwarding: light sleep -> REM (idle {idle_time:.0f}s)")
+                    await self._enter_rem(state, current_time)
+                if state.is_rem and not state.is_deep_sleep:
+                    logger.info(f"Agent {agent_id} fast-forwarding: REM -> deep sleep (idle {idle_time:.0f}s)")
+                    await self._enter_deep_sleep(state, current_time)
+            
+            # 如果空闲时间超过REM但未到深睡，且跳过了浅睡
+            if idle_time >= config.rem_seconds and not state.is_rem and not state.is_deep_sleep:
+                if state.is_active:
+                    logger.info(f"Agent {agent_id} fast-forwarding: active -> light sleep (idle {idle_time:.0f}s)")
+                    await self._enter_light_sleep(state, current_time)
+                if state.is_light_sleep and not state.is_rem:
+                    logger.info(f"Agent {agent_id} fast-forwarding: light sleep -> REM (idle {idle_time:.0f}s)")
+                    await self._enter_rem(state, current_time)
+            
+            # 如果空闲时间低于浅睡阈值，恢复活跃状态
+            if idle_time < config.light_sleep_seconds and not state.is_active:
+                logger.info(f"Agent {agent_id} waking up to active")
+                self._reset_to_active(state)
+        except Exception as e:
+            logger.error(f"Error in _update_sleep_state for {agent_id}: {e}", exc_info=True)
     
     async def _enter_light_sleep(self, state: AgentSleepState, current_time: float):
         """进入浅层睡眠"""
@@ -449,10 +410,12 @@ class SleepManager:
         state.is_deep_sleep = False
         state.last_light_sleep_time = current_time
         
-        # 执行浅睡任务（只执行一次）
         if not state._light_sleep_executed:
             state._light_sleep_executed = True
-            await self._execute_light_sleep(state.agent_id, state)
+            try:
+                await self._execute_light_sleep(state.agent_id, state)
+            except Exception as e:
+                logger.error(f"Light sleep task failed: {e}", exc_info=True)
     
     async def _enter_rem(self, state: AgentSleepState, current_time: float):
         """进入REM阶段"""
@@ -462,10 +425,12 @@ class SleepManager:
         state.is_deep_sleep = False
         state.last_rem_time = current_time
         
-        # 执行REM任务（只执行一次）
         if not state._rem_executed:
             state._rem_executed = True
-            await self._execute_rem(state.agent_id, state)
+            try:
+                await self._execute_rem(state.agent_id, state)
+            except Exception as e:
+                logger.error(f"REM task failed: {e}", exc_info=True)
     
     async def _enter_deep_sleep(self, state: AgentSleepState, current_time: float):
         """进入深层睡眠"""
@@ -475,10 +440,12 @@ class SleepManager:
         state.is_deep_sleep = True
         state.last_deep_sleep_time = current_time
         
-        # 执行深睡任务（只执行一次）
         if not state._deep_sleep_executed:
             state._deep_sleep_executed = True
-            await self._execute_deep_sleep(state.agent_id, state)
+            try:
+                await self._execute_deep_sleep(state.agent_id, state)
+            except Exception as e:
+                logger.error(f"Deep sleep task failed: {e}", exc_info=True)
     
     def _reset_to_active(self, state: AgentSleepState):
         """重置为活跃状态"""
@@ -494,36 +461,72 @@ class SleepManager:
         state._deep_sleep_executed = False
     
     async def force_light_sleep(self, agent_id: str) -> dict:
-        """强制进入浅睡"""
+        """强制进入浅睡（跳过睡眠执行任务，仅设置状态）"""
         if agent_id not in self._agent_states:
             self._agent_states[agent_id] = AgentSleepState(agent_id)
         state = self._agent_states[agent_id]
-        self._reset_to_active(state)
-        await self._enter_light_sleep(state, time.time())
+        if not state.forced_state:
+            if state.is_deep_sleep:
+                state.actual_status = "deep_sleep"
+            elif state.is_rem:
+                state.actual_status = "rem"
+            elif state.is_light_sleep:
+                state.actual_status = "light_sleep"
+            else:
+                state.actual_status = "active"
+        state.is_active = False
+        state.is_light_sleep = True
+        state.is_rem = False
+        state.is_deep_sleep = False
         state.forced_state = "light_sleep"
+        state._light_sleep_executed = True
         return {"success": True, "agent_id": agent_id, "status": "light_sleep"}
     
     async def force_rem(self, agent_id: str) -> dict:
-        """强制进入REM"""
+        """强制进入REM（跳过睡眠执行任务，仅设置状态）"""
         if agent_id not in self._agent_states:
             self._agent_states[agent_id] = AgentSleepState(agent_id)
         state = self._agent_states[agent_id]
-        self._reset_to_active(state)
-        await self._enter_light_sleep(state, time.time())
-        await self._enter_rem(state, time.time())
+        if not state.forced_state:
+            if state.is_deep_sleep:
+                state.actual_status = "deep_sleep"
+            elif state.is_rem:
+                state.actual_status = "rem"
+            elif state.is_light_sleep:
+                state.actual_status = "light_sleep"
+            else:
+                state.actual_status = "active"
+        state.is_active = False
+        state.is_light_sleep = False
+        state.is_rem = True
+        state.is_deep_sleep = False
         state.forced_state = "rem"
+        state._light_sleep_executed = True
+        state._rem_executed = True
         return {"success": True, "agent_id": agent_id, "status": "rem"}
     
     async def force_deep_sleep(self, agent_id: str) -> dict:
-        """强制进入深睡"""
+        """强制进入深睡（跳过睡眠执行任务，仅设置状态）"""
         if agent_id not in self._agent_states:
             self._agent_states[agent_id] = AgentSleepState(agent_id)
         state = self._agent_states[agent_id]
-        self._reset_to_active(state)
-        await self._enter_light_sleep(state, time.time())
-        await self._enter_rem(state, time.time())
-        await self._enter_deep_sleep(state, time.time())
+        if not state.forced_state:
+            if state.is_deep_sleep:
+                state.actual_status = "deep_sleep"
+            elif state.is_rem:
+                state.actual_status = "rem"
+            elif state.is_light_sleep:
+                state.actual_status = "light_sleep"
+            else:
+                state.actual_status = "active"
+        state.is_active = False
+        state.is_light_sleep = False
+        state.is_rem = False
+        state.is_deep_sleep = True
         state.forced_state = "deep_sleep"
+        state._light_sleep_executed = True
+        state._rem_executed = True
+        state._deep_sleep_executed = True
         return {"success": True, "agent_id": agent_id, "status": "deep_sleep"}
     
     async def wakeup(self, agent_id: str) -> dict:
@@ -531,9 +534,12 @@ class SleepManager:
         if agent_id not in self._agent_states:
             self._agent_states[agent_id] = AgentSleepState(agent_id)
         state = self._agent_states[agent_id]
+        if state.is_active and not state.forced_state:
+            return {"success": True, "agent_id": agent_id, "status": "active"}
         self._reset_to_active(state)
         state.forced_state = None
-        state.last_active_time = time.time()
+        state.actual_status = "active"
+        logger.info(f"Agent {agent_id} manually woken up, last_active_time={state.last_active_time}")
         return {"success": True, "agent_id": agent_id, "status": "active"}
     
     async def record_activity(self, agent_id: str) -> bool:
@@ -546,7 +552,8 @@ class SleepManager:
         Returns:
             True 表示Agent被唤醒
         """
-        if not self.config.enable_agent_sleep:
+        config = self._get_agent_config(agent_id)
+        if not config.enable_agent_sleep:
             return False
         
         if agent_id not in self._agent_states:
@@ -579,21 +586,16 @@ class SleepManager:
         仅暂存，不写入长期记忆
         """
         try:
-            if HumanThinkingDB is None:
-                from .database import HumanThinkingDB as DBClass
-            else:
-                DBClass = HumanThinkingDB
+            db = await self._get_or_create_db(agent_id)
             
-            db = DBClass(_get_db_path(agent_id))
-            await db.initialize()
-            
-            if self.config.enable_dream_log:
+            config = self._get_agent_config(agent_id)
+            if config.enable_dream_log:
                 await db.add_dream_log(agent_id, "LIGHT_SLEEP", "阶段一：浅层睡眠 - 扫描7天日志，去重过滤")
             
             memories = await db.get_recent_memories(agent_id, days=7)
             
             if not memories:
-                logger.info(f"No memories to process in light sleep")
+                logger.info(f"No memories to process in light sleep for {agent_id}")
                 return
             
             # 去重和过滤
@@ -619,15 +621,10 @@ class SleepManager:
         生成反思摘要，识别持久真理
         """
         try:
-            if HumanThinkingDB is None:
-                from .database import HumanThinkingDB as DBClass
-            else:
-                DBClass = HumanThinkingDB
+            db = await self._get_or_create_db(agent_id)
             
-            db = DBClass(_get_db_path(agent_id))
-            await db.initialize()
-            
-            if self.config.enable_dream_log:
+            config = self._get_agent_config(agent_id)
+            if config.enable_dream_log:
                 await db.add_dream_log(agent_id, "REM", "阶段二：REM - 提取主题，发现跨对话模式")
             
             # 提取主题
@@ -638,7 +635,7 @@ class SleepManager:
             state.lasting_truths = truths
             
             # 生成反思摘要
-            if self.config.enable_insight:
+            if config.enable_insight:
                 summary = self._generate_reflection_summary(themes, truths)
                 state.theme_summary = summary
                 
@@ -664,15 +661,10 @@ class SleepManager:
         执行遗忘曲线算法
         """
         try:
-            if HumanThinkingDB is None:
-                from .database import HumanThinkingDB as DBClass
-            else:
-                DBClass = HumanThinkingDB
+            db = await self._get_or_create_db(agent_id)
             
-            db = DBClass(_get_db_path(agent_id))
-            await db.initialize()
-            
-            if self.config.enable_dream_log:
+            config = self._get_agent_config(agent_id)
+            if config.enable_dream_log:
                 await db.add_dream_log(agent_id, "DEEP_SLEEP", "阶段三：深层睡眠 - 六维评分，写入长期记忆")
             
             # 六维评分
@@ -694,9 +686,11 @@ class SleepManager:
                     await db.set_memory_tier(mem_id, "long_term")
             
             
+            await self._apply_memory_temperature(db, agent_id, scored_memories)
+            
             await self._archive_and_freeze(db, agent_id)
             
-            if self.config.auto_consolidate:
+            if config.auto_consolidate:
                 await self._consolidate_memories(db, agent_id)
             
             logger.info(f"Deep sleep processed {len(scored_memories)} memories, wrote {len(top_memories)} to long-term")
@@ -794,43 +788,77 @@ class SleepManager:
         
         return relevance + frequency + timeliness + diversity + integration + richness
     
-    async def _apply_forgetting_curve(self, db, agent_id: str):
-        """应用遗忘曲线算法"""
-        try:
-            await db.apply_forgetting_curve(
-                agent_id,
-                frozen_days=self.config.frozen_days,
-                archive_days=self.config.archive_days,
-                delete_days=self.config.delete_days
-            )
-        except Exception as e:
-            logger.error(f"Error applying forgetting curve: {e}", exc_info=True)
-    
     async def _archive_and_freeze(self, db, agent_id: str):
         """归档和冻结记忆"""
         try:
+            config = self._get_agent_config(agent_id)
             await db.apply_forgetting_curve(
                 agent_id,
-                frozen_days=self.config.frozen_days,
-                archive_days=self.config.archive_days,
-                delete_days=self.config.delete_days
+                frozen_days=config.frozen_days,
+                archive_days=config.archive_days,
+                delete_days=config.delete_days
             )
         except Exception as e:
             logger.error(f"Error archiving and freezing: {e}", exc_info=True)
     
+    async def _apply_memory_temperature(self, db, agent_id: str, scored_memories: list):
+        """应用记忆温度系统：根据访问频率、重要性、时间衰减计算温度并更新状态
+        
+        对冷却/冻结记忆写入相应的 tier 和 decay_score。
+        与 _archive_and_freeze 互补：温度系统处理活跃/冷却记忆的衰减，
+        _archive_and_freeze 处理基于时间的硬性冻结。
+        """
+        try:
+            from qwenpaw.agents.tools.HumanThinking.core.memory_temperature import MemoryTemperature
+            
+            memories_for_temp = [m for m in scored_memories if m.get("id")]
+            if not memories_for_temp:
+                logger.debug(f"No memories to calculate temperature for {agent_id}")
+                return
+            
+            temp_results = MemoryTemperature.calculate_batch(memories_for_temp)
+            
+            frozen_count = 0
+            cooled_count = 0
+            
+            for temp_result in temp_results:
+                mem_id = temp_result.get("id")
+                if not mem_id:
+                    continue
+                
+                level = temp_result.get("temperature_level", "warm")
+                temp_score = temp_result.get("temperature", 0.5)
+                
+                if level == "frozen":
+                    await db.set_memory_tier(mem_id, "frozen")
+                    await db.update_memory_score(mem_id, temp_score)
+                    frozen_count += 1
+                elif level == "cool":
+                    await db.set_memory_tier(mem_id, "cool")
+                    cooled_count += 1
+            
+            
+            logger.info(f"Temperature applied for {agent_id}: {frozen_count} frozen, {cooled_count} cooled out of {len(temp_results)} scored")
+            
+        except ImportError:
+            logger.debug(f"memory_temperature module not available for {agent_id}")
+        except Exception as e:
+            logger.error(f"Error applying memory temperature for {agent_id}: {e}", exc_info=True)
+    
     async def _consolidate_memories(self, db, agent_id: str):
         """整合记忆"""
         try:
-            if not self.config.auto_consolidate:
+            config = self._get_agent_config(agent_id)
+            if not config.auto_consolidate:
                 return
             
             memories = await db.get_memories_for_consolidation(
-                agent_id, days=self.config.consolidate_days
+                agent_id, days=config.consolidate_days
             )
             if not memories:
                 return
             
-            if self.config.enable_contradiction_detection:
+            if config.enable_contradiction_detection:
                 from .contradiction_detector import batch_detect_contradictions, ConflictResolutionStrategy
                 
                 strategy_map = {
@@ -841,30 +869,30 @@ class SleepManager:
                     "mark_for_review": ConflictResolutionStrategy.MARK_FOR_REVIEW,
                 }
                 resolution_strategy = strategy_map.get(
-                    self.config.contradiction_resolution_strategy,
+                    config.contradiction_resolution_strategy,
                     ConflictResolutionStrategy.KEEP_LATEST
                 )
                 
                 contradictions = batch_detect_contradictions(
                     memories,
-                    enable_semantic_check=self.config.enable_semantic_contradiction_check,
-                    enable_temporal_check=self.config.enable_temporal_contradiction_check,
-                    enable_confidence_scoring=self.config.enable_confidence_scoring,
-                    contradiction_threshold=self.config.contradiction_threshold,
-                    auto_resolve=self.config.auto_resolve_contradiction,
-                    min_confidence_for_auto=self.config.min_confidence_for_auto_resolve,
+                    enable_semantic_check=config.enable_semantic_contradiction_check,
+                    enable_temporal_check=config.enable_temporal_contradiction_check,
+                    enable_confidence_scoring=config.enable_confidence_scoring,
+                    contradiction_threshold=config.contradiction_threshold,
+                    auto_resolve=config.auto_resolve_contradiction,
+                    min_confidence_for_auto=config.min_confidence_for_auto_resolve,
                     resolution_strategy=resolution_strategy,
                 )
                 for i, j, result in contradictions:
                     if result.is_contradiction and result.suggested_loser:
                         loser_id = result.suggested_loser.get("id")
                         if loser_id:
-                            if self.config.auto_resolve_contradiction and result.confidence >= self.config.min_confidence_for_auto_resolve:
+                            if config.auto_resolve_contradiction and result.confidence >= config.min_confidence_for_auto_resolve:
                                 await db.archive_memory(loser_id)
                             else:
                                 logger.info(f"Contradiction detected but not auto-resolved (confidence={result.confidence:.2f}): {result.explanation}")
             
-            if self.config.enable_merge:
+            if config.enable_merge:
                 merged = await self._merge_similar_memories(db, agent_id, memories)
                 if merged:
                     logger.info(f"Merged {merged} similar memories for {agent_id}")
@@ -881,9 +909,10 @@ class SleepManager:
         if not memories or len(memories) < 2:
             return 0
         
+        config = self._get_agent_config(agent_id)
         merged_count = 0
-        threshold = self.config.merge_similarity_threshold
-        max_distance_hours = self.config.merge_max_distance_hours
+        threshold = config.merge_similarity_threshold
+        max_distance_hours = config.merge_max_distance_hours
         merged_ids = set()
         
         for i in range(len(memories)):
@@ -955,10 +984,19 @@ class SleepManager:
     def _write_memory_md(self, agent_id: str, state: AgentSleepState):
         """写入MEMORY.md"""
         try:
-            if not self.config.memory_md_path:
+            config = self._get_agent_config(agent_id)
+            if not config.memory_md_path:
                 return
             
-            md_path = Path(self.config.memory_md_path)
+            md_path = Path(config.memory_md_path).resolve()
+            
+            ws_root = _resolve_agent_workspace_dir(agent_id).resolve()
+            try:
+                md_path.relative_to(ws_root)
+            except ValueError:
+                logger.error(f"Memory md path {md_path} is outside workspace {ws_root}, rejected")
+                return
+            
             md_path.parent.mkdir(parents=True, exist_ok=True)
             
             with open(md_path, 'w', encoding='utf-8') as f:
@@ -1027,18 +1065,6 @@ def record_agent_activity(agent_id: str) -> None:
         _sleep_manager._reset_to_active(state)
 
 
-def pulse_agent(agent_id: str) -> None:
-    """Agent心跳（由消息处理流程调用）
-    
-    与record_agent_activity相同，保持兼容性。
-    当Agent参与消息交互时调用。
-    
-    Args:
-        agent_id: Agent ID
-    """
-    record_agent_activity(agent_id)
-
-
 def is_agent_sleeping(agent_id: str) -> bool:
     """检查Agent是否处于睡眠状态（惰性计算）
     
@@ -1055,7 +1081,11 @@ def is_agent_sleeping(agent_id: str) -> bool:
         True if Agent应该处于睡眠状态
     """
     global _sleep_manager
-    if _sleep_manager is None or not _sleep_manager.config.enable_agent_sleep:
+    if _sleep_manager is None:
+        return False
+    
+    config = _sleep_manager._get_agent_config(agent_id)
+    if not config.enable_agent_sleep:
         return False
     
     if agent_id not in _sleep_manager._agent_states:
@@ -1065,7 +1095,7 @@ def is_agent_sleeping(agent_id: str) -> bool:
     current_time = time.time()
     
     idle_time = current_time - state.last_active_time
-    return idle_time >= _sleep_manager.config.light_sleep_seconds
+    return idle_time >= config.light_sleep_seconds
 
 
 async def check_and_trigger_sleep(agent_id: str) -> dict:
@@ -1092,7 +1122,7 @@ async def check_and_trigger_sleep(agent_id: str) -> dict:
 def get_agent_sleep_config(agent_id: str = None) -> SleepConfig:
     """获取Agent的睡眠配置
     
-    如果有全局sleep_manager，返回其配置；否则返回默认配置
+    优先从文件加载，如果失败则返回全局sleep_manager配置或默认配置
     
     Args:
         agent_id: Agent ID（可选）
@@ -1100,16 +1130,26 @@ def get_agent_sleep_config(agent_id: str = None) -> SleepConfig:
     Returns:
         SleepConfig实例
     """
+    if agent_id:
+        try:
+            config = _load_config_from_file(agent_id)
+            if config is not None:
+                return config
+        except Exception as e:
+            logger.warning(f"Failed to load sleep config from file for {agent_id}: {e}")
+    
     global _sleep_manager
     if _sleep_manager is not None:
-        return _sleep_manager.config
+        if agent_id:
+            return _sleep_manager._get_agent_config(agent_id)
+        return _sleep_manager._default_config
     return SleepConfig()
 
 
 def save_agent_sleep_config(agent_id: str, config: SleepConfig) -> bool:
     """保存Agent的睡眠配置
     
-    更新全局sleep_manager的配置（如果存在）
+    更新全局sleep_manager的配置（如果存在），并保存到文件
     
     Args:
         agent_id: Agent ID
@@ -1121,9 +1161,11 @@ def save_agent_sleep_config(agent_id: str, config: SleepConfig) -> bool:
     global _sleep_manager
     try:
         if _sleep_manager is not None:
-            _sleep_manager.update_config(config)
-        # 同时保存到文件以便持久化
+            _sleep_manager.update_config(config, agent_id=agent_id)
+        # 保存到Agent专属文件
         _save_config_to_file(agent_id, config)
+        # 同时保存到全局配置文件
+        _save_global_config_to_file(config)
         return True
     except Exception as e:
         logger.error(f"Failed to save sleep config for {agent_id}: {e}")
@@ -1133,7 +1175,8 @@ def save_agent_sleep_config(agent_id: str, config: SleepConfig) -> bool:
 def load_agent_sleep_config(agent_id: str) -> SleepConfig:
     """加载Agent的睡眠配置
     
-    优先从文件加载，如果失败则返回全局配置或默认配置
+    优先从Agent文件加载，如果失败则从全局文件加载，
+    再失败则返回全局sleep_manager配置或默认配置
     
     Args:
         agent_id: Agent ID
@@ -1148,19 +1191,92 @@ def load_agent_sleep_config(agent_id: str) -> SleepConfig:
     except Exception as e:
         logger.warning(f"Failed to load sleep config from file for {agent_id}: {e}")
     
+    try:
+        config = _load_global_config_from_file()
+        if config is not None:
+            return config
+    except Exception as e:
+        logger.warning(f"Failed to load global sleep config from file: {e}")
+    
     global _sleep_manager
     if _sleep_manager is not None:
-        return _sleep_manager.config
+        return _sleep_manager._get_agent_config(agent_id)
     return SleepConfig()
-
-
-# Agent配置缓存（内存中）
-_agent_sleep_configs: Dict[str, SleepConfig] = {}
 
 
 def _get_config_path(agent_id: str) -> Path:
     """获取Agent配置文件路径"""
     return _resolve_agent_workspace_dir(agent_id) / "memory" / "sleep_config.json"
+
+
+def _get_global_config_path() -> Path:
+    """获取全局配置文件路径"""
+    return _resolve_qwenpaw_dir() / "config" / "sleep_config.json"
+
+
+def _save_global_config_to_file(config: SleepConfig) -> bool:
+    """保存全局配置到文件"""
+    try:
+        config_path = _get_global_config_path()
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        config_dict = {
+            "enable_agent_sleep": config.enable_agent_sleep,
+            "light_sleep_minutes": config.light_sleep_minutes,
+            "rem_minutes": config.rem_minutes,
+            "deep_sleep_minutes": config.deep_sleep_minutes,
+            "auto_consolidate": config.auto_consolidate,
+            "consolidate_days": config.consolidate_days,
+            "frozen_days": config.frozen_days,
+            "archive_days": config.archive_days,
+            "delete_days": config.delete_days,
+            "enable_insight": config.enable_insight,
+            "enable_dream_log": config.enable_dream_log,
+            "enable_merge": config.enable_merge,
+            "merge_similarity_threshold": config.merge_similarity_threshold,
+            "merge_max_distance_hours": config.merge_max_distance_hours,
+            "enable_contradiction_detection": config.enable_contradiction_detection,
+            "contradiction_threshold": config.contradiction_threshold,
+            "contradiction_resolution_strategy": config.contradiction_resolution_strategy,
+            "enable_semantic_contradiction_check": config.enable_semantic_contradiction_check,
+            "enable_temporal_contradiction_check": config.enable_temporal_contradiction_check,
+            "enable_confidence_scoring": config.enable_confidence_scoring,
+            "auto_resolve_contradiction": config.auto_resolve_contradiction,
+            "min_confidence_for_auto_resolve": config.min_confidence_for_auto_resolve,
+        }
+        
+        with open(config_path, 'w', encoding='utf-8') as f:
+            import json
+            json.dump(config_dict, f, ensure_ascii=False, indent=2)
+        
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save global config to file: {e}")
+        return False
+
+
+def _load_global_config_from_file() -> Optional[SleepConfig]:
+    """从文件加载全局配置"""
+    try:
+        config_path = _get_global_config_path()
+        if not config_path.exists():
+            return None
+        
+        with open(config_path, 'r', encoding='utf-8') as f:
+            import json
+            config_dict = json.load(f)
+        
+        import inspect
+        sig = inspect.signature(SleepConfig.__init__)
+        valid_keys = set(sig.parameters.keys()) - {'self'}
+        
+        config = SleepConfig(**{k: v for k, v in config_dict.items() 
+                                if k in valid_keys})
+        
+        return config
+    except Exception as e:
+        logger.warning(f"Failed to load global config from file: {e}")
+        return None
 
 
 def _save_config_to_file(agent_id: str, config: SleepConfig) -> bool:

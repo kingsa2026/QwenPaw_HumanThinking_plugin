@@ -15,6 +15,7 @@ from agentscope.message import Msg
 from agentscope.tool import ToolResponse
 from agentscope.memory import InMemoryMemory
 
+from ..utils.paths import resolve_qwenpaw_dir as _resolve_qwenpaw_dir, resolve_agent_workspace_dir as _resolve_agent_workspace_dir
 from .database import HumanThinkingDB
 from .cache_pool import AgentCachePool
 from .session_buffer import MemoryItem
@@ -47,52 +48,10 @@ class HumanThinkingConfig:
 # Agent 配置缓存，实现真正的配置隔离
 _agent_configs: Dict[str, HumanThinkingConfig] = {}
 _global_config = HumanThinkingConfig()
+_config_lock = asyncio.Lock()
 
 
-def _resolve_qwenpaw_dir() -> Path:
-    import os
-    env_dir = os.environ.get('QWENPAW_WORKING_DIR', '')
-    if env_dir:
-        resolved = Path(env_dir).expanduser().resolve()
-        logger.debug(f"[qwenpaw_dir] using env QWENPAW_WORKING_DIR: {resolved}")
-        return resolved
-    try:
-        from qwenpaw.constant import WORKING_DIR
-        logger.debug(f"[qwenpaw_dir] using qwenpaw.constant.WORKING_DIR: {WORKING_DIR}")
-        return WORKING_DIR
-    except (ImportError, AttributeError):
-        pass
-    legacy = Path("~/.copaw").expanduser()
-    if legacy.exists():
-        resolved = legacy.resolve()
-        logger.debug(f"[qwenpaw_dir] using legacy ~/.copaw: {resolved}")
-        return resolved
-    fallback = Path("~/.qwenpaw").expanduser().resolve()
-    logger.info(f"[qwenpaw_dir] using fallback ~/.qwenpaw: {fallback}")
-    return fallback
-
-
-def _resolve_agent_workspace_dir(agent_id: str) -> Path:
-    try:
-        from qwenpaw.config.utils import load_config
-        config = load_config()
-        if agent_id in config.agents.profiles:
-            ws_dir = config.agents.profiles[agent_id].workspace_dir
-            resolved = Path(ws_dir).expanduser().resolve()
-            logger.debug(f"[workspace_resolve] agent={agent_id} -> custom workspace: {resolved}")
-            return resolved
-        else:
-            logger.warning(f"[workspace_resolve] agent={agent_id} not found in profiles, keys={list(config.agents.profiles.keys())}")
-    except ImportError as e:
-        logger.warning(f"[workspace_resolve] cannot import load_config: {e}")
-    except Exception as e:
-        logger.warning(f"[workspace_resolve] failed for agent={agent_id}: {e}", exc_info=True)
-    fallback = _resolve_qwenpaw_dir() / "workspaces" / agent_id
-    logger.info(f"[workspace_resolve] agent={agent_id} -> fallback: {fallback}")
-    return fallback
-
-
-def get_config(agent_id: str = None, working_dir: str = None) -> HumanThinkingConfig:
+async def get_config(agent_id: str = None, working_dir: str = None) -> HumanThinkingConfig:
     """获取配置（支持按 Agent 隔离）
     
     每个 Agent 拥有独立的配置实例，修改一个 Agent 的配置不会影响其他 Agent。
@@ -109,46 +68,51 @@ def get_config(agent_id: str = None, working_dir: str = None) -> HumanThinkingCo
     # 确定配置标识符
     config_key = f"{agent_id or 'global'}:{working_dir or ''}"
     
-    # 如果已缓存，返回缓存的配置副本
+    # 双重检查锁定模式避免竞态条件
     if config_key in _agent_configs:
         return _agent_configs[config_key]
     
-    # 创建新的配置实例（基于全局默认值）
-    config = HumanThinkingConfig()
-    
-    # 从全局配置复制默认值
-    for key in vars(_global_config):
-        if hasattr(config, key):
-            setattr(config, key, getattr(_global_config, key))
-    
-    # 尝试从文件加载配置
-    try:
-        from pathlib import Path
-        import json
+    async with _config_lock:
+        # 再次检查（可能在等待锁期间其他协程已创建）
+        if config_key in _agent_configs:
+            return _agent_configs[config_key]
         
-        config_path = None
+        # 创建新的配置实例（基于全局默认值）
+        config = HumanThinkingConfig()
         
-        # 优先从 Agent 工作目录读取
-        if working_dir:
-            config_path = Path(working_dir) / "memory" / "human_thinking_config.json"
+        # 从全局配置复制默认值
+        for key in vars(_global_config):
+            if hasattr(config, key):
+                setattr(config, key, getattr(_global_config, key))
         
-        # 如果有 agent_id，尝试从全局配置目录读取
-        elif agent_id:
-            config_path = _resolve_agent_workspace_dir(agent_id) / "memory" / "human_thinking_config.json"
-        
-        if config_path and config_path.exists():
-            with open(config_path, "r", encoding="utf-8") as f:
-                user_config = json.load(f)
-            for key, value in user_config.items():
-                if hasattr(config, key):
-                    setattr(config, key, value)
-            logger.info(f"Loaded config for agent {agent_id} from {config_path}")
-        
-    except Exception as e:
-        logger.warning(f"Failed to load config for agent {agent_id}: {e}")
+        # 尝试从文件加载配置
+        try:
+            from pathlib import Path
+            import json
+            
+            config_path = None
+            
+            # 优先从 Agent 工作目录读取
+            if working_dir:
+                config_path = Path(working_dir) / "memory" / "human_thinking_config.json"
+            
+            # 如果有 agent_id，尝试从全局配置目录读取
+            elif agent_id:
+                config_path = _resolve_agent_workspace_dir(agent_id) / "memory" / "human_thinking_config.json"
+            
+            if config_path and config_path.exists():
+                with open(config_path, "r", encoding="utf-8") as f:
+                    user_config = json.load(f)
+                for key, value in user_config.items():
+                    if hasattr(config, key):
+                        setattr(config, key, value)
+                logger.info(f"Loaded config for agent {agent_id} from {config_path}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to load config for agent {agent_id}: {e}")
 
-    _agent_configs[config_key] = config
-    return config
+        _agent_configs[config_key] = config
+        return config
 
 
 def save_config(config: HumanThinkingConfig, agent_id: str = None, working_dir: str = None) -> bool:
@@ -185,8 +149,6 @@ def save_config(config: HumanThinkingConfig, agent_id: str = None, working_dir: 
         config_dict = {
             "enable_cross_session": getattr(config, 'enable_cross_session', True),
             "enable_emotion": getattr(config, 'enable_emotion', True),
-            "enable_session_isolation": True,
-            "enable_memory_freeze": True,
             "session_idle_timeout": getattr(config, 'session_idle_timeout', 180),
             "refresh_interval": getattr(config, 'refresh_interval', 5),
             "max_results": getattr(config, 'max_results', 5),
@@ -231,7 +193,7 @@ def update_config(config: HumanThinkingConfig, agent_id: str = None, working_dir
         _global_config = config
 
 
-def update_config_fields(fields: dict, agent_id: str = None, working_dir: str = None):
+async def update_config_fields(fields: dict, agent_id: str = None, working_dir: str = None):
     """安全更新指定 Agent 配置的指定字段
     
     Args:
@@ -245,7 +207,7 @@ def update_config_fields(fields: dict, agent_id: str = None, working_dir: str = 
         config_key = f"{agent_id or 'global'}:{working_dir or ''}"
         if config_key not in _agent_configs:
             # 如果缓存中不存在，先获取（会创建缓存）
-            get_config(agent_id=agent_id, working_dir=working_dir)
+            await get_config(agent_id=agent_id, working_dir=working_dir)
         
         for key, value in fields.items():
             if hasattr(_agent_configs[config_key], key):
@@ -323,7 +285,7 @@ class ContextLoadingInMemory(InMemoryMemory):
         if not query:
             return
         
-        config = get_config(manager.agent_id, manager.working_dir)
+        config = await get_config(manager.agent_id, manager.working_dir)
         
         if manager.cache_pool:
             cache_results = await manager.cache_pool.search(
@@ -337,7 +299,7 @@ class ContextLoadingInMemory(InMemoryMemory):
             )
             
             if cache_results:
-                self._build_long_term_memory(cache_results, manager.agent_id, manager)
+                await self._build_long_term_memory(cache_results, manager.agent_id, manager)
         elif manager.db:
             db_results = await manager.db.search_memories(
                 query=query,
@@ -350,12 +312,12 @@ class ContextLoadingInMemory(InMemoryMemory):
                 round_duration_seconds=self.ROUND_DURATION_SECONDS,
             )
             if db_results:
-                self._build_long_term_memory(db_results, manager.agent_id, manager)
+                await self._build_long_term_memory(db_results, manager.agent_id, manager)
     
-    def _build_long_term_memory(self, memories: list, agent_id: str = None, manager = None):
+    async def _build_long_term_memory(self, memories: list, agent_id: str = None, manager = None):
         """构建长期记忆字符串"""
         # 获取配置
-        config = get_config(agent_id, manager.working_dir if manager else None)
+        config = await get_config(agent_id, manager.working_dir if manager else None)
         frozen_days = config.frozen_days
         archive_days = config.archive_days
         delete_days = config.delete_days
@@ -658,7 +620,7 @@ class HumanThinkingMemoryManager(BaseMemoryManager):
         self._init_agent_config()
         
         # 获取配置
-        config = get_config(self.agent_id, self.working_dir)
+        config = await get_config(self.agent_id, self.working_dir)
         
         # 1. 初始化数据库（支持分布式）
         self.db = HumanThinkingDB(
@@ -680,9 +642,6 @@ class HumanThinkingMemoryManager(BaseMemoryManager):
             db=self.db,
             search_engine=None
         )
-        
-        # 获取配置
-        config = get_config(self.agent_id, self.working_dir)
         
         # 4. 初始化情感引擎（可选）
         if config.enable_emotion:
@@ -958,10 +917,8 @@ After reading, please save key points to your memory database using `store_memor
         
         # 记录 Agent 活动，唤醒睡眠中的 Agent
         try:
-            from .sleep_manager import record_agent_activity, pulse_agent, is_agent_sleeping
+            from .sleep_manager import record_agent_activity, is_agent_sleeping
             
-            # 心跳唤醒 + 记录活动
-            pulse_agent(self.agent_id)
             record_agent_activity(self.agent_id)
             
             # 检查是否在睡眠
@@ -995,7 +952,7 @@ After reading, please save key points to your memory database using `store_memor
         if not self.db:
             return ToolResponse(content="Database not initialized")
 
-        config = get_config(self.agent_id, self.working_dir)
+        config = await get_config(self.agent_id, self.working_dir)
         
         results = await self.db.search_memories(
             query=query,
@@ -1158,26 +1115,66 @@ After reading, please save key points to your memory database using `store_memor
         
         return result
     
-    async def summary_memory(
-        self,
-        messages: list[Msg],
-        **kwargs,
-    ) -> str:
-        """记忆摘要"""
+    async def summarize(self, messages: list[Msg], **kwargs) -> str:
+        """总结对话消息并持久化到记忆数据库
+        
+        QwenPaw 框架在每轮对话结束后通过 add_summarize_task() 异步调用此方法。
+        覆盖基类的空实现，将对话内容实际写入 HumanThinking 数据库。
+        
+        Args:
+            messages: 有序的对话消息列表
+            **kwargs: 扩展参数
+        
+        Returns:
+            记忆摘要字符串，供框架加载到上下文
+        """
         if not messages:
             return ""
         
         summary_parts = []
         total_length = 0
         
-        for msg in messages[:10]:
+        for msg in messages[-20:]:
             content = msg.content if hasattr(msg, "content") else str(msg)
-            if total_length + len(content) > 1000:
+            if not content or not isinstance(content, str):
+                continue
+            content = content.strip()
+            if not content:
+                continue
+            if total_length + len(content) > 2000:
                 break
             summary_parts.append(content)
             total_length += len(content)
         
-        return "\n".join(summary_parts)
+        summary_text = "\n".join(summary_parts) if summary_parts else ""
+        
+        try:
+            from .sleep_manager import record_agent_activity
+            record_agent_activity(self.agent_id)
+        except ImportError:
+            pass
+        
+        if summary_text:
+            try:
+                await self.store_memory(
+                    content=summary_text[:2000],
+                    memory_type="conversation",
+                    importance=4,
+                    metadata={"source": "summarize", "message_count": len(messages)}
+                )
+                logger.debug(f"summarize: stored {len(summary_text)} chars, {len(messages)} messages")
+            except Exception as e:
+                logger.warning(f"summarize: store_memory failed (session may not be set): {e}")
+        
+        return summary_text
+    
+    async def summary_memory(
+        self,
+        messages: list[Msg],
+        **kwargs,
+    ) -> str:
+        """记忆摘要（兼容旧接口，委托给 summarize）"""
+        return await self.summarize(messages, **kwargs)
     
     async def check_context(self, **kwargs) -> tuple:
         """

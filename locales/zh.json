@@ -1,7 +1,8 @@
 {
   "plugin": {
     "name": "Human Thinking",
-    "description": "记忆管理插件"
+    "description": "记忆管理插件",
+    "brandName": "HumanThinking"
   },
   "nav": {
     "memory": "记忆管理",
@@ -68,7 +69,9 @@
       "awake": "活跃",
       "light": "浅层睡眠",
       "rem": "REM睡眠",
-      "deep": "深层睡眠"
+      "deep": "深层睡眠",
+      "forced": "(强制)",
+      "manual": "手动接管"
     },
     "startSleep": "开始睡眠",
     "wakeUp": "唤醒",
@@ -78,6 +81,14 @@
     "sleepTime": "睡眠时间",
     "dreamContent": "梦境内容",
     "statusTitle": "睡眠状态",
+    "statusPreview": "(状态预览)",
+    "statusActual": "(实际状态)",
+    "idleTime": "空闲",
+    "lightSleepTime": "浅睡",
+    "remTime": "REM睡眠",
+    "deepSleepTime": "深度睡眠",
+    "currentStatus": "当前状态",
+    "countdownTo": "距离进入{state}还有",
     "configTitle": "参数配置",
     "energyTitle": "功能说明",
     "enableAgentSleep": "启用{agent}睡眠",
@@ -141,7 +152,8 @@
       "timeliness": "时效性",
       "diversity": "多样性",
       "integration": "整合度",
-      "richness": "概念丰富度"
+      "richness": "概念丰富度",
+      "energy": "能耗"
     }
   },
   "emotion": {
@@ -177,17 +189,34 @@
     "emotionTracking": "情感追踪",
     "sleepTracking": "睡眠追踪",
     "crossSession": "跨会话记忆",
+    "crossSessionDesc": "启用跨会话记忆保持",
     "emotion": "情感跟踪",
+    "emotionDesc": "启用情感状态计算",
     "distributedDb": "分布式数据库",
     "distributedDbEnabled": "分布式数据库已启用，不可关闭",
     "distributedDbDisabled": "开启后将启用分布式数据库（开启后不可关闭）",
     "sessionIdleTimeout": "会话空闲超时（秒）",
+    "sessionIdleTimeoutDesc": "会话无活动超过此时长视为空闲",
     "maxMemoryChars": "单条记忆最大字符数",
+    "maxMemoryCharsDesc": "单条记忆最大字符数限制",
     "maxResults": "搜索限制（条）",
+    "maxResultsDesc": "搜索时返回的最大记录数",
     "frozenDays": "冷藏天数",
+    "frozenDaysDesc": "超过此天数记忆进入冷藏状态",
     "archiveDays": "归档天数",
+    "archiveDaysDesc": "超过此天数自动归档记忆",
     "deleteDays": "删除天数",
+    "deleteDaysDesc": "超过此天数自动删除记忆",
     "lifecycle": "记忆生命周期",
+    "lifecycleSettings": "生命周期设置",
+    "basicFeatures": "基础功能",
+    "sessionSettings": "会话设置",
+    "compressionMode": "记忆压缩模式",
+    "compressionModeDesc": "选择记忆压缩策略",
+    "compressionAuto": "自动",
+    "compressionSimple": "简单压缩",
+    "compressionLLM": "LLM压缩",
+    "errorSaving": "保存失败",
     "on": "开启",
     "off": "关闭",
     "enabled": "已启用",
@@ -228,6 +257,7 @@
     "dangerZone": "危险区域",
     "uninstall": {
       "title": "卸载插件",
+      "description": "这将永久删除 HumanThinking 插件及相关文件",
       "button": "卸载插件",
       "warning": "⚠️ 确认卸载",
       "confirmMessage": "您确定要卸载 HumanThinking 插件吗？此操作不可恢复。",
@@ -272,7 +302,8 @@
     "second": "秒",
     "char": "字符",
     "record": "条",
-    "secondUnit": "秒"
+    "secondUnit": "秒",
+    "unknownError": "未知错误"
   },
   "htConfig": {
     "title": "🧠 HumanThinking 记忆配置",

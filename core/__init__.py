@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 from .database import HumanThinkingDB
 from .sleep_manager import (
     SleepManager, get_sleep_manager, init_sleep_manager,
-    record_agent_activity, pulse_agent, is_agent_sleeping, check_and_trigger_sleep,
+    record_agent_activity, is_agent_sleeping, check_and_trigger_sleep,
     get_agent_sleep_config, save_agent_sleep_config, load_agent_sleep_config
 )
 

@@ -840,32 +840,15 @@ class TestHelperFunctions:
                 mock_class.return_value = mock_mm
                 get_memory_manager(f"agent_{i}")
     
-    def test_handle_db_operation_success(self):
-        """测试数据库操作成功处理"""
-        from api.routes import _handle_db_operation
-        
-        result = _handle_db_operation("test", lambda: "success")
-        assert result == "success"
+    def test_handle_api_errors_decorator_exists(self):
+        """测试错误处理装饰器存在"""
+        from api.routes import handle_api_errors
+        assert handle_api_errors is not None
     
-    def test_handle_db_operation_import_error(self):
-        """测试导入错误处理"""
-        from api.routes import _handle_db_operation
-        
-        def raise_import_error():
-            raise ImportError("Module not found")
-        
-        result = _handle_db_operation("test", raise_import_error, fallback_result="fallback")
-        assert result == "fallback"
-    
-    def test_handle_db_operation_general_error(self):
-        """测试一般错误处理"""
-        from api.routes import _handle_db_operation
-        
-        def raise_error():
-            raise RuntimeError("Some error")
-        
-        result = _handle_db_operation("test", raise_error, fallback_result="fallback")
-        assert result == "fallback"
+    def test_no_handle_db_operation_function(self):
+        """测试 _handle_db_operation 函数已被移除"""
+        import api.routes as routes
+        assert not hasattr(routes, '_handle_db_operation')
 
 
 # ==================== 请求模型验证测试 ====================

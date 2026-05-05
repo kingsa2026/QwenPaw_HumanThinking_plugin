@@ -63,12 +63,8 @@ class VersionManager:
         db_parsed = VersionManager.parse_version(db_version)
         min_parsed = VersionManager.parse_version(min_compatible)
         
-        # 比较主版本、次版本、补丁版本
-        return (
-            db_parsed[0] >= min_parsed[0] and
-            db_parsed[1] >= min_parsed[1] and
-            db_parsed[2] >= min_parsed[2]
-        )
+        # 使用元组比较进行语义版本比较
+        return (db_parsed[0], db_parsed[1], db_parsed[2]) >= (min_parsed[0], min_parsed[1], min_parsed[2])
 
     @staticmethod
     def get_version_info() -> Dict[str, str]:

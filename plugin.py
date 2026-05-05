@@ -8,7 +8,9 @@ import sys
 import json
 from pathlib import Path
 from typing import Optional
-from starlette.requests import Request
+
+from .utils.paths import resolve_qwenpaw_dir as _resolve_qwenpaw_dir, resolve_agent_workspace_dir as _resolve_agent_workspace_dir, validate_agent_id
+from .utils.version import CURRENT_VERSION
 
 logger = logging.getLogger("qwenpaw.humanthinking")
 
@@ -17,52 +19,16 @@ BACKUP_CONFIG_KEY = 'humanthinking_backup_config'
 SLEEP_CONFIG_KEY = 'humanthinking_sleep_config'
 
 
-def _resolve_qwenpaw_dir() -> Path:
-    env_dir = os.environ.get('QWENPAW_WORKING_DIR', '')
-    if env_dir:
-        resolved = Path(env_dir).expanduser().resolve()
-        logger.debug(f"[qwenpaw_dir] using env QWENPAW_WORKING_DIR: {resolved}")
-        return resolved
-    try:
-        from qwenpaw.constant import WORKING_DIR
-        logger.debug(f"[qwenpaw_dir] using qwenpaw.constant.WORKING_DIR: {WORKING_DIR}")
-        return WORKING_DIR
-    except (ImportError, AttributeError):
-        pass
-    legacy = Path("~/.copaw").expanduser()
-    if legacy.exists():
-        resolved = legacy.resolve()
-        logger.debug(f"[qwenpaw_dir] using legacy ~/.copaw: {resolved}")
-        return resolved
-    fallback = Path("~/.qwenpaw").expanduser().resolve()
-    logger.info(f"[qwenpaw_dir] using fallback ~/.qwenpaw: {fallback}")
-    return fallback
-
-
-def _resolve_agent_workspace_dir(agent_id: str) -> Path:
-    try:
-        from qwenpaw.config.utils import load_config
-        config = load_config()
-        if agent_id in config.agents.profiles:
-            ws_dir = config.agents.profiles[agent_id].workspace_dir
-            resolved = Path(ws_dir).expanduser().resolve()
-            logger.debug(f"[workspace_resolve] agent={agent_id} -> custom workspace: {resolved}")
-            return resolved
-        else:
-            logger.warning(f"[workspace_resolve] agent={agent_id} not found in profiles, keys={list(config.agents.profiles.keys())}")
-    except ImportError as e:
-        logger.warning(f"[workspace_resolve] cannot import load_config: {e}")
-    except Exception as e:
-        logger.warning(f"[workspace_resolve] failed for agent={agent_id}: {e}", exc_info=True)
-    fallback = _resolve_qwenpaw_dir() / "workspaces" / agent_id
-    logger.info(f"[workspace_resolve] agent={agent_id} -> fallback: {fallback}")
-    return fallback
-
+_config_profiles_cache = None
 
 def _config_profiles():
+    global _config_profiles_cache
+    if _config_profiles_cache is not None:
+        return _config_profiles_cache
     try:
         from qwenpaw.config.utils import load_config
-        return load_config().agents.profiles
+        _config_profiles_cache = load_config().agents.profiles
+        return _config_profiles_cache
     except Exception:
         return {}
 
@@ -77,42 +43,15 @@ def _resolve_all_agent_workspace_dirs() -> list[Path]:
     return []
 
 
-def load_backup_config() -> dict:
+def _load_json_config(config_path: Path, default: dict = None) -> dict:
+    """通用配置加载函数"""
     try:
-        config_path = _resolve_qwenpaw_dir() / "config" / f"{BACKUP_CONFIG_KEY}.json"
         if config_path.exists():
             with open(config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
     except Exception as e:
-        logger.warning(f"Failed to load backup config: {e}")
-    return {"auto_backup_enabled": False, "auto_backup_interval_hours": 24}
-
-
-def load_humanthinking_config() -> dict:
-    try:
-        config_path = _resolve_qwenpaw_dir() / "config" / f"{CONFIG_KEY}.json"
-        if config_path.exists():
-            with open(config_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception as e:
-        logger.warning(f"Failed to load humanthinking config: {e}")
-    return {}
-
-
-def load_sleep_config() -> dict:
-    try:
-        config_path = _resolve_qwenpaw_dir() / "config" / f"{SLEEP_CONFIG_KEY}.json"
-        if config_path.exists():
-            with open(config_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception as e:
-        logger.warning(f"Failed to load sleep config: {e}")
-    return {
-        "enable_agent_sleep": True,
-        "sleep_idle_hours": 2,
-        "auto_consolidate": True,
-        "consolidate_interval_hours": 6,
-    }
+        logger.warning(f"Failed to load config from {config_path}: {e}")
+    return default or {}
 
 
 class HumanThinkingMemoryPlugin:
@@ -172,79 +111,14 @@ class HumanThinkingMemoryPlugin:
                         return {
                             "status": "healthy",
                             "plugin": "humanthinking",
-                            "version": "1.1.5.post1",
+                            "version": CURRENT_VERSION,
                             "timestamp": __import__('time').time()
                         }
                     logger.info("Health endpoint registered in register()")
                 else:
                     logger.info("Health endpoint already in FastAPI app")
 
-                existing_paths2 = [getattr(r, 'path', '') for r in app.routes]
-                has_config = any('humanthinking/config' in p for p in existing_paths2)
-
-                if not has_config:
-                    @app.get("/api/plugins/humanthinking/config")
-                    async def get_ht_config(agent_id: str = None):
-                        try:
-                            from .core.memory_manager import get_config as _get_config
-                            config = _get_config(agent_id=agent_id)
-                            return {
-                                "enable_cross_session": config.enable_cross_session,
-                                "enable_emotion": config.enable_emotion,
-                                "frozen_days": config.frozen_days,
-                                "archive_days": config.archive_days,
-                                "delete_days": config.delete_days,
-                                "max_results": getattr(config, 'max_results', 10),
-                                "session_idle_timeout": getattr(config, 'session_idle_timeout', 1800),
-                                "max_memory_chars": getattr(config, 'max_memory_chars', 50000),
-                                "enable_distributed_db": getattr(config, 'enable_distributed_db', False),
-                                "db_size_threshold_mb": getattr(config, 'db_size_threshold_mb', 100),
-                                "compression_mode": getattr(config, 'compression_mode', 'auto'),
-                            }
-                        except Exception:
-                            return {
-                                "enable_cross_session": True,
-                                "enable_emotion": True,
-                                "frozen_days": 30,
-                                "archive_days": 90,
-                                "delete_days": 180,
-                                "max_results": 5,
-                                "session_idle_timeout": 180,
-                                "compression_mode": "auto",
-                            }
-
-                    @app.post("/api/plugins/humanthinking/config")
-                    async def post_ht_config(request: Request, agent_id: str = None):
-                        try:
-                            data = await request.json()
-                            from .core.memory_manager import get_config as _get_config, save_config as _save_config
-                            config = _get_config(agent_id=agent_id)
-                            field_mapping = {
-                                'enable_cross_session', 'enable_emotion', 'frozen_days',
-                                'archive_days', 'delete_days', 'max_results',
-                                'session_idle_timeout', 'max_memory_chars',
-                                'enable_distributed_db', 'db_size_threshold_mb', 'compression_mode'
-                            }
-                            for key, value in data.items():
-                                if key in field_mapping and hasattr(config, key):
-                                    setattr(config, key, value)
-                            _save_config(config, agent_id=agent_id)
-                            return {"success": True}
-                        except Exception as e:
-                            logger.warning(f"Config save failed: {e}")
-                            return {"success": False, "error": str(e)}
-
-                    @app.get("/api/plugins/humanthinking/stats")
-                    async def get_ht_stats(agent_id: str = None):
-                        try:
-                            from .core.memory_manager import get_stats as _get_stats
-                            return (await _get_stats(agent_id)) if agent_id else {"status": "ok"}
-                        except Exception as e:
-                            return {"status": "ok", "note": str(e)}
-
-                    logger.info("API routes registered in register()")
-                else:
-                    logger.info("API routes already registered")
+                logger.info("Config/Stats routes handled by api/routes.py via include_router")
 
                 verify_paths = [getattr(r, 'path', '') for r in app.routes]
                 verify_health = [p for p in verify_paths if 'humanthinking/health' in p]
@@ -444,34 +318,10 @@ class HumanThinkingMemoryPlugin:
                     return {
                         "status": "healthy",
                         "plugin": "humanthinking",
-                        "version": "1.1.5.post1",
+                        "version": CURRENT_VERSION,
                         "timestamp": __import__('time').time()
                     }
                 logger.info("Health endpoint registered directly to FastAPI app")
-
-            async def db_version(agent_id: str = None):
-                from .core.database import HumanThinkingDB, CURRENT_SCHEMA_VERSION
-                agent_id = validate_agent_id(agent_id)
-                working_dir = _resolve_agent_workspace_dir(agent_id or "default")
-                db_path = Path(str(working_dir)) / "memory" / f"human_thinking_memory_{agent_id or 'default'}.db"
-                if not db_path.exists():
-                    return {
-                        "exists": False, "code_schema_version": CURRENT_SCHEMA_VERSION,
-                        "db_schema_version": None, "needs_migration": False,
-                        "migration_history": [], "db_path": str(db_path),
-                    }
-                db = HumanThinkingDB(str(db_path))
-                try:
-                    await db.initialize()
-                    info = db.get_version_info()
-                    info["exists"] = True
-                    info["migration_history"] = db.get_migration_history()
-                    info["db_path"] = str(db_path)
-                    return info
-                finally:
-                    await db.close()
-            app.add_api_route("/api/plugins/humanthinking/db/version", db_version, methods=["GET"])
-            logger.info("DB version endpoint registered directly to FastAPI app")
 
             has_uninstall = any('humanthinking/uninstall' in p for p in existing_paths)
             if not has_uninstall:
@@ -527,59 +377,78 @@ class HumanThinkingMemoryPlugin:
                 logger.info("HumanThinkingMemoryManager imported successfully")
             except ImportError as e:
                 logger.warning(f"Could not import HumanThinkingMemoryManager: {e}")
-                return
+                HumanThinkingMemoryManager = None
 
-            from qwenpaw.agents.tools.HumanThinking.core.memory_manager import get_config
-            ht_config = load_humanthinking_config()
-            global_config = get_config()
-
-            frozen_days = ht_config.get("frozen_days", global_config.frozen_days)
-            archive_days = ht_config.get("archive_days", global_config.archive_days)
-            delete_days = ht_config.get("delete_days", global_config.delete_days)
-
+            ht_config = _load_json_config(
+                _resolve_qwenpaw_dir() / "config" / f"{CONFIG_KEY}.json"
+            )
+            import json as _json
+            global_config_path = _resolve_qwenpaw_dir() / "config" / f"{CONFIG_KEY}.json"
             try:
-                qwenpaw_dir = _resolve_qwenpaw_dir()
-                working_dir = str(_resolve_agent_workspace_dir("default"))
-                logger.info(f"Resolved working directory: {working_dir} (from {qwenpaw_dir})")
+                with open(global_config_path, 'r', encoding='utf-8') as _f:
+                    global_config_data = _json.load(_f)
+            except Exception:
+                global_config_data = {}
+            frozen_days = ht_config.get("frozen_days", global_config_data.get("frozen_days", 30))
+            archive_days = ht_config.get("archive_days", global_config_data.get("archive_days", 90))
+            delete_days = ht_config.get("delete_days", global_config_data.get("delete_days", 365))
 
-                Path(working_dir).mkdir(parents=True, exist_ok=True)
-
-                memory_manager = HumanThinkingMemoryManager(
-                    working_dir=working_dir,
-                    agent_id="default",
-                    user_id=None
-                )
-
+            if HumanThinkingMemoryManager is not None:
                 try:
-                    import asyncio
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        asyncio.create_task(memory_manager.start())
-                    else:
+                    qwenpaw_dir = _resolve_qwenpaw_dir()
+                    working_dir = str(_resolve_agent_workspace_dir("default"))
+                    logger.info(f"Resolved working directory: {working_dir} (from {qwenpaw_dir})")
+
+                    Path(working_dir).mkdir(parents=True, exist_ok=True)
+
+                    memory_manager = HumanThinkingMemoryManager(
+                        working_dir=working_dir,
+                        agent_id="default",
+                        user_id=None
+                    )
+
+                    try:
+                        import asyncio as _asyncio
+                        loop = _asyncio.get_event_loop()
+                        if loop.is_running():
+                            _asyncio.create_task(memory_manager.start())
+                        else:
+                            loop.run_until_complete(memory_manager.start())
+                    except RuntimeError:
+                        import asyncio as _asyncio
+                        loop = _asyncio.new_event_loop()
+                        _asyncio.set_event_loop(loop)
                         loop.run_until_complete(memory_manager.start())
-                except RuntimeError:
-                    import asyncio
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    loop.run_until_complete(memory_manager.start())
 
-                logger.info(f"HumanThinkingMemoryManager instance created and started")
-                logger.info(f"  - Working directory: {working_dir}")
-                logger.info(f"  - Database path: {memory_manager.db_path}")
-            except Exception as e:
-                logger.warning(f"Failed to create HumanThinkingMemoryManager instance: {e}")
+                    logger.info(f"HumanThinkingMemoryManager instance created and started")
+                    logger.info(f"  - Working directory: {working_dir}")
+                    logger.info(f"  - Database path: {memory_manager.db_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to create HumanThinkingMemoryManager instance: {e}")
 
-            sleep_config = load_sleep_config()
+            sleep_config = _load_json_config(
+                _resolve_qwenpaw_dir() / "config" / "sleep_config.json",
+                default={
+                    "enable_agent_sleep": True,
+                    "sleep_idle_hours": 2,
+                    "light_sleep_minutes": 30,
+                    "rem_minutes": 60,
+                    "auto_consolidate": True,
+                    "consolidate_interval_hours": 6,
+                }
+            )
             enable_agent_sleep = sleep_config.get("enable_agent_sleep", True)
             sleep_idle_hours = sleep_config.get("sleep_idle_hours", 2)
+            light_sleep_minutes = sleep_config.get("light_sleep_minutes", 30)
+            rem_minutes = sleep_config.get("rem_minutes", 60)
             auto_consolidate = sleep_config.get("auto_consolidate", True)
             consolidate_interval_hours = sleep_config.get("consolidate_interval_hours", 6)
 
             from qwenpaw.agents.tools.HumanThinking.core.sleep_manager import init_sleep_manager, SleepConfig
             sleep_cfg = SleepConfig(
                 enable_agent_sleep=enable_agent_sleep,
-                light_sleep_minutes=30,
-                rem_minutes=60,
+                light_sleep_minutes=light_sleep_minutes,
+                rem_minutes=rem_minutes,
                 deep_sleep_minutes=sleep_idle_hours * 60,
                 auto_consolidate=auto_consolidate,
                 consolidate_days=consolidate_interval_hours // 4 if consolidate_interval_hours >= 4 else 1,
@@ -594,7 +463,10 @@ class HumanThinkingMemoryPlugin:
             qwenpaw_root = str(_resolve_qwenpaw_dir())
             if qwenpaw_root:
                 from qwenpaw.agents.tools.HumanThinking.core.backup_manager import init_backup_manager
-                backup_config = load_backup_config()
+                backup_config = _load_json_config(
+                    _resolve_qwenpaw_dir() / "config" / f"{BACKUP_CONFIG_KEY}.json",
+                    default={"auto_backup_enabled": False, "auto_backup_interval_hours": 24}
+                )
                 auto_backup_hours = 0
                 if backup_config.get("auto_backup_enabled", False):
                     auto_backup_hours = backup_config.get("auto_backup_interval_hours", 24)
@@ -606,39 +478,44 @@ class HumanThinkingMemoryPlugin:
         except Exception as e:
             logger.error(f"Failed to initialize HumanThinking Memory Manager: {e}", exc_info=True)
 
-    def _register_api_routes(self):
-        import threading
-
-        def delayed_register():
-            import time
-            time.sleep(10)
-            try:
-                from qwenpaw.app._app import app
-                from .api.routes import router as ht_router
-
-                existing_paths = [getattr(r, 'path', '') for r in app.routes]
-                if '/api/plugins/humanthinking/stats' in existing_paths:
-                    logger.info("API routes already registered")
-                    return
-
-                app.include_router(ht_router)
-
-                new_paths = [getattr(r, 'path', '') for r in app.routes]
-                if '/api/plugins/humanthinking/stats' in new_paths:
-                    logger.info("API routes successfully registered (delayed)")
-                else:
-                    logger.warning("API routes registration may have failed")
-
-            except Exception as e:
-                logger.error(f"Failed to register API routes (delayed): {e}", exc_info=True)
-
-        threading.Thread(target=delayed_register, daemon=True).start()
-        logger.info("API routes will be registered in 10 seconds (delayed)")
-
     def _shutdown_hook(self):
         try:
             logger.info("=== HumanThinking Memory Manager Cleanup ===")
-            logger.info("SleepManager is event-driven, no cleanup needed")
+            try:
+                from qwenpaw.agents.tools.HumanThinking.core.backup_manager import get_backup_manager
+                bm = get_backup_manager()
+                if bm:
+                    bm.shutdown()
+                    logger.info("BackupManager shutdown completed")
+            except Exception as e:
+                logger.warning(f"Failed to shutdown BackupManager: {e}")
+            try:
+                from qwenpaw.agents.tools.HumanThinking.api.routes import _db_cache
+                import asyncio as _asyncio
+                for db_path, db in list(_db_cache.items()):
+                    try:
+                        _asyncio.get_event_loop().run_until_complete(db.close())
+                        logger.info(f"Closed cached DB: {db_path}")
+                    except Exception:
+                        pass
+                _db_cache.clear()
+                logger.info("Routes DB cache cleared")
+            except Exception as e:
+                logger.warning(f"Failed to clear routes DB cache: {e}")
+            try:
+                from qwenpaw.agents.tools.HumanThinking.core.sleep_manager import get_sleep_manager
+                sm = get_sleep_manager()
+                if sm and hasattr(sm, '_db_cache'):
+                    import asyncio as _asyncio
+                    for db_path, db in list(sm._db_cache.items()):
+                        try:
+                            _asyncio.get_event_loop().run_until_complete(db.close())
+                        except Exception:
+                            pass
+                    sm._db_cache.clear()
+                    logger.info("SleepManager DB cache cleared")
+            except Exception as e:
+                logger.warning(f"Failed to clear SleepManager DB cache: {e}")
             logger.info("HumanThinking Memory Manager cleanup completed")
         except Exception as e:
             logger.error(f"Failed to cleanup HumanThinking Memory Manager: {e}", exc_info=True)

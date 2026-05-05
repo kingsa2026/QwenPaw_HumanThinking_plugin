@@ -53,8 +53,8 @@ class EmotionalContinuityEngine:
         }
         
         # 计算情感连续性
-        continuity_score = await self.calculate_continuity(
-            agent_id, session_id, emotion
+        continuity_score = await self.calculate_emotional_continuity(
+            session_id, agent_id
         )
         
         # 存储到数据库
@@ -202,33 +202,24 @@ class EmotionalContinuityEngine:
         else:
             return 0.3  # 不一致
     
-    async def calculate_continuity(
-        self,
-        agent_id: str,
-        session_id: str,
-        emotion: str
-    ) -> float:
-        """计算与之前Session的情感连续性"""
-        return await self.calculate_emotional_continuity(
-            session_id, agent_id
-        )
-    
     def _recommend_approach(self, emotion: str, continuity: float) -> str:
         """推荐交互方法"""
         if continuity >= 0.8:
-            return "保持当前情感基调，延续良好的互动"
+            return f"保持{emotion}的情感基调，延续良好的互动"
         elif continuity >= 0.5:
             return "适度调整情感表达，关注用户反馈"
         else:
             return "采用中性情感基调，建立新的情感连接"
     
-    def _extract_emotional_cues(self, states: List[Dict]) -> List[str]:
+    def _extract_emotional_cues(self, states: List[Dict]) -> List[Dict]:
         """提取情感线索"""
         cues = []
         for state in states:
-            triggers = state.get("triggers", [])
-            if triggers:
-                cues.append(f"触发因素: {', '.join(triggers[:3])}")
+            cues.append({
+                "emotion": state.get("emotion", "neutral"),
+                "intensity": state.get("intensity", 0.5),
+                "triggers": state.get("triggers", [])[:3]
+            })
         return cues
     
     def _analyze_historical_patterns(self, states: List[Dict]) -> Dict:

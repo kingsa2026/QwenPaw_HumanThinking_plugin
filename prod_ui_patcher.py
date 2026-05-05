@@ -1251,6 +1251,9 @@ def patch_runtime_config_model() -> dict:
         if field is not None:
             field.annotation = new_literal
             logger.info(f"Patched model_fields['memory_manager_backend'].annotation = {new_literal}")
+            if field.default == "remelight":
+                field.default = "human_thinking"
+                logger.info(f"Changed default memory_manager_backend: 'remelight' -> 'human_thinking'")
         
         # ========== 关键：清Pydantic 内部缓存 ==========
         # Pydantic 会在模块加载时缓validator，即使修改了 __annotations__

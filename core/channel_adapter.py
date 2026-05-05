@@ -693,13 +693,15 @@ def build_memory_key(
 
 
 def parse_memory_key(key: str) -> Dict[str, str]:
-    """解析记忆键"""
+    """解析记忆键
+    
+    记忆键格式: {agent_id}:{target_id}:{user_id}
+    """
     parts = key.split(":")
-    if len(parts) >= 4:
+    if len(parts) >= 3:
         return {
             "agent_id": parts[0],
             "target_id": parts[1],
-            "channel_id": parts[2],
-            "user_id": parts[3],
+            "user_id": parts[2],
         }
-    return {"agent_id": "", "target_id": "", "channel_id": "", "user_id": ""}
+    return {"agent_id": "", "target_id": "", "user_id": ""}

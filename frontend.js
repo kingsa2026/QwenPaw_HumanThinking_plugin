@@ -327,9 +327,11 @@
     // API请求封装
     const apiRequest = async (endpoint, options = {}) => {
         const url = `${getApiBase()}${endpoint}`;
+        const { signal, ...restOptions } = options;
         const response = await fetch(url, {
-            ...options,
-            headers: { ...getHeaders(), ...options.headers }
+            ...restOptions,
+            headers: { ...getHeaders(), ...options.headers },
+            signal
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.json();
@@ -434,7 +436,7 @@
     // 创建组件
     const createComponents = () => {
         const React = window.QwenPaw.host.React;
-        const { useState, useEffect, useCallback } = React;
+        const { useState, useEffect, useCallback, useRef } = React;
         const { Card, Tabs, Button, List, Statistic, Row, Col, Progress, message, Input, Space, Tag, Timeline, Switch, Slider, Form, Select, Popconfirm, Modal, Empty, Checkbox, Radio, Divider } = window.QwenPaw.host.antd;
 
         // useTranslation Hook - 响应式翻译
@@ -511,20 +513,27 @@
             // 配置面板
             const [config, setConfig] = useState(null);
             const currentAgentIdRef = React.useRef('');
+            const abortRef = React.useRef(null);
 
             // 时间线
             const [timelineData, setTimelineData] = useState([]);
             const [timeFilter, setTimeFilter] = useState('all');
 
-            // Agent 切换时重置状态
             useEffect(() => {
-                setStats(null);
-                setSessions([]);
-                setSearchResults([]);
+                abortRef.current?.abort();
+                abortRef.current = new AbortController();
+                return () => abortRef.current?.abort();
+            }, [agent.agent_id]);
+
+            useEffect(() => {
+                // Agent 切换时仅标记为加载中，保留旧数据避免白屏闪烁
+                setStats(prev => prev ? { ...prev, _loading: true } : null);
+                setSessions(prev => prev.length ? prev : []);
+                setSearchResults(prev => prev.length ? prev : []);
                 setSelectedMemories([]);
-                setEmotion(null);
-                setConfig(null);
-                setTimelineData([]);
+                setEmotion(prev => prev ? { ...prev, _loading: true } : null);
+                setConfig(prev => prev ? { ...prev, _loading: true } : null);
+                setTimelineData(prev => prev.length ? prev : []);
             }, [agent.agent_id]);
 
             useEffect(() => {
@@ -532,12 +541,13 @@
                     try {
                         const queryParam = agent.agent_id ? '?agent_id=' + agent.agent_id : '';
                         const [statsRes, sessionsRes] = await Promise.all([
-                            apiRequest('/stats' + queryParam),
-                            apiRequest('/sessions' + queryParam)
+                            apiRequest('/stats' + queryParam, { signal: abortRef.current?.signal }),
+                            apiRequest('/sessions' + queryParam, { signal: abortRef.current?.signal })
                         ]);
                         setStats(statsRes);
                         setSessions(Array.isArray(sessionsRes) ? sessionsRes : []);
                     } catch (e) {
+                        if (e.name === 'AbortError') return;
                         console.warn('[HumanThinking] API 暂不可用，使用离线模式:', e.message || e);
                         setStats({
                             total_memories: 0,
@@ -603,7 +613,8 @@
                     const data = await apiRequest('/search' + queryParam, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ query: searchQuery, limit: 10 })
+                        body: JSON.stringify({ query: searchQuery, limit: 10 }),
+                        signal: abortRef.current?.signal
                     });
                     setSearchResults(data.memories || []);
                     setSelectedMemories([]);
@@ -640,7 +651,8 @@
                     const result = await apiRequest('/memories/batch' + queryParam, {
                         method: 'DELETE',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ memory_ids: selectedMemories })
+                        body: JSON.stringify({ memory_ids: selectedMemories }),
+                        signal: abortRef.current?.signal
                     });
                     if (result && result.success === false) {
                         message.error(result.error || t('common.deleteError', 'Delete failed'));
@@ -672,7 +684,8 @@
                             content: editContent,
                             memory_type: editType,
                             importance: editImportance
-                        })
+                        }),
+                        signal: abortRef.current?.signal
                     });
                     if (result && result.success === false) {
                         message.error(result.error || t('common.saveError', 'Save failed'));
@@ -861,16 +874,19 @@
             useEffect(() => {
                 const fetchEmotion = async () => {
                     try {
-                        const data = await apiRequest('/emotion');
+                        const currentAgent = getCurrentAgent();
+                        const aid = agent.agent_id || (currentAgent && currentAgent.agent_id) || 'default';
+                        const data = await apiRequest('/emotion?agent_id=' + aid, { signal: abortRef.current?.signal });
                         setEmotion(data);
                     } catch (e) {
+                        if (e.name === 'AbortError') return;
                         console.error('[HumanThinking] 获取情感失败:', e);
                     }
                 };
                 fetchEmotion();
                 const interval = setInterval(fetchEmotion, 5000);
                 return () => clearInterval(interval);
-            }, []);
+            }, [agent.agent_id]);
 
             const renderEmotion = () => {
                 const emotionConfig = {
@@ -965,11 +981,12 @@
                         const agent = getCurrentAgent();
                         // 只在有agent_id时传入，避免空字符串
                         const queryParam = agent.agent_id ? '?agent_id=' + agent.agent_id : '';
-                        const data = await apiRequest('/config' + queryParam);
+                        const data = await apiRequest('/config' + queryParam, { signal: abortRef.current?.signal });
                         setConfig(data);
                         currentAgentIdRef.current = agent.agent_id;
                         console.log('[HumanThinking] 配置已加载，agent:', agent.agent_id || 'global');
                     } catch (e) {
+                        if (e.name === 'AbortError') return;
                         console.error('[HumanThinking] 获取配置失败:', e);
                         // 加载失败时使用默认配置
                         setConfig({
@@ -1030,7 +1047,8 @@
                     const result = await apiRequest('/config' + queryParam, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(config)
+                        body: JSON.stringify(config),
+                        signal: abortRef.current?.signal
                     });
                     if (result && result.success === false) {
                         message.error(result.error || t('common.saveError', 'Save failed'));
@@ -1211,37 +1229,21 @@
             useEffect(() => {
                 const fetchTimeline = async () => {
                     try {
-                        const queryParam = agent.agent_id ? '?agent_id=' + agent.agent_id : '';
-                        const data = await apiRequest('/memories/timeline' + queryParam);
+                        const currentAgent = getCurrentAgent();
+                        const aid = agent.agent_id || (currentAgent && currentAgent.agent_id) || 'default';
+                        const groupMap = { all: 'month', today: 'hour', week: '12h', month: 'day' };
+                        const groupBy = groupMap[timeFilter] || 'month';
+                        const data = await apiRequest('/memories/timeline?agent_id=' + aid + '&group_by=' + groupBy, { signal: abortRef.current?.signal });
                         setTimelineData(Array.isArray(data) ? data : []);
                     } catch (e) {
+                        if (e.name === 'AbortError') return;
                         console.error('[HumanThinking] 获取时间线失败:', e);
                     }
                 };
                 fetchTimeline();
-            }, []);
-
-            const getFilteredTimeline = () => {
-                if (timeFilter === 'all') return timelineData;
-                const now = new Date();
-                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                return timelineData.filter(item => {
-                    const itemDate = new Date(item.date);
-                    if (timeFilter === 'today') return itemDate >= today;
-                    if (timeFilter === 'week') {
-                        const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-                        return itemDate >= weekAgo;
-                    }
-                    if (timeFilter === 'month') {
-                        const monthAgo = new Date(today.getFullYear(), today.getMonth() - 1, today.getDate());
-                        return itemDate >= monthAgo;
-                    }
-                    return true;
-                });
-            };
+            }, [agent.agent_id, timeFilter]);
 
             const renderTimeline = () => {
-                const filtered = getFilteredTimeline();
                 const filterButtons = [
                     { key: 'all', label: t('timeline.all', 'All') },
                     { key: 'today', label: t('timeline.today', 'Today') },
@@ -1266,10 +1268,10 @@
                             )
                         )
                     ),
-                    filtered.length === 0
+                    timelineData.length === 0
                         ? React.createElement(Empty, { description: t('timeline.noEvents', 'No memory events in this period') })
                         : React.createElement(Timeline, null,
-                            filtered.map((item, index) =>
+                            timelineData.map((item, index) =>
                                 React.createElement(Timeline.Item, {
                                     key: index,
                                     color: item.count > 5 ? 'red' : item.count > 2 ? 'blue' : 'green'
@@ -1538,6 +1540,30 @@
             const agent = useAgent();
             const [activeTab, setActiveTab] = useState('status');
             const [sleepStatus, setSleepStatus] = useState(null);
+            const [tick, setTick] = useState(0);
+
+            const lastFetchRef = useRef({ time: 0, idle: 0, light: 0, rem: 0, deep: 0, next: -1, status: 'active' });
+            const tickRef = useRef(null);
+
+            function formatMMSS(seconds) {
+                const s = Math.max(0, Math.floor(seconds || 0));
+                const m = Math.floor(s / 60);
+                const sec = s % 60;
+                return m + ':' + String(sec).padStart(2, '0');
+            }
+
+            function startTick() {
+                stopTick();
+                setTick(t => t + 1);
+                tickRef.current = setInterval(function () { setTick(function (t) { return t + 1; }); }, 1000);
+            }
+
+            function stopTick() {
+                if (tickRef.current) {
+                    clearInterval(tickRef.current);
+                    tickRef.current = null;
+                }
+            }
 
             const fetchSleepStatus = async () => {
                 try {
@@ -1545,41 +1571,53 @@
                     const aid = agent.agent_id || currentAgent.agent_id || 'default';
                     const data = await apiRequest('/sleep/status?agent_id=' + aid);
                     setSleepStatus(data);
+                    var now = Date.now() / 1000;
+                    lastFetchRef.current = {
+                        time: now,
+                        idle: data.idle_time || 0,
+                        light: data.light_sleep_elapsed || 0,
+                        rem: data.rem_elapsed || 0,
+                        deep: data.deep_sleep_elapsed || 0,
+                        next: data.next_sleep_in != null ? data.next_sleep_in : -1,
+                        status: data.status || 'active',
+                        actual_status: data.actual_status || data.status || 'active'
+                    };
                 } catch (e) {
                     console.error('[HumanThinking] 获取睡眠状态失败:', e);
                 }
             };
 
             useEffect(() => {
-                setSleepStatus(null);
+                setSleepStatus(prev => prev ? { ...prev, _loading: true } : null);
+                stopTick();
             }, [agent.agent_id]);
 
             useEffect(() => {
-                fetchSleepStatus();
-                const interval = setInterval(fetchSleepStatus, 5000);
-                return () => clearInterval(interval);
+                fetchSleepStatus().finally(function () { startTick(); });
+                return function () { stopTick(); };
             }, [agent.agent_id]);
 
             const handleSleepAction = async (action) => {
+                if (action === 'wakeup' && sleepStatus?.status === 'active') {
+                    return;
+                }
                 try {
                     const currentAgent = getCurrentAgent();
                     const aid = agent.agent_id || currentAgent.agent_id || 'default';
                     const queryParam = '?agent_id=' + aid;
                     const endpoint = action === 'wakeup' ? '/sleep/wakeup' + queryParam : '/sleep/force' + queryParam;
                     const body = action === 'wakeup' ? {} : { sleep_type: action };
-                    console.log('[HumanThinking] Sleep action:', action, 'agent_id:', aid, 'endpoint:', endpoint);
                     const result = await apiRequest(endpoint, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(body)
                     });
-                    console.log('[HumanThinking] Sleep action result:', result);
                     if (result && result.success === false) {
                         message.error(result.error || t('common.error', 'Error'));
                     } else {
                         message.success(t('common.success', 'Success'));
                     }
-                    fetchSleepStatus();
+                    fetchSleepStatus().finally(function () { startTick(); });
                 } catch (e) {
                     console.error('[HumanThinking] Sleep action failed:', e);
                     message.error(t('common.error', 'Error') + ': ' + (e.message || 'Unknown'));
@@ -1622,19 +1660,60 @@
                     transition: 'all 0.5s ease'
                 };
                 if (sleepStatus?.status === 'active') {
-                    style.boxShadow = `0 0 20px ${current.color}60, 0 0 40px ${current.color}40`;
+                    style.boxShadow = '0 0 20px ' + current.color + '60, 0 0 40px ' + current.color + '40';
                 } else if (sleepStatus?.status === 'light_sleep') {
-                    style.boxShadow = `0 0 15px ${current.color}50`;
+                    style.boxShadow = '0 0 15px ' + current.color + '50';
                 } else if (sleepStatus?.status === 'rem') {
-                    style.boxShadow = `0 0 20px ${current.color}60`;
+                    style.boxShadow = '0 0 20px ' + current.color + '60';
                 } else if (sleepStatus?.status === 'deep_sleep') {
-                    style.boxShadow = `0 0 10px ${current.color}40`;
+                    style.boxShadow = '0 0 10px ' + current.color + '40';
                 }
                 return style;
             };
 
             const renderStatus = () => {
                 const currentStatus = sleepStatus?.status || 'active';
+                const actualStatus = lastFetchRef.current.actual_status || currentStatus;
+                const isForced = sleepStatus?.forced === true;
+                var elapsed = (Date.now() / 1000) - lastFetchRef.current.time;
+                if (elapsed < 0) elapsed = 0;
+
+                var displayTimeValue = 0;
+                var statusTimeLabel = '';
+                var countdownNextLabel = '';
+                var countdownValue = -1;
+
+                if (actualStatus === 'active') {
+                    statusTimeLabel = t('sleep.idleTime', 'Idle');
+                    displayTimeValue = lastFetchRef.current.idle + elapsed;
+                    countdownValue = lastFetchRef.current.next >= 0 ? Math.max(0, lastFetchRef.current.next - elapsed) : -1;
+                    countdownNextLabel = t('sleep.status.light', 'Light Sleep');
+                } else if (actualStatus === 'light_sleep') {
+                    statusTimeLabel = t('sleep.lightSleepTime', 'Light Sleep');
+                    displayTimeValue = lastFetchRef.current.light + elapsed;
+                    countdownValue = lastFetchRef.current.next >= 0 ? Math.max(0, lastFetchRef.current.next - elapsed) : -1;
+                    countdownNextLabel = t('sleep.status.rem', 'REM Sleep');
+                } else if (actualStatus === 'rem') {
+                    statusTimeLabel = t('sleep.remTime', 'REM Sleep');
+                    displayTimeValue = lastFetchRef.current.rem + elapsed;
+                    countdownValue = lastFetchRef.current.next >= 0 ? Math.max(0, lastFetchRef.current.next - elapsed) : -1;
+                    countdownNextLabel = t('sleep.status.deep', 'Deep Sleep');
+                } else if (actualStatus === 'deep_sleep') {
+                    statusTimeLabel = t('sleep.deepSleepTime', 'Deep Sleep');
+                    displayTimeValue = lastFetchRef.current.deep + elapsed;
+                    countdownValue = -1;
+                }
+
+                var statusSuffix = isForced
+                    ? t('sleep.statusPreview', '(Status Preview)')
+                    : t('sleep.statusActual', '(Actual)');
+                var statusDisplay = current.label + ' ' + statusSuffix;
+
+                var countdownDisplay = '';
+                if (countdownValue >= 0) {
+                    countdownDisplay = t('sleep.countdownTo', 'Until {state}:').replace('{state}', countdownNextLabel) + ' ' + formatMMSS(countdownValue);
+                }
+
                 const btnBase = { height: 48, transition: 'all 0.3s' };
                 const sleepButtons = [
                     { key: 'light', action: 'light', icon: '⭐', label: t('sleep.lightSleep', 'Light Sleep'), activeStatus: 'light_sleep', activeColor: '#faad14', activeBg: '#fffbe6' },
@@ -1643,11 +1722,15 @@
                     { key: 'wakeup', action: 'wakeup', icon: '☀️', label: t('sleep.wakeUp', 'Wake Up'), activeStatus: 'active', activeColor: '#52c41a', activeBg: '#f6ffed' }
                 ];
 
+                const agentDisplayName = agent.agent_name || agent.agent_id || 'Agent';
+                const sleepCardTitle = agentDisplayName + ' ' + t('sleep.currentStatus', 'Current Status');
+
                 return React.createElement('div', { style: { padding: 16 } },
                     React.createElement(Row, { gutter: [16, 16] },
                         React.createElement(Col, { span: 24 },
                             React.createElement(Card, {
                                 size: 'small',
+                                title: sleepCardTitle,
                                 style: { textAlign: 'center', padding: '32px 0' }
                             },
                                 React.createElement('img', {
@@ -1657,10 +1740,13 @@
                                     style: getGifStyle()
                                 }),
                                 React.createElement('div', { style: { fontSize: 28, fontWeight: 'bold', color: current.color, marginTop: 16 } },
-                                    current.label
+                                    statusDisplay
                                 ),
-                                React.createElement('div', { style: { fontSize: 13, color: '#8c8c8c', marginTop: 8 } },
-                                    t('sleep.statusDesc', 'Current sleep state of the agent')
+                                React.createElement('div', { style: { fontSize: 13, color: '#8c8c8c', marginTop: 4 } },
+                                    statusTimeLabel + ': ' + formatMMSS(displayTimeValue)
+                                ),
+                                countdownDisplay && React.createElement('div', { style: { fontSize: 12, color: '#bfbfbf', marginTop: 2 } },
+                                    countdownDisplay
                                 )
                             )
                         )
@@ -1673,9 +1759,9 @@
                                     size: 'large',
                                     block: true,
                                     type: isActive ? 'primary' : 'default',
-                                    onClick: () => handleSleepAction(btn.action),
+                                    onClick: function () { handleSleepAction(btn.action); },
                                     style: isActive
-                                        ? { ...btnBase, borderColor: btn.activeColor, backgroundColor: btn.activeBg, color: btn.activeColor, fontWeight: 'bold', boxShadow: `0 2px 8px ${btn.activeColor}33` }
+                                        ? { ...btnBase, borderColor: btn.activeColor, backgroundColor: btn.activeBg, color: btn.activeColor, fontWeight: 'bold', boxShadow: '0 2px 8px ' + btn.activeColor + '33' }
                                         : btnBase
                                 }, React.createElement('span', { style: { fontSize: 18, marginRight: 8 } }, btn.icon), btn.label)
                             );

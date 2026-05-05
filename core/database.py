@@ -249,17 +249,11 @@ class HumanThinkingDB:
             
             for row in shard_cursor.fetchall():
                 memory = self._row_to_record(row)
-                memory_dict = {
-                    "id": memory.id,
-                    "content": memory.content,
-                    "importance": memory.importance,
-                    "memory_type": memory.memory_type,
-                    "created_at": memory.created_at,
-                    "session_id": memory.session_id,
-                    "agent_id": memory.agent_id,
-                    "from_shard": shard_idx,
-                }
-                results.append(memory_dict)
+                # 标记来源分片（通过 metadata）
+                if memory.metadata is None:
+                    memory.metadata = {}
+                memory.metadata["from_shard"] = shard_idx
+                results.append(memory)
                 
                 if memory.memory_tier == 'frozen':
                     shard_cursor.execute("""
@@ -660,8 +654,16 @@ class HumanThinkingDB:
                     try:
                         self.cursor.execute(stmt)
                     except sqlite3.OperationalError as e:
-                        if "duplicate column" in str(e).lower():
+                        error_msg = str(e).lower()
+                        # SQLite 中 ALTER TABLE ADD COLUMN 列已存在的错误信息
+                        if "duplicate column" in error_msg or "duplicate column name" in error_msg:
                             logger.info(f"列已存在，跳过: {e}")
+                        # 表已存在的错误
+                        elif "table already exists" in error_msg:
+                            logger.info(f"表已存在，跳过: {e}")
+                        # 索引已存在的错误
+                        elif "index already exists" in error_msg:
+                            logger.info(f"索引已存在，跳过: {e}")
                         else:
                             raise
             self.conn.commit()
@@ -978,8 +980,8 @@ class HumanThinkingDB:
         
         fts_memory_ids = self._search_fts(query, max_results * 5)
         
-        def _build_sql_and_params(base_condition, filter_params, tier_clause=""):
-            sql = base_condition + " AND agent_id = ? AND deleted_at IS NULL"
+        def _build_sql_and_params(base_condition, tier_clause=""):
+            sql = base_condition + " WHERE agent_id = ? AND deleted_at IS NULL"
             params = [agent_id]
             if tier_clause:
                 sql += tier_clause
@@ -1069,7 +1071,15 @@ class HumanThinkingDB:
                     tags=[]
                 ))
         
-        # 4. 排序并返回结果
+        # 4. 更新访问统计（access_count + 唤醒冷藏记忆）
+        for result in results:
+            if result.memory_tier != "archived":
+                try:
+                    await self.update_memory_access(result.id)
+                except Exception:
+                    pass
+        
+        # 5. 排序并返回结果
         results.sort(key=lambda x: (x.importance, x.created_at), reverse=True)
         return results[:max_results]
     
@@ -1708,7 +1718,7 @@ class HumanThinkingDB:
         rows = self.cursor.fetchall()
         return [dict(row) for row in rows]
     
-    async def get_recent_memories(self, agent_id: str, days: int = 7) -> List[Dict]:
+    async def get_recent_memories(self, agent_id: str, days: int = 7, limit: int = 500) -> List[Dict]:
         """获取最近N天的所有记忆"""
         import datetime
         cutoff_time = datetime.datetime.now() - datetime.timedelta(days=days)
@@ -1719,8 +1729,8 @@ class HumanThinkingDB:
               AND deleted_at IS NULL 
               AND created_at > ?
             ORDER BY created_at DESC
-            LIMIT 500
-        """, (agent_id, cutoff_time.isoformat()))
+            LIMIT ?
+        """, (agent_id, cutoff_time.isoformat(), limit))
         
         rows = self.cursor.fetchall()
         return [dict(row) for row in rows]

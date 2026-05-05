@@ -22,29 +22,9 @@ from typing import List, Dict, Optional, Any
 from datetime import datetime
 from dataclasses import dataclass
 
+from ..utils.paths import resolve_qwenpaw_dir as _resolve_qwenpaw_dir, resolve_agent_workspace_dir as _resolve_agent_workspace_dir
+
 logger = logging.getLogger(__name__)
-
-
-def _resolve_qwenpaw_dir() -> Path:
-    env_dir = os.environ.get('QWENPAW_WORKING_DIR', '')
-    if env_dir:
-        resolved = Path(env_dir).expanduser().resolve()
-        logger.debug(f"[qwenpaw_dir] using env QWENPAW_WORKING_DIR: {resolved}")
-        return resolved
-    try:
-        from qwenpaw.constant import WORKING_DIR
-        logger.debug(f"[qwenpaw_dir] using qwenpaw.constant.WORKING_DIR: {WORKING_DIR}")
-        return WORKING_DIR
-    except (ImportError, AttributeError):
-        pass
-    legacy = Path("~/.copaw").expanduser()
-    if legacy.exists():
-        resolved = legacy.resolve()
-        logger.debug(f"[qwenpaw_dir] using legacy ~/.copaw: {resolved}")
-        return resolved
-    fallback = Path("~/.qwenpaw").expanduser().resolve()
-    logger.info(f"[qwenpaw_dir] using fallback ~/.qwenpaw: {fallback}")
-    return fallback
 
 
 def _resolve_all_agent_workspace_dirs() -> list[Path]:
@@ -61,26 +41,6 @@ def _resolve_all_agent_workspace_dirs() -> list[Path]:
     if workspaces_dir.exists():
         return [d for d in workspaces_dir.iterdir() if d.is_dir()]
     return []
-
-
-def _resolve_agent_workspace_dir(agent_id: str) -> Path:
-    try:
-        from qwenpaw.config.utils import load_config
-        config = load_config()
-        if agent_id in config.agents.profiles:
-            ws_dir = config.agents.profiles[agent_id].workspace_dir
-            resolved = Path(ws_dir).expanduser().resolve()
-            logger.debug(f"[workspace_resolve] agent={agent_id} -> custom workspace: {resolved}")
-            return resolved
-        else:
-            logger.warning(f"[workspace_resolve] agent={agent_id} not found in profiles, keys={list(config.agents.profiles.keys())}")
-    except ImportError as e:
-        logger.warning(f"[workspace_resolve] cannot import load_config: {e}")
-    except Exception as e:
-        logger.warning(f"[workspace_resolve] failed for agent={agent_id}: {e}", exc_info=True)
-    fallback = _resolve_qwenpaw_dir() / "workspaces" / agent_id
-    logger.info(f"[workspace_resolve] agent={agent_id} -> fallback: {fallback}")
-    return fallback
 
 
 @dataclass

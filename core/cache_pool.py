@@ -124,26 +124,54 @@ class ReadCache:
         # 会话跟踪：{session_id: 最后访问时间戳}
         self._session_last_access: Dict[str, float] = {}
         self._session_idle_timeout = session_idle_timeout
+        
+        # 记忆访问跟踪：{memory_id/temp_id: 最后访问时间戳}
+        self._item_last_access: Dict[str, float] = {}
     
     async def add_batch(self, memories: List[MemoryItem]):
         """批量添加已持久化的记忆到读缓存"""
         async with self._lock:
+            now = time.time()
             for m in memories:
                 self._cache.append(m)
                 self._total_chars += m.char_count
                 # 更新会话最后访问时间
-                self._session_last_access[m.session_id] = time.time()
+                self._session_last_access[m.session_id] = now
+                # 初始化记忆项的访问时间
+                self._item_last_access[m.temp_id] = now
             
             self._evict_if_needed()
     
     def _evict_if_needed(self):
-        """淘汰旧数据，保持缓存大小在限制内"""
+        """淘汰旧数据，保持缓存大小在限制内
+        
+        改进的淘汰策略：
+        1. 优先淘汰最久未访问的记忆项（基于访问时间）
+        2. 如果访问时间不可用，则回退到添加时间（FIFO）
+        """
         while (
             len(self._cache) > self._max_items or
             self._total_chars > self._max_chars
         ) and self._cache:
-            old = self._cache.popleft()
-            self._total_chars -= old.char_count
+            # 找到最久未访问的记忆项
+            oldest_item = None
+            oldest_time = float('inf')
+            
+            for m in self._cache:
+                last_access = self._item_last_access.get(m.temp_id, m.created_at)
+                if last_access < oldest_time:
+                    oldest_time = last_access
+                    oldest_item = m
+            
+            if oldest_item:
+                self._cache.remove(oldest_item)
+                self._total_chars -= oldest_item.char_count
+                self._item_last_access.pop(oldest_item.temp_id, None)
+            else:
+                # 回退到 FIFO
+                old = self._cache.popleft()
+                self._total_chars -= old.char_count
+                self._item_last_access.pop(old.temp_id, None)
         
         # 清理无对应缓存项的会话记录
         active_sessions = set(m.session_id for m in self._cache)
@@ -156,15 +184,17 @@ class ReadCache:
         async with self._lock:
             results = []
             query_lower = query.lower()
+            now = time.time()
             
             for m in self._cache:
                 if session_id and m.session_id != session_id:
                     continue
                 if query_lower in m.content.lower():
                     results.append(m)
+                    # 更新记忆项的访问时间
+                    self._item_last_access[m.temp_id] = now
             
             if results:
-                now = time.time()
                 for m in results:
                     self._session_last_access[m.session_id] = now
             
@@ -512,7 +542,8 @@ class AgentCachePool:
                         role=r.role,
                         importance=r.importance,
                         memory_type=r.memory_type,
-                        metadata=r.metadata or {}
+                        metadata=r.metadata or {},
+                        temp_id=temp_id
                     )
                     results.append(item)
                     seen_ids.add(temp_id)
@@ -553,7 +584,8 @@ class AgentCachePool:
                 role=r.role,
                 importance=r.importance,
                 memory_type=r.memory_type,
-                metadata=r.metadata or {}
+                metadata=r.metadata or {},
+                temp_id=f"db_{r.id}"
             )
             for r in records
         ]

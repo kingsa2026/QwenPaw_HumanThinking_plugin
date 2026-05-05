@@ -16,7 +16,15 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable
 
+from .version import VersionManager
+
 logger = logging.getLogger(__name__)
+
+
+def _parse_version_tuple(version: str) -> tuple:
+    """解析版本号为元组用于比较"""
+    parsed = VersionManager.parse_version(version)
+    return (parsed[0], parsed[1], parsed[2])
 
 
 class Migration:
@@ -80,14 +88,21 @@ class Migrator:
             logger.info("No existing database found, creating new database")
             return self._create_new_database()
         
-        # 按版本排序
-        sorted_migrations = sorted(self._migrations, key=lambda m: m.version)
+        # 按版本排序（使用元组比较）
+        sorted_migrations = sorted(
+            self._migrations, 
+            key=lambda m: _parse_version_tuple(m.version)
+        )
+        
+        current_version_tuple = _parse_version_tuple(current_version)
+        target_version_tuple = _parse_version_tuple(target_version) if target_version else None
         
         # 找到需要执行的迁移
         pending_migrations = []
         for migration in sorted_migrations:
-            if migration.version > current_version:
-                if target_version and migration.version > target_version:
+            migration_tuple = _parse_version_tuple(migration.version)
+            if migration_tuple > current_version_tuple:
+                if target_version_tuple and migration_tuple > target_version_tuple:
                     break
                 pending_migrations.append(migration)
         
@@ -192,14 +207,21 @@ class Migrator:
         if not current_version:
             return {"status": "error", "error": "No database found"}
         
-        if current_version <= target_version:
+        current_version_tuple = _parse_version_tuple(current_version)
+        target_version_tuple = _parse_version_tuple(target_version)
+        
+        if current_version_tuple <= target_version_tuple:
             return {"status": "success", "message": "Already at or before target version"}
         
-        # 找到需要回滚的迁移（倒序）
-        sorted_migrations = sorted(self._migrations, key=lambda m: m.version, reverse=True)
+        # 找到需要回滚的迁移（倒序，使用元组比较）
+        sorted_migrations = sorted(
+            self._migrations, 
+            key=lambda m: _parse_version_tuple(m.version), 
+            reverse=True
+        )
         rollback_migrations = []
         for migration in sorted_migrations:
-            if migration.version > target_version:
+            if _parse_version_tuple(migration.version) > target_version_tuple:
                 rollback_migrations.append(migration)
         
         if not rollback_migrations:
