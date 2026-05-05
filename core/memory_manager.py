@@ -797,7 +797,32 @@ HumanThinking 是你的记忆管理系统，具有以下能力：
         return True
 
     def get_memory_prompt(self, language: str = "zh") -> str:
-        """返回记忆指导 prompt - 引导 agent 阅读 agent-read.md"""
+        """注入记忆上下文：静态指令 + 动态检索结果 + Session桥接
+        
+        QwenPaw 在 _build_sys_prompt 时调用此方法作为唯一记忆注入点。
+        """
+        instruction = self._build_instruction_prompt(language)
+        
+        try:
+            memory_context = self._inject_recent_memories()
+        except Exception:
+            memory_context = ""
+        
+        try:
+            bridge_context = self._inject_session_bridge()
+        except Exception:
+            bridge_context = ""
+        
+        parts = [instruction]
+        if memory_context:
+            parts.append(memory_context)
+        if bridge_context:
+            parts.append(bridge_context)
+        
+        return "\n\n".join(parts)
+    
+    def _build_instruction_prompt(self, language: str = "zh") -> str:
+        """静态使用说明"""
         plugins_dir = _resolve_qwenpaw_dir() / "plugins" / "HumanThinking"
         prompts = {
             "zh": f"""## 🧠 记忆系统 - HumanThinking
@@ -832,6 +857,97 @@ After reading, please save key points to your memory database using `store_memor
 """,
         }
         return prompts.get(language, prompts["zh"])
+    
+    def _inject_recent_memories(self) -> str:
+        """同步注入近期重要记忆（sqlite3 直读，兼容 get_memory_prompt 同步调用）"""
+        import sqlite3
+        
+        db_path = str(self.db_path)
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            
+            rows = conn.execute(
+                """SELECT memory_type, content, importance, created_at
+                   FROM qwenpaw_memory
+                   WHERE agent_id = ? AND deleted_at IS NULL AND memory_tier != 'archived'
+                   ORDER BY COALESCE(last_accessed_at, created_at) DESC
+                   LIMIT 10""",
+                (self.agent_id,)
+            ).fetchall()
+            conn.close()
+            
+            if not rows:
+                return ""
+            
+            lines = ["## 📚 近期重要记忆"]
+            for row in rows:
+                mem_type = row["memory_type"] or "general"
+                content = (row["content"] or "")[:200]
+                lines.append(f"- [{mem_type}] {content}")
+            
+            return "\n".join(lines)
+            
+        except Exception:
+            return ""
+    
+    def _inject_session_bridge(self) -> str:
+        """检测新Session并注入桥接上下文
+        
+        如果当前Session在数据库中记忆数量极少（刚创建的对话），
+        则注入来自历史Session的关键记忆作为上下文延续。
+        """
+        import sqlite3
+        
+        sid = self._current_session_id
+        if not sid:
+            return ""
+        
+        db_path = str(self.db_path)
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            
+            current_count = conn.execute(
+                "SELECT COUNT(*) as cnt FROM qwenpaw_memory WHERE agent_id = ? AND session_id = ? AND deleted_at IS NULL",
+                (self.agent_id, sid)
+            ).fetchone()["cnt"]
+            
+            if current_count >= 5:
+                conn.close()
+                return ""
+            
+            rows = conn.execute(
+                """SELECT DISTINCT session_id, memory_type, content, importance, created_at
+                   FROM qwenpaw_memory
+                   WHERE agent_id = ? AND session_id != ? AND deleted_at IS NULL AND memory_tier != 'archived'
+                   ORDER BY COALESCE(last_accessed_at, created_at) DESC
+                   LIMIT 8""",
+                (self.agent_id, sid)
+            ).fetchall()
+            conn.close()
+            
+            if not rows:
+                return ""
+            
+            lines = ["## 🔗 跨Session记忆桥接（新对话上下文延续）"]
+            seen_sessions = set()
+            count = 0
+            for row in rows:
+                prev_sid = row["session_id"]
+                content = (row["content"] or "")[:150]
+                if prev_sid not in seen_sessions:
+                    lines.append(f"\n**来自此前对话**：")
+                    seen_sessions.add(prev_sid)
+                lines.append(f"- [{row['memory_type']}] {content}")
+                count += 1
+                if count >= 6:
+                    break
+            
+            return "\n".join(lines)
+            
+        except Exception:
+            return ""
 
     def list_memory_tools(self) -> list:
         """返回记忆工具列表"""
