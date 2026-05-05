@@ -1809,6 +1809,69 @@ def ensure_memory_registry_registration() -> dict:
         }
 
 
+def inject_runner_post_reply_dispatch() -> dict:
+    """注入 post_reply hook dispatch 到 QwenPaw AgentRunner.query_handler()
+    
+    QwenPaw 的 runner.py 中 AgentRunner.query_handler() 在生成回复后
+    （_stream_printing_messages_interruptible 循环结束后），
+    没有调用 context_manager.post_reply() 来触发 summarize→store→cache→flush 写入链。
+    此函数在 yield 循环后注入 post_reply 调度代码。
+    """
+    import os
+    
+    runner_path = "/root/.qwenpaw/venv/lib/python3.12/site-packages/qwenpaw/app/runner/runner.py"
+    if not os.path.isfile(runner_path):
+        return {"success": False, "error": f"runner.py not found: {runner_path}"}
+    
+    try:
+        with open(runner_path, "r") as f:
+            content = f.read()
+        
+        begin_marker = "# ── HumanThinking: post_reply dispatch [BEGIN]"
+        end_marker = "# ── HumanThinking: post_reply dispatch [END]"
+        
+        if begin_marker in content:
+            logger.info("[PostReplyDispatch] Already injected")
+            return {"success": True, "injected": False, "message": "Already injected"}
+        
+        _make_backup(runner_path)
+        
+        injection = """
+            # ── HumanThinking: post_reply dispatch [BEGIN] ──
+            if self.context_manager is not None:
+                try:
+                    await self.context_manager.post_reply(
+                        agent=agent,
+                        kwargs={},
+                        output=None,
+                    )
+                except Exception:
+                    logger.debug("post_reply hook failed", exc_info=True)
+            # ── HumanThinking: post_reply dispatch [END] ──
+"""
+        
+        old_pattern = "                    yield msg, last\n\n        except asyncio.CancelledError as exc:"
+        new_pattern = "                    yield msg, last\n" + injection + "\n        except asyncio.CancelledError as exc:"
+        
+        if old_pattern not in content:
+            return {"success": False, "error": "Could not find injection point in runner.py"}
+        
+        new_content = content.replace(old_pattern, new_pattern)
+        
+        if new_content == content:
+            return {"success": False, "error": "Content unchanged after injection"}
+        
+        with open(runner_path, "w") as f:
+            f.write(new_content)
+        
+        logger.info("[PostReplyDispatch] Injected post_reply dispatch into runner.py")
+        return {"success": True, "injected": True, "file": runner_path}
+    
+    except Exception as e:
+        logger.error(f"[PostReplyDispatch] Failed: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
 if __name__ == "__main__":
     import sys
     logging.basicConfig(level=logging.INFO)

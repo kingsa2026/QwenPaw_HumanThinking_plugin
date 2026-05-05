@@ -245,6 +245,10 @@ class HumanThinkingMemoryPlugin:
                 preload_result = patcher_module.inject_registry_preload()
                 logger.info(f"Registry preload injection: {preload_result}")
 
+                logger.info("Step 9: Injecting post_reply dispatch into runner.py...")
+                post_reply_result = patcher_module.inject_runner_post_reply_dispatch()
+                logger.info(f"Post-reply dispatch injection: {post_reply_result}")
+
                 logger.info("=" * 60)
                 return True
             else:
