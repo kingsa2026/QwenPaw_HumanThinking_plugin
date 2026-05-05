@@ -1316,12 +1316,13 @@ def patch_runtime_config_model() -> dict:
 
 
 def inject_persistent_config() -> dict:
-    """注入 QwenPaw 持久配置：将 memory_manager_backend 改为 human_thinking
+    """注入 QwenPaw 持久配置：memory_manager_backend + auto_memory_interval
     
-    这个函数修改 /root/.qwenpaw/config.json，使 QwenPaw 下次重启时使用 HumanThinking。
-    配合 inject_registry_preload() 使用，需要重启两次生效：
-    第一次重启：启动钩子调用本函数 → 写入 config.json
-    第二次重启：QwenPaw 读取 config.json → HumanThinking 已预注册 → 创建 HumanThinkingMemoryManager
+    修改 /root/.qwenpaw/config.json：
+    1. memory_manager_backend → "human_thinking"
+    2. auto_memory_interval → 3（每3轮用户消息触发一次summarize写入链）
+    
+    配合 inject_registry_preload()，需要重启两次生效。
     """
     import json
     import os
@@ -1336,18 +1337,31 @@ def inject_persistent_config() -> dict:
         
         agents = config.get("agents", {})
         running = agents.get("running", {})
-        current = running.get("memory_manager_backend")
+        changes = []
         
-        if current == "human_thinking":
-            return {"success": True, "injected": False, "message": "Already human_thinking, no change needed"}
+        backend_current = running.get("memory_manager_backend")
+        if backend_current != "human_thinking":
+            running["memory_manager_backend"] = "human_thinking"
+            changes.append(f"memory_manager_backend: {backend_current} -> human_thinking")
         
-        running["memory_manager_backend"] = "human_thinking"
+        rlmc = running.get("reme_light_memory_config", {})
+        if not isinstance(rlmc, dict):
+            rlmc = {}
+            running["reme_light_memory_config"] = rlmc
+        
+        interval_current = rlmc.get("auto_memory_interval")
+        if interval_current is None or interval_current <= 0:
+            rlmc["auto_memory_interval"] = 3
+            changes.append(f"auto_memory_interval: {interval_current} -> 3")
+        
+        if not changes:
+            return {"success": True, "injected": False, "message": "All config values already correct, no change needed"}
         
         with open(config_path, "w") as f:
             json.dump(config, f, indent=2, ensure_ascii=False)
         
-        logger.info(f"Persistent config injected: memory_manager_backend 'remelight' -> 'human_thinking'")
-        return {"success": True, "injected": True, "previous": current}
+        logger.info(f"Persistent config injected: {', '.join(changes)}")
+        return {"success": True, "injected": True, "changes": changes}
     
     except Exception as e:
         logger.error(f"Failed to inject persistent config: {e}", exc_info=True)

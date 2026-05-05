@@ -103,6 +103,34 @@ class _DBContext:
         return False
 
 
+def _read_qwenpaw_auto_memory_interval() -> Optional[int]:
+    """从 QwenPaw config.json 读取 auto_memory_interval"""
+    import json
+    config_path = "/root/.qwenpaw/config.json"
+    try:
+        with open(config_path, "r") as f:
+            config = json.load(f)
+        return config.get("agents", {}).get("running", {}).get("reme_light_memory_config", {}).get("auto_memory_interval")
+    except Exception:
+        return None
+
+
+def _write_qwenpaw_auto_memory_interval(value: int) -> bool:
+    """写入 auto_memory_interval 到 QwenPaw config.json"""
+    import json
+    config_path = "/root/.qwenpaw/config.json"
+    try:
+        with open(config_path, "r") as f:
+            config = json.load(f)
+        config.setdefault("agents", {}).setdefault("running", {}).setdefault("reme_light_memory_config", {})["auto_memory_interval"] = value
+        with open(config_path, "w") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to write auto_memory_interval to QwenPaw config: {e}")
+        return False
+
+
 # ============ 请求/响应模型 ============
 
 class StatsResponse(BaseModel):
@@ -182,6 +210,7 @@ class SleepConfigUpdateRequest(BaseModel):
     enable_confidence_scoring: Optional[bool] = None
     auto_resolve_contradiction: Optional[bool] = None
     min_confidence_for_auto_resolve: Optional[float] = Field(None, ge=0.5, le=0.99)
+    auto_memory_interval: Optional[int] = Field(None, ge=0, le=20, description="每N轮用户消息触发一次summarize，null/0禁用")
 
 
 class ForceSleepRequest(BaseModel):
@@ -906,6 +935,8 @@ async def get_sleep_config(agent_id: Optional[str] = None):
         "enable_confidence_scoring": config.enable_confidence_scoring,
         "auto_resolve_contradiction": config.auto_resolve_contradiction,
         "min_confidence_for_auto_resolve": config.min_confidence_for_auto_resolve,
+        # QwenPaw 写入链开关
+        "auto_memory_interval": _read_qwenpaw_auto_memory_interval(),
     }
 
 
@@ -961,6 +992,11 @@ async def update_sleep_config(request: SleepConfigUpdateRequest, agent_id: Optio
         success = save_agent_sleep_config(agent_id, config)
         if not success:
             return {"success": False, "message": "配置保存失败，请检查日志"}
+    
+    if request.auto_memory_interval is not None:
+        qwenpaw_ok = _write_qwenpaw_auto_memory_interval(request.auto_memory_interval)
+        if not qwenpaw_ok:
+            logger.warning("HumanThinking config saved but failed to sync auto_memory_interval to QwenPaw config")
     
     logger.info(f"Sleep config updated for agent {agent_id}: {request.model_dump(exclude_unset=True)}")
     return {"success": True, "config": request.model_dump(exclude_unset=True)}
