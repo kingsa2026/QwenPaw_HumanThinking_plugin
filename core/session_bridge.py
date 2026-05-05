@@ -157,7 +157,8 @@ class SessionBridgeEngine:
             content = m.content if hasattr(m, 'content') else m.get('content', '')
             topics.append(content[:60])
 
-        return f"\u57fa\u4e8e\u4e4b\u524d\u7684\u5bf9\u8bdd\uff1a{';\u3002'.join(topics)}"
+        sep = ';\u3002'
+        return f"\u57fa\u4e8e\u4e4b\u524d\u7684\u5bf9\u8bdd\uff1a{sep.join(topics)}"
 
     async def build_emotional_bridge(
         self,
