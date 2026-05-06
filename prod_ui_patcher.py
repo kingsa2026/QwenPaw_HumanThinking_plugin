@@ -1316,10 +1316,11 @@ def patch_runtime_config_model() -> dict:
 
 
 def inject_persistent_config() -> dict:
-    """注入 QwenPaw 持久配置：memory_manager_backend + auto_memory_interval
+    """注入 QwenPaw 持久配置：memory_manager_backend + auto_memory_interval + 飞书独占
     
     1. memory_manager_backend → "human_thinking"（全局 config.json）
     2. auto_memory_interval → 3（每个 agent 的 agent.json，per-agent 独立配置）
+    3. 飞书独占：确保只有一个 agent 启用飞书（同一 app_id 只能有一个 WebSocket）
     
     配合 inject_registry_preload()，需要重启两次生效。
     """
@@ -1392,10 +1393,70 @@ def inject_persistent_config() -> dict:
             result["errors"].append(f"agent.json {agent_path}: {e}")
             logger.error(f"Failed to inject auto_memory_interval for {agent_path}: {e}")
     
+    # ── 3. 飞书独占：确保只有一个 agent 启用飞书 ──
+    _enforce_feishu_exclusivity(agent_files, result)
+    
     if not result["changes"]:
         result["message"] = "All config values already correct, no change needed"
     
     return result
+
+
+def _enforce_feishu_exclusivity(agent_files: list, result: dict) -> None:
+    """确保只有一个 agent 的 feishu 是 enabled=true。
+    
+    策略：
+    1. 扫描所有 agent.json，找出 feishu.enabled=true 且 app_id 非空的
+    2. 如果只有一个 → 保持，这是"飞书专属 agent"
+    3. 如果多个 → 保留第一个有真实 app_id 的，禁用其他
+    4. 如果没有 → 不做任何事（飞书压根没配）
+    
+    飞书只允许每个 app_id 一个 WebSocket 连接。
+    多 agent 启用 = 互抢连接 = 谁也收不到消息。
+    """
+    import json
+    
+    agents_with_feishu = []
+    
+    for agent_path in agent_files:
+        try:
+            agent_name = agent_path.split("/")[-2]
+            with open(agent_path, "r") as f:
+                agent_config = json.load(f)
+            
+            channels = agent_config.get("channels", {})
+            feishu_cfg = channels.get("feishu", {})
+            if not isinstance(feishu_cfg, dict):
+                feishu_cfg = {}
+            
+            enabled = feishu_cfg.get("enabled", False)
+            app_id = (feishu_cfg.get("app_id") or "").strip()
+            
+            if enabled and app_id:
+                agents_with_feishu.append((agent_path, agent_name, feishu_cfg, agent_config))
+        except Exception:
+            pass
+    
+    if len(agents_with_feishu) <= 1:
+        return
+    
+    logger.warning(
+        f"Multiple agents have Feishu enabled: {[a[1] for a in agents_with_feishu]}. "
+        f"Disabling all but the first one."
+    )
+    
+    primary = agents_with_feishu[0]
+    for agent_path, agent_name, feishu_cfg, agent_config in agents_with_feishu[1:]:
+        try:
+            agent_config["channels"]["feishu"]["enabled"] = False
+            with open(agent_path, "w") as f:
+                json.dump(agent_config, f, indent=2, ensure_ascii=False)
+            result["changes"].append(f"agent[{agent_name}] feishu.enabled: true -> false (exclusive to {primary[1]})")
+            result["injected"] = True
+            logger.info(f"agent.json [{agent_name}]: feishu disabled (exclusive to {primary[1]})")
+        except Exception as e:
+            result["errors"].append(f"agent.json {agent_path} feishu: {e}")
+            logger.error(f"Failed to disable feishu for {agent_path}: {e}")
 
 
 def inject_registry_preload() -> dict:

@@ -129,6 +129,71 @@ def _write_qwenpaw_auto_memory_interval(agent_id: str, value: int) -> bool:
         return False
 
 
+def _get_feishu_agent_id() -> Optional[str]:
+    """返回当前启用飞书的 agent_id（feishu.enabled=true 且 app_id 非空）。
+    如果多个 agent 启用飞书，返回第一个。如果没有，返回 None。
+    """
+    import json
+    import glob as glob_mod
+    
+    agent_files = glob_mod.glob("/root/.qwenpaw/workspaces/*/agent.json")
+    for agent_path in agent_files:
+        try:
+            agent_name = agent_path.split("/")[-2]
+            with open(agent_path, "r") as f:
+                agent_config = json.load(f)
+            channels = agent_config.get("channels", {})
+            feishu_cfg = channels.get("feishu", {})
+            if not isinstance(feishu_cfg, dict):
+                continue
+            if feishu_cfg.get("enabled") and (feishu_cfg.get("app_id") or "").strip():
+                return agent_name
+        except Exception:
+            continue
+    return None
+
+
+def _set_feishu_agent_id(target_agent_id: str) -> bool:
+    """将飞书独占切换到指定 agent。
+    启用 target_agent 的 feishu，禁用所有其他 agent 的 feishu。
+    返回是否成功。
+    """
+    import json
+    import glob as glob_mod
+    
+    agent_files = glob_mod.glob("/root/.qwenpaw/workspaces/*/agent.json")
+    success = False
+    
+    for agent_path in agent_files:
+        try:
+            agent_name = agent_path.split("/")[-2]
+            with open(agent_path, "r") as f:
+                agent_config = json.load(f)
+            
+            channels = agent_config.get("channels", {})
+            feishu_cfg = channels.get("feishu", {})
+            if not isinstance(feishu_cfg, dict):
+                feishu_cfg = {}
+            
+            desired = (agent_name == target_agent_id)
+            current = feishu_cfg.get("enabled", False)
+            
+            if current != desired:
+                if "channels" not in agent_config:
+                    agent_config["channels"] = {}
+                if "feishu" not in agent_config["channels"]:
+                    agent_config["channels"]["feishu"] = feishu_cfg
+                agent_config["channels"]["feishu"]["enabled"] = desired
+                with open(agent_path, "w") as f:
+                    json.dump(agent_config, f, indent=2, ensure_ascii=False)
+                logger.info(f"Feishu exclusive: agent[{agent_name}] enabled={desired}")
+                success = True
+        except Exception as e:
+            logger.error(f"Failed to set feishu for agent[{agent_name}]: {e}")
+    
+    return success
+
+
 # ============ 请求/响应模型 ============
 
 class StatsResponse(BaseModel):
@@ -208,7 +273,8 @@ class SleepConfigUpdateRequest(BaseModel):
     enable_confidence_scoring: Optional[bool] = None
     auto_resolve_contradiction: Optional[bool] = None
     min_confidence_for_auto_resolve: Optional[float] = Field(None, ge=0.5, le=0.99)
-    auto_memory_interval: Optional[int] = Field(None, ge=0, le=20, description="每N轮用户消息触发一次summarize，null/0禁用")
+    auto_memory_interval: Optional[int] = Field(None, ge=0, le=20, description="每N轮用户消息触发一次summarize，0/null禁用")
+    feishu_agent_id: Optional[str] = Field(None, description="指定飞书专属 agent，切换后需重启生效")
 
 
 class ForceSleepRequest(BaseModel):
@@ -935,6 +1001,8 @@ async def get_sleep_config(agent_id: Optional[str] = None):
         "min_confidence_for_auto_resolve": config.min_confidence_for_auto_resolve,
         # QwenPaw 写入链开关
         "auto_memory_interval": _read_qwenpaw_auto_memory_interval(agent_id or "default"),
+        # 飞书独占 agent
+        "feishu_agent_id": _get_feishu_agent_id(),
     }
 
 
@@ -995,6 +1063,13 @@ async def update_sleep_config(request: SleepConfigUpdateRequest, agent_id: Optio
         qwenpaw_ok = _write_qwenpaw_auto_memory_interval(agent_id or "default", request.auto_memory_interval)
         if not qwenpaw_ok:
             logger.warning("HumanThinking config saved but failed to sync auto_memory_interval to agent.json")
+    
+    if request.feishu_agent_id is not None:
+        feishu_ok = _set_feishu_agent_id(request.feishu_agent_id)
+        if feishu_ok:
+            logger.info(f"Feishu exclusive switched to agent: {request.feishu_agent_id}")
+        else:
+            logger.warning(f"Failed to set Feishu exclusive agent to: {request.feishu_agent_id}")
     
     logger.info(f"Sleep config updated for agent {agent_id}: {request.model_dump(exclude_unset=True)}")
     return {"success": True, "config": request.model_dump(exclude_unset=True)}
