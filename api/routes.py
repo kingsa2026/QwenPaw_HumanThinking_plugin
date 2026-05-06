@@ -15,7 +15,9 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field
 
 from ..utils.paths import resolve_qwenpaw_dir, resolve_agent_workspace_dir, validate_agent_id, safe_path_join, get_db_path as _get_db_path
@@ -1011,8 +1013,20 @@ async def get_sleep_config(agent_id: Optional[str] = None):
     operation_name="update_sleep_config",
     allow_fallback=False
 )
-async def update_sleep_config(request: SleepConfigUpdateRequest, agent_id: Optional[str] = None):
+async def update_sleep_config(payload: Request, agent_id: Optional[str] = None):
     """更新睡眠配置（支持按Agent隔离）"""
+    import json as _json
+    
+    raw_body = None
+    try:
+        raw_body = await payload.body()
+        raw_text = raw_body.decode("utf-8", errors="replace")
+        request_data = _json.loads(raw_text)
+        request = SleepConfigUpdateRequest(**request_data)
+    except Exception as e:
+        raw_preview = (raw_body.decode("utf-8", errors="replace")[:300] if raw_body else "<empty>")
+        logger.error(f"update_sleep_config parse failed: body={raw_preview} error={e}")
+        raise HTTPException(status_code=422, detail=f"Invalid request body: {str(e)}")
     from ..core.sleep_manager import get_agent_sleep_config, save_agent_sleep_config, SleepConfig
     
     old_config = get_agent_sleep_config(agent_id)
