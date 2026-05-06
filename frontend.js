@@ -9,6 +9,63 @@
 
     const PLUGIN_ID = 'humanthinking';
 
+    // ── Lucide 内联 SVG 图标 ──
+    const LUCIDE_PATHS = {
+        settings: 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+        sun: 'M12 2v2 M12 20v2 M4.93 4.93l1.41 1.41 M17.66 17.66l1.41 1.41 M2 12h2 M20 12h2 M6.34 17.66l-1.41 1.41 M19.07 4.93l-1.41 1.41 M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10z',
+        star: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
+        moon: 'M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z',
+        brain: 'M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.17-2.44v-1A2.5 2.5 0 0 1 3.5 12 2.5 2.5 0 0 1 4.87 7.5v-1A2.5 2.5 0 0 1 9.5 2z M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.17-2.44v-1A2.5 2.5 0 0 0 20.5 12 2.5 2.5 0 0 0 19.13 7.5v-1A2.5 2.5 0 0 0 14.5 2z',
+        zap: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z',
+        link: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71 M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
+        snowflake: 'M12 2v20 M12 2l3 3 M12 2L9 5 M12 22l3-3 M12 22l-3-3 M2 12h20 M2 12l3-3 M2 12l3 3 M22 12l-3-3 M22 12l-3 3 M6.34 17.66l1.41-1.41 M17.66 6.34l-1.41-1.41 M17.66 17.66l-1.41-1.41 M6.34 6.34l1.41-1.41',
+        chartBar: 'M3 3v18h18 M18 9v10 M13 13v6 M8 17v2',
+        plug: 'M12 22v-5 M9 8V3h6v5 M15 10l-3 3-3-3 M21 10H3 M12 22a4 4 0 0 0 4-4v-3H8v3a4 4 0 0 0 4 4z',
+        pencil: 'M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z M15 5l4 4',
+        smile: 'M8 14s1.5 2 4 2 4-2 4-2 M9 9h.01 M15 9h.01 M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z',
+        frown: 'M8 14s1.5-2 4-2 4 2 4 2 M9 9h.01 M15 9h.01 M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z',
+        alertCircle: 'M12 8v4 M12 16h.01 M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z',
+        meh: 'M8 15h8 M9 9h.01 M15 9h.01 M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z',
+        sparkles: 'M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z M12 3v0 M6 3l.75 2.25L9 6l-2.25.75L6 9l-.75-2.25L3 6l2.25-.75z M18 3l.75 2.25L21 6l-2.25.75L18 9l-.75-2.25L15 6l2.25-.75z',
+        calendar: 'M8 2v4 M16 2v4 M3 10h18 M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z',
+        clock: 'M12 6v6l4 2 M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z',
+        activity: 'M22 12h-4l-3 9L9 3l-3 9H2',
+        edit3: 'M21.3 5.3a3.5 3.5 0 0 0-4.95-4.95L15.3 1.4a1 1 0 0 0-.7.3L12 4.5 7.5.05a1 1 0 0 0-1.41 0l-6 6a1 1 0 0 0 0 1.41L12 19.5l11.9-11.9a1 1 0 0 0 .3-.7z M12 4.5L19.5 12',
+        cloud: 'M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9z',
+        search: 'M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z',
+        fileText: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8'
+    };
+
+    const createLucideIcon = (iconName, opts) => {
+        opts = opts || {};
+        const size = opts.size || 16;
+        const strokeWidth = opts.strokeWidth || 2;
+        const color = opts.color || 'currentColor';
+        const paths = LUCIDE_PATHS[iconName];
+        if (!paths) return null;
+        const pathArr = paths.split(' M').map(function(p, i) { return (i === 0 ? 'M' : 'M') + p; });
+        return React.createElement('svg', {
+            xmlns: 'http://www.w3.org/2000/svg',
+            width: size,
+            height: size,
+            viewBox: '0 0 24 24',
+            fill: 'none',
+            stroke: color,
+            strokeWidth: strokeWidth,
+            strokeLinecap: 'round',
+            strokeLinejoin: 'round',
+            style: opts.style || { verticalAlign: 'middle' }
+        }, ...pathArr.map(function(d, i) { return React.createElement('path', { d: d, key: i }); }));
+    };
+
+    const Icon = function(name, size, color) {
+        return createLucideIcon(name, { size: size, color: color });
+    };
+
+    const IconWithStyle = function(name, size, color, style) {
+        return createLucideIcon(name, { size: size, color: color, style: style });
+    };
+
     // 注入原生风格CSS - 使用QwenPaw原生变量和类名
     const injectNativeStyles = () => {
         if (document.getElementById('humanthinking-native-styles')) return;
@@ -482,7 +539,7 @@
             const agent = useAgent();
 
             return React.createElement('div', { className: 'ht-agent-bar' },
-                React.createElement('span', { style: { fontSize: '14px' } }, '🤖'),
+                React.createElement(Icon('brain', 16)),
                 React.createElement('span', null, t('agent.current', 'Current Agent') + '：'),
                 React.createElement('span', { style: { fontWeight: 600 } }, agent.agent_name || t('agent.notSelected', 'Not Selected'))
             );
@@ -567,10 +624,10 @@
                 if (!stats) return React.createElement(Empty, { description: t('common.loading', 'Loading...') });
 
                 const statItems = [
-                    { title: t('stats.totalMemories', 'Total Memories'), value: stats.total_memories || 0, color: '#1890ff', icon: '📊' },
-                    { title: t('stats.crossSession', 'Cross-Session'), value: stats.cross_session_memories || 0, color: '#52c41a', icon: '🔗' },
-                    { title: t('stats.frozen', 'Frozen'), value: stats.frozen_memories || 0, color: '#faad14', icon: '❄️' },
-                    { title: t('stats.activeSessions', 'Active Sessions'), value: stats.active_sessions || 0, color: '#722ed1', icon: '🔌' }
+                    { title: t('stats.totalMemories', 'Total Memories'), value: stats.total_memories || 0, color: '#1890ff', icon: Icon('chartBar', 20, '#1890ff') },
+                    { title: t('stats.crossSession', 'Cross-Session'), value: stats.cross_session_memories || 0, color: '#52c41a', icon: Icon('link', 20, '#52c41a') },
+                    { title: t('stats.frozen', 'Frozen'), value: stats.frozen_memories || 0, color: '#faad14', icon: Icon('snowflake', 20, '#faad14') },
+                    { title: t('stats.activeSessions', 'Active Sessions'), value: stats.active_sessions || 0, color: '#722ed1', icon: Icon('activity', 20, '#722ed1') }
                 ];
 
                 return React.createElement('div', { style: { padding: 16 } },
@@ -750,7 +807,7 @@
                                     React.createElement(Button, {
                                         type: 'text',
                                         size: 'small',
-                                        icon: React.createElement('span', null, '✏️'),
+                                        icon: Icon('pencil', 14),
                                         onClick: () => handleEdit(item)
                                     }, t('common.edit', 'Edit'))
                                 ]
@@ -813,13 +870,13 @@
                                 onChange: value => setEditType(value),
                                 style: { width: '100%' },
                                 options: [
-                                    { value: 'fact', label: t('memory.types.fact', '📋 Fact') },
-                                    { value: 'emotion', label: t('memory.types.emotion', '💝 Emotion') },
-                                    { value: 'preference', label: t('memory.types.preference', '⭐ Preference') },
-                                    { value: 'order', label: t('memory.types.order', '🛒 Order') },
-                                    { value: 'address', label: t('memory.types.address', '📍 Address') },
-                                    { value: 'contact', label: t('memory.types.contact', '📞 Contact') },
-                                    { value: 'other', label: t('memory.types.other', '📦 Other') }
+                                    { value: 'fact', label: t('memory.types.fact', 'Fact') },
+                                    { value: 'emotion', label: t('memory.types.emotion', 'Emotion') },
+                                    { value: 'preference', label: t('memory.types.preference', 'Preference') },
+                                    { value: 'order', label: t('memory.types.order', 'Order') },
+                                    { value: 'address', label: t('memory.types.address', 'Address') },
+                                    { value: 'contact', label: t('memory.types.contact', 'Contact') },
+                                    { value: 'other', label: t('memory.types.other', 'Other') }
                                 ]
                             })
                         ),
@@ -834,7 +891,7 @@
                         )
                     ),
                     React.createElement(Modal, {
-                        title: '⚠️ ' + t('memory.batchDeleteConfirm', 'Confirm Batch Delete'),
+                        title: React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } }, Icon('alertCircle', 16, '#ff4d4f'), t('memory.batchDeleteConfirm', 'Confirm Batch Delete')),
                         open: deleteConfirmVisible,
                         onOk: handleConfirmDelete,
                         onCancel: () => setDeleteConfirmVisible(false),
@@ -890,11 +947,11 @@
 
             const renderEmotion = () => {
                 const emotionConfig = {
-                    happy: { icon: '😊', label: t('emotion.happy', 'Happy'), color: '#52c41a' },
-                    sad: { icon: '😢', label: t('emotion.sad', 'Sad'), color: '#1890ff' },
-                    angry: { icon: '😠', label: t('emotion.angry', 'Angry'), color: '#ff4d4f' },
-                    neutral: { icon: '😐', label: t('emotion.neutral', 'Neutral'), color: '#999' },
-                    surprised: { icon: '😮', label: t('emotion.surprised', 'Surprised'), color: '#faad14' }
+                    happy: { icon: Icon('smile', 16, '#52c41a'), label: t('emotion.happy', 'Happy'), color: '#52c41a' },
+                    sad: { icon: Icon('frown', 16, '#1890ff'), label: t('emotion.sad', 'Sad'), color: '#1890ff' },
+                    angry: { icon: Icon('alertCircle', 16, '#ff4d4f'), label: t('emotion.angry', 'Angry'), color: '#ff4d4f' },
+                    neutral: { icon: Icon('meh', 16, '#999'), label: t('emotion.neutral', 'Neutral'), color: '#999' },
+                    surprised: { icon: Icon('sparkles', 16, '#faad14'), label: t('emotion.surprised', 'Surprised'), color: '#faad14' }
                 };
                 const current = emotionConfig[emotion?.current_emotion] || emotionConfig.neutral;
                 const history = (emotion?.history || []).slice().reverse();
@@ -928,7 +985,7 @@
                     React.createElement(Card, {
                         size: 'small',
                         title: React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-                            React.createElement('span', null, '📈'),
+                            Icon('activity', 14, '#666'),
                             React.createElement('span', { style: { fontWeight: 600 } }, t('emotion.history', 'Recent Emotion Changes'))
                         ),
                         headStyle: { background: '#fafafa', borderBottom: '1px solid #f0f0f0' }
@@ -1083,7 +1140,7 @@
                 );
 
                 return React.createElement('div', { style: { padding: 16 } },
-                    React.createElement(ConfigSection, { title: t('config.basicFeatures', 'Basic Features'), icon: '⚙️' },
+                    React.createElement(ConfigSection, { title: t('config.basicFeatures', 'Basic Features'), icon: Icon('settings', 16) },
                         React.createElement(ConfigItem, {
                             label: t('config.crossSession', 'Cross-Session Memory'),
                             description: t('config.crossSessionDesc', 'Enable memory sharing across sessions')
@@ -1126,7 +1183,7 @@
                         )
                     ),
 
-                    React.createElement(ConfigSection, { title: t('config.sessionSettings', 'Session Settings'), icon: '⏱️' },
+                    React.createElement(ConfigSection, { title: t('config.sessionSettings', 'Session Settings'), icon: Icon('clock', 16) },
                         React.createElement(ConfigItem, {
                             label: t('config.sessionIdleTimeout', 'Session Idle Timeout'),
                             description: t('config.sessionIdleTimeoutDesc', 'Time before session becomes idle')
@@ -1180,7 +1237,7 @@
                         )
                     ),
 
-                    React.createElement(ConfigSection, { title: t('config.lifecycleSettings', 'Lifecycle Settings'), icon: '\ud83d\udcc5' },
+                    React.createElement(ConfigSection, { title: t('config.lifecycleSettings', 'Lifecycle Settings'), icon: Icon('calendar', 16) },
                         React.createElement(ConfigItem, {
                             label: t('config.frozenDays', 'Frozen Days'),
                             description: t('config.frozenDaysDesc', 'Days before memories are frozen')
@@ -1329,7 +1386,7 @@
                     const modalHtml = `
                         <div id="${modalId}" style="position:fixed;top:0;left:0;right:0;bottom:0;background:${themeStyles.modalOverlay};display:flex;align-items:center;justify-content:center;z-index:1000;" onclick="if(event.target===this)document.getElementById('${modalId}').remove()">
                             <div style="background:${themeStyles.modalBg};border-radius:8px;padding:24px;max-width:500px;width:90%;box-shadow:0 4px 12px rgba(0,0,0,0.15);border:1px solid ${themeStyles.cardBorder};color:${themeStyles.textColor};">
-                                <h3 style="margin-bottom:16px;color:${themeStyles.dangerText};">${t('about.uninstall.warning', '⚠️ Confirm Uninstall')}</h3>
+                                <h3 style="margin-bottom:16px;color:${themeStyles.dangerText};">${t('about.uninstall.warning', 'Confirm Uninstall')}</h3>
                                 <div style="margin-bottom:16px;">${t('about.uninstall.confirmMessage', 'Are you sure you want to uninstall the HumanThinking plugin? This action cannot be undone.')}</div>
                                 
                                 <div style="margin-bottom:16px;padding:12px;background:${themeStyles.cardBg};border-radius:4px;border:1px solid ${themeStyles.cardBorder};">
@@ -1341,7 +1398,7 @@
                                 </div>
 
                                 <div style="margin-bottom:16px;font-size:13px;color:${themeStyles.textSecondary};">
-                                    <div style="font-weight:bold;margin-bottom:8px;color:${themeStyles.textColor};">📦 ${t('about.uninstall.keepDataOptions', 'Data Retention Options')}</div>
+                                    <div style="font-weight:bold;margin-bottom:8px;color:${themeStyles.textColor};">${t('about.uninstall.keepDataOptions', 'Data Retention Options')}</div>
                                     <ul style="margin:4px 0;padding-left:20px;">
                                         <li>${t('about.uninstall.keepDataOption1', 'Default checked "Keep data (config and database files)"')}</li>
                                         <li>${t('about.uninstall.keepDataOption2', 'When checked: Uninstall plugin but keep all memory data')}</li>
@@ -1350,7 +1407,7 @@
                                 </div>
 
                                 <div style="margin-bottom:16px;font-size:13px;color:${themeStyles.textSecondary};">
-                                    <div style="font-weight:bold;margin-bottom:8px;color:${themeStyles.textColor};">⚡ ${t('about.uninstall.uninstallActions', 'Uninstall will perform')}</div>
+                                    <div style="font-weight:bold;margin-bottom:8px;color:${themeStyles.textColor};">${t('about.uninstall.uninstallActions', 'Uninstall will perform')}</div>
                                     <ul style="margin:4px 0;padding-left:20px;">
                                         <li>${t('about.uninstall.action1', 'Delete plugin directory')}</li>
                                         <li>${t('about.uninstall.action2', 'Remove plugin from QwenPaw config')}</li>
@@ -1410,7 +1467,7 @@
                 return React.createElement('div', { style: { padding: 16, color: themeStyles.textColor } },
                     // 版本信息
                     React.createElement('div', { style: { marginBottom: 24 } },
-                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: `2px solid ${themeStyles.linkColor}`, paddingBottom: 8, color: themeStyles.textColor } }, '📋 ' + t('about.versionInfo', 'Version Info')),
+                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: `2px solid ${themeStyles.linkColor}`, paddingBottom: 8, color: themeStyles.textColor } }, Icon('fileText', 16, themeStyles.linkColor), ' ', t('about.versionInfo', 'Version Info')),
                         React.createElement('div', {
                             style: { background: themeStyles.cardBg, padding: 16, borderRadius: 8, border: `1px solid ${themeStyles.cardBorder}` }
                         },
@@ -1442,12 +1499,12 @@
 
                     // 功能说明
                     React.createElement('div', { style: { marginBottom: 24 } },
-                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: '2px solid #52c41a', paddingBottom: 8, color: themeStyles.textColor } }, '✨ ' + t('about.features.title', 'Features')),
+                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: '2px solid #52c41a', paddingBottom: 8, color: themeStyles.textColor } }, Icon('sparkles', 16, '#52c41a'), ' ', t('about.features.title', 'Features')),
                         React.createElement('div', {
                             style: { background: themeStyles.featureBg, padding: 16, borderRadius: 8, border: `1px solid ${themeStyles.featureBorder}` }
                         },
                             React.createElement('div', { style: { marginBottom: 12 } },
-                                React.createElement('h4', { style: { color: themeStyles.textColor } }, t('about.features.memory', '🧠 Memory Management')),
+                                React.createElement('h4', { style: { color: themeStyles.textColor } }, Icon('brain', 14), ' ', t('about.features.memory', 'Memory Management')),
                                 React.createElement('ul', null,
                                     React.createElement('li', null, t('about.features.memoryDesc.0', 'Cross-session memory persistence')),
                                     React.createElement('li', null, t('about.features.memoryDesc.1', 'Memory search - Support keyword and semantic search')),
@@ -1456,7 +1513,7 @@
                                 )
                             ),
                             React.createElement('div', { style: { marginBottom: 12 } },
-                                React.createElement('h4', { style: { color: themeStyles.textColor } }, t('about.features.sleep', '🌙 Sleep Management')),
+                                React.createElement('h4', { style: { color: themeStyles.textColor } }, Icon('moon', 14), ' ', t('about.features.sleep', 'Sleep Management')),
                                 React.createElement('ul', null,
                                     React.createElement('li', null, t('about.features.sleepDesc.0', 'Smart sleep scheduling')),
                                     React.createElement('li', null, t('about.features.sleepDesc.1', 'Dream generation - Organize and consolidate memories during sleep')),
@@ -1464,7 +1521,7 @@
                                 )
                             ),
                             React.createElement('div', null,
-                                React.createElement('h4', { style: { color: themeStyles.textColor } }, t('about.features.config', '⚙️ Configuration')),
+                                React.createElement('h4', { style: { color: themeStyles.textColor } }, Icon('settings', 14), ' ', t('about.features.config', 'Configuration')),
                                 React.createElement('ul', null,
                                     React.createElement('li', null, t('about.features.configDesc.0', 'Support Agent-isolated configuration')),
                                     React.createElement('li', null, t('about.features.configDesc.1', 'Distributed database support')),
@@ -1476,7 +1533,7 @@
 
                     // 一键卸载
                     React.createElement('div', { style: { marginBottom: 24 } },
-                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: '2px solid #ff4d4f', paddingBottom: 8, color: themeStyles.textColor } }, '⚠️ ' + t('about.dangerZone', 'Danger Zone')),
+                        React.createElement('h3', { style: { marginBottom: 16, borderBottom: '2px solid #ff4d4f', paddingBottom: 8, color: themeStyles.textColor } }, Icon('alertCircle', 16, '#ff4d4f'), ' ', t('about.dangerZone', 'Danger Zone')),
                         React.createElement('div', {
                             style: { background: themeStyles.dangerBg, padding: 16, borderRadius: 8, border: `1px solid ${themeStyles.dangerBorder}` }
                         },
@@ -1495,26 +1552,26 @@
                                     fontSize: '14px',
                                     fontWeight: 'bold'
                                 }
-                            }, '⚠️ ' + t('about.uninstall.button', 'Uninstall Plugin'))
+                            }, Icon('alertCircle', 14, 'white'), ' ', t('about.uninstall.button', 'Uninstall Plugin'))
                         )
                     )
                 );
             };
 
             const tabItems = [
-                { key: 'stats', label: '📊 ' + t('nav.stats', 'Memory Stats'), children: renderStats() },
-                { key: 'search', label: '🔍 ' + t('nav.search', 'Memory Search'), children: renderSearch() },
-                { key: 'emotion', label: '💝 ' + t('nav.emotion', 'Emotion Status'), children: renderEmotion() },
-                { key: 'timeline', label: '📅 ' + t('nav.timeline', 'Timeline'), children: renderTimeline() },
-                { key: 'config', label: '⚙️ ' + t('nav.config', 'Memory Config'), children: renderConfig() },
-                { key: 'about', label: 'ℹ️ ' + t('nav.about', 'About'), children: renderAbout() }
+                { key: 'stats', label: React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } }, Icon('chartBar', 14), t('nav.stats', 'Memory Stats')), children: renderStats() },
+                { key: 'search', label: React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } }, Icon('search', 14), t('nav.search', 'Memory Search')), children: renderSearch() },
+                { key: 'emotion', label: React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } }, Icon('smile', 14), t('nav.emotion', 'Emotion Status')), children: renderEmotion() },
+                { key: 'timeline', label: React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } }, Icon('calendar', 14), t('nav.timeline', 'Timeline')), children: renderTimeline() },
+                { key: 'config', label: React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } }, Icon('settings', 14), t('nav.config', 'Memory Config')), children: renderConfig() },
+                { key: 'about', label: React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } }, Icon('fileText', 14), t('nav.about', 'About')), children: renderAbout() }
             ];
 
             return React.createElement('div', { style: { height: '100%', display: 'flex', flexDirection: 'column' } },
                 // 标题栏 - 使用原生CSS类
                 React.createElement('div', { className: 'ht-page-header' },
                     React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-                        React.createElement('span', { style: { fontSize: '20px' } }, '🧠'),
+                        Icon('brain', 20),
                         React.createElement('div', null,
                             React.createElement('div', { className: 'ht-page-title' }, 'HumanThinking ' + t('memory.title', 'Memory Management')),
                             React.createElement('div', { className: 'ht-page-subtitle' }, t('plugin.description', 'Memory Management Plugin'))
@@ -1625,10 +1682,10 @@
             };
 
             const statusConfig = {
-                active: { icon: '☀️', label: t('sleep.status.awake', 'Active'), color: '#52c41a' },
-                light_sleep: { icon: '⭐', label: t('sleep.status.light', 'Light Sleep'), color: '#faad14' },
-                rem: { icon: '💭', label: t('sleep.status.rem', 'REM Sleep'), color: '#1890ff' },
-                deep_sleep: { icon: '🌙', label: t('sleep.status.deep', 'Deep Sleep'), color: '#722ed1' }
+                active: { icon: Icon('sun', 16, '#52c41a'), label: t('sleep.status.awake', 'Active'), color: '#52c41a' },
+                light_sleep: { icon: Icon('star', 16, '#faad14'), label: t('sleep.status.light', 'Light Sleep'), color: '#faad14' },
+                rem: { icon: Icon('brain', 16, '#1890ff'), label: t('sleep.status.rem', 'REM Sleep'), color: '#1890ff' },
+                deep_sleep: { icon: Icon('moon', 16, '#722ed1'), label: t('sleep.status.deep', 'Deep Sleep'), color: '#722ed1' }
             };
 
             const current = statusConfig[sleepStatus?.status] || statusConfig.active;
@@ -1716,10 +1773,10 @@
 
                 const btnBase = { height: 48, transition: 'all 0.3s' };
                 const sleepButtons = [
-                    { key: 'light', action: 'light', icon: '⭐', label: t('sleep.lightSleep', 'Light Sleep'), activeStatus: 'light_sleep', activeColor: '#faad14', activeBg: '#fffbe6' },
-                    { key: 'rem', action: 'rem', icon: '💭', label: t('sleep.remSleep', 'REM Sleep'), activeStatus: 'rem', activeColor: '#1890ff', activeBg: '#e6f7ff' },
-                    { key: 'deep', action: 'deep', icon: '🌙', label: t('sleep.deepSleep', 'Deep Sleep'), activeStatus: 'deep_sleep', activeColor: '#722ed1', activeBg: '#f9f0ff' },
-                    { key: 'wakeup', action: 'wakeup', icon: '☀️', label: t('sleep.wakeUp', 'Wake Up'), activeStatus: 'active', activeColor: '#52c41a', activeBg: '#f6ffed' }
+                    { key: 'light', action: 'light', icon: 'star', label: t('sleep.lightSleep', 'Light Sleep'), activeStatus: 'light_sleep', activeColor: '#faad14', activeBg: '#fffbe6' },
+                    { key: 'rem', action: 'rem', icon: 'brain', label: t('sleep.remSleep', 'REM Sleep'), activeStatus: 'rem', activeColor: '#1890ff', activeBg: '#e6f7ff' },
+                    { key: 'deep', action: 'deep', icon: 'moon', label: t('sleep.deepSleep', 'Deep Sleep'), activeStatus: 'deep_sleep', activeColor: '#722ed1', activeBg: '#f9f0ff' },
+                    { key: 'wakeup', action: 'wakeup', icon: 'sun', label: t('sleep.wakeUp', 'Wake Up'), activeStatus: 'active', activeColor: '#52c41a', activeBg: '#f6ffed' }
                 ];
 
                 const agentDisplayName = agent.agent_name || agent.agent_id || 'Agent';
@@ -1763,7 +1820,7 @@
                                     style: isActive
                                         ? { ...btnBase, borderColor: btn.activeColor, backgroundColor: btn.activeBg, color: btn.activeColor, fontWeight: 'bold', boxShadow: '0 2px 8px ' + btn.activeColor + '33' }
                                         : btnBase
-                                }, React.createElement('span', { style: { fontSize: 18, marginRight: 8 } }, btn.icon), btn.label)
+                                }, Icon(btn.icon, 16, isActive ? btn.activeColor : undefined), ' ', btn.label)
                             );
                         })
                     )
@@ -1909,7 +1966,7 @@
                 const enableSleepDesc = rawDesc.replace('{agent}', agentName);
 
                 return React.createElement('div', { style: { padding: 16 } },
-                    React.createElement(ConfigSection, { title: t('sleep.basicSettings', 'Basic Settings'), icon: '⚙️' },
+                    React.createElement(ConfigSection, { title: t('sleep.basicSettings', 'Basic Settings'), icon: Icon('settings', 16) },
                         React.createElement(ConfigItem, {
                             label: t('sleep.enableAgentSleep', 'Enable {agent} Sleep').replace('{agent}', agentName),
                             description: enableSleepDesc
@@ -1959,7 +2016,7 @@
                         )
                     ),
 
-                    React.createElement(ConfigSection, { title: t('sleep.consolidationSettings', 'Consolidation Settings'), icon: '🧠' },
+                    React.createElement(ConfigSection, { title: t('sleep.consolidationSettings', 'Consolidation Settings'), icon: Icon('brain', 16) },
                         React.createElement(ConfigItem, {
                             label: t('sleep.enableInsight', 'Auto Consolidation'),
                             description: t('sleep.enableInsightDesc', 'Automatically consolidate memories, scan N days')
@@ -1996,7 +2053,7 @@
                         )
                     ),
 
-                    React.createElement(ConfigSection, { title: t('sleep.mergeSettings', 'Memory Merge'), icon: '🔗' },
+                    React.createElement(ConfigSection, { title: t('sleep.mergeSettings', 'Memory Merge'), icon: Icon('link', 16) },
                         React.createElement(ConfigItem, {
                             label: t('sleep.enableMerge', 'Auto Merge Similar Memories'),
                             description: t('sleep.enableMergeDesc', 'Automatically merge similar memories during sleep')
@@ -2035,7 +2092,7 @@
                         )
                     ),
 
-                    React.createElement(ConfigSection, { title: t('sleep.contradictionSettings', 'Contradiction Detection'), icon: '⚡' },
+                    React.createElement(ConfigSection, { title: t('sleep.contradictionSettings', 'Contradiction Detection'), icon: Icon('zap', 16) },
                         React.createElement(ConfigItem, {
                             label: t('sleep.enableContradictionDetection', 'Contradiction Detection'),
                             description: t('sleep.enableContradictionDetectionDesc', 'Automatically detect and handle conflicting memories during sleep')
@@ -2141,17 +2198,17 @@
             // 功能说明
             const renderEnergy = () => {
                 const sleepStates = [
-                    { icon: '☀️', name: t('sleep.states.active.name', 'Active State'), energy: t('sleep.states.active.energy', 'High'), color: '#52c41a', desc: t('sleep.states.active.desc', 'Agent is fully active, responding to user requests normally.') },
-                    { icon: '⭐', name: t('sleep.states.light.name', 'Light Sleep'), energy: t('sleep.states.light.energy', 'Med-High'), color: '#faad14', desc: t('sleep.states.light.desc', 'Agent enters light rest state, reducing power but maintaining basic responsiveness.') },
-                    { icon: '💭', name: t('sleep.states.rem.name', 'REM Stage'), energy: t('sleep.states.rem.energy', 'Medium'), color: '#1890ff', desc: t('sleep.states.rem.desc', 'Simulate human REM sleep, performing memory reorganization and pattern recognition.') },
-                    { icon: '🌙', name: t('sleep.states.deep.name', 'Deep Sleep'), energy: t('sleep.states.deep.energy', 'Low'), color: '#722ed1', desc: t('sleep.states.deep.desc', 'Agent enters deep consolidation state, performing six-dimensional weighted scoring on candidate memories, executing forgetting curve algorithm.') }
+                    { icon: 'sun', name: t('sleep.states.active.name', 'Active State'), energy: t('sleep.states.active.energy', 'High'), color: '#52c41a', desc: t('sleep.states.active.desc', 'Agent is fully active, responding to user requests normally.') },
+                    { icon: 'star', name: t('sleep.states.light.name', 'Light Sleep'), energy: t('sleep.states.light.energy', 'Med-High'), color: '#faad14', desc: t('sleep.states.light.desc', 'Agent enters light rest state, reducing power but maintaining basic responsiveness.') },
+                    { icon: 'brain', name: t('sleep.states.rem.name', 'REM Stage'), energy: t('sleep.states.rem.energy', 'Medium'), color: '#1890ff', desc: t('sleep.states.rem.desc', 'Simulate human REM sleep, performing memory reorganization and pattern recognition.') },
+                    { icon: 'moon', name: t('sleep.states.deep.name', 'Deep Sleep'), energy: t('sleep.states.deep.energy', 'Low'), color: '#722ed1', desc: t('sleep.states.deep.desc', 'Agent enters deep consolidation state, performing six-dimensional weighted scoring on candidate memories, executing forgetting curve algorithm.') }
                 ];
 
                 return React.createElement('div', { style: { padding: 16 } },
                     React.createElement(Card, {
                         size: 'small',
                         title: React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-                            React.createElement('span', null, '📖'),
+                            React.createElement('span', null, Icon('cloud', 16)),
                             React.createElement('span', { style: { fontWeight: 600 } }, t('sleep.energyTitle', 'Features'))
                         ),
                         style: { marginBottom: 16 },
@@ -2177,7 +2234,7 @@
                                                 justifyContent: 'center',
                                                 fontSize: 20
                                             }
-                                        }, item.icon),
+                                        }, Icon(item.icon, 20, item.color)),
                                         React.createElement('div', { style: { flex: 1 } },
                                             React.createElement('div', { style: { fontWeight: 'bold', color: item.color, fontSize: 14 } }, item.name)
                                         ),
@@ -2192,7 +2249,7 @@
                     React.createElement(Card, {
                         size: 'small',
                         title: React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-                            React.createElement('span', null, '📊'),
+                            Icon('chartBar', 14, '#666'),
                             React.createElement('span', { style: { fontWeight: 600 } }, t('sleep.scoring.title', 'Six-Dimensional Scoring System'))
                         ),
                         headStyle: { background: '#fafafa', borderBottom: '1px solid #f0f0f0' }
@@ -2219,16 +2276,16 @@
             };
 
             const tabItems = [
-                { key: 'status', label: '🌙 ' + t('sleep.statusTitle', 'Sleep Status'), children: renderStatus() },
-                { key: 'config', label: '⚙️ ' + t('sleep.configTitle', 'Parameters'), children: renderConfig() },
-                { key: 'energy', label: '📖 ' + t('sleep.energyTitle', 'Features'), children: renderEnergy() }
+                { key: 'status', label: React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } }, Icon('moon', 14), t('sleep.statusTitle', 'Sleep Status')), children: renderStatus() },
+                { key: 'config', label: React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } }, Icon('settings', 14), t('sleep.configTitle', 'Parameters')), children: renderConfig() },
+                { key: 'energy', label: React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } }, Icon('cloud', 14), t('sleep.energyTitle', 'Features')), children: renderEnergy() }
             ];
 
             return React.createElement('div', { style: { height: '100%', display: 'flex', flexDirection: 'column' } },
                 // 标题栏 - 使用原生CSS类
                 React.createElement('div', { className: 'ht-page-header' },
                     React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-                        React.createElement('span', { style: { fontSize: '20px' } }, '🌙'),
+                        Icon('moon', 20),
                         React.createElement('div', null,
                             React.createElement('div', { className: 'ht-page-title' }, 'HumanThinking ' + t('sleep.title', 'Sleep Management')),
                             React.createElement('div', { className: 'ht-page-subtitle' }, t('sleep.title', 'Sleep Management'))
@@ -2443,7 +2500,7 @@
         }
 
         return React.createElement('div', { style: { padding: '16px' } },
-            React.createElement('h3', { style: { marginBottom: '16px' } }, t('htConfig.title', '🧠 HumanThinking Memory Config')),
+            React.createElement('h3', { style: { marginBottom: '16px' } }, Icon('brain', 16), ' ', t('htConfig.title', 'HumanThinking Memory Config')),
             React.createElement('div', { style: { marginBottom: '16px' } },
                 React.createElement('label', { style: { display: 'block', marginBottom: '8px' } }, t('htConfig.crossSession', 'Cross-Session Memory')),
                 React.createElement('input', {
@@ -2932,7 +2989,7 @@
 
         container.innerHTML = `
             <div style="padding: 16px;">
-                <h3 style="margin-bottom: 16px;">${t('htConfig.title', '🧠 HumanThinking Memory Config')}</h3>
+                <h3 style="margin-bottom: 16px;">${t('htConfig.title', 'HumanThinking Memory Config')}</h3>
                 <div id="ht-config-loading" style="text-align: center; padding: 40px;">
                     ${t('common.loading', 'Loading...')}
                 </div>
