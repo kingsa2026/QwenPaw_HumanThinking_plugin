@@ -70,7 +70,64 @@ async def _init_and_stop_agent(mgr, name: str) -> None:
 class HumanThinkingMemoryPlugin:
     """HumanThinking Memory Manager Plugin."""
 
+    @staticmethod
+    def _auto_sync():
+        """自动同步插件文件到 venv site-packages，确保代码始终最新"""
+        try:
+            plugin_dir = os.path.dirname(os.path.abspath(__file__))
+            qwenpaw_root = os.path.dirname(os.path.dirname(plugin_dir))
+            venv_dir = os.path.join(
+                qwenpaw_root, "venv", "lib", "python3.12", "site-packages",
+                "qwenpaw", "agents", "tools", "HumanThinking"
+            )
+            os.makedirs(venv_dir, exist_ok=True)
+
+            sentinel = os.path.join(plugin_dir, "plugin.py")
+            venv_sentinel = os.path.join(venv_dir, "plugin.py")
+
+            if os.path.exists(venv_sentinel):
+                src_mtime = os.path.getmtime(sentinel)
+                dst_mtime = os.path.getmtime(venv_sentinel)
+                if src_mtime <= dst_mtime:
+                    return
+
+            logger.info("Auto-syncing plugin files to venv...")
+            import shutil
+
+            skip = {'.git', '__pycache__', 'tests', '.trae'}
+            for src_root, dirs, files in os.walk(plugin_dir):
+                rel = os.path.relpath(src_root, plugin_dir)
+                if rel == '.':
+                    rel = ''
+                dst_root = os.path.join(venv_dir, rel) if rel else venv_dir
+                os.makedirs(dst_root, exist_ok=True)
+
+                dirs[:] = [d for d in dirs if d not in skip]
+
+                for fn in files:
+                    if fn.endswith(('.pyc', '.md')) or fn.startswith('tmp_'):
+                        continue
+                    src = os.path.join(src_root, fn)
+                    dst = os.path.join(dst_root, fn)
+                    if not os.path.exists(dst) or os.path.getmtime(src) > os.path.getmtime(dst):
+                        shutil.copy2(src, dst)
+
+            for root, dirs, files in os.walk(venv_dir):
+                for d in list(dirs):
+                    if d == '__pycache__':
+                        shutil.rmtree(os.path.join(root, d), ignore_errors=True)
+                        dirs.remove(d)
+                for f in files:
+                    if f.endswith('.pyc'):
+                        os.remove(os.path.join(root, f))
+
+            logger.info("Auto-sync complete")
+        except Exception as e:
+            logger.warning(f"Auto-sync skipped: {e}")
+
     def register(self, api: PluginApi):
+        self._auto_sync()
+
         logger.info("=" * 60)
         logger.info("Registering HumanThinking Memory Manager v1.0.0-beta0.1...")
         logger.info(f"Plugin module: {__name__}")
@@ -479,6 +536,27 @@ class HumanThinkingMemoryPlugin:
                             logger.warning(f"Failed to init DB for agent '{agent_name}': {e}")
                 except Exception as e:
                     logger.warning(f"Failed to create HumanThinkingMemoryManager instance: {e}")
+
+            try:
+                from qwenpaw.config.config import load_agent_config, save_agent_config
+                agent_ids = set()
+                agent_ids.add("default")
+                existing_workspaces = _resolve_all_agent_workspace_dirs()
+                for agent_ws in existing_workspaces:
+                    agent_ids.add(agent_ws.name)
+                for agent_id in agent_ids:
+                    try:
+                        cfg = load_agent_config(agent_id)
+                        ms = cfg.running.reme_light_memory_config.auto_memory_search_config
+                        if not ms.enabled:
+                            ms.enabled = True
+                            ms.max_results = 3
+                            save_agent_config(agent_id, cfg)
+                            logger.info(f"Enabled auto_memory_search for agent '{agent_id}'")
+                    except Exception as e:
+                        logger.warning(f"Cannot enable auto_memory_search for agent '{agent_id}': {e}")
+            except Exception as e:
+                logger.warning(f"Cannot load QwenPaw config module: {e}")
 
             sleep_config = _load_json_config(
                 _resolve_qwenpaw_dir() / "config" / "sleep_config.json",

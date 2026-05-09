@@ -7,13 +7,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from agentscope.message import Msg, TextBlock, ToolUseBlock, ToolResultBlock
 from qwenpaw.agents.memory.base_memory_manager import BaseMemoryManager, memory_registry
-from agentscope.message import Msg
 from agentscope.tool import ToolResponse
 from agentscope.memory import InMemoryMemory
 
@@ -651,7 +653,20 @@ class HumanThinkingMemoryManager(BaseMemoryManager):
         
         # 5. 初始化系统记忆（首次使用时写入）
         await self._init_system_memory()
-        
+
+        # 6. 启用自动记忆搜索（会在每次对话时触发 retrieve() 方法检索相关记忆）
+        try:
+            from qwenpaw.config.config import load_agent_config, save_agent_config
+            cfg = load_agent_config(self.agent_id)
+            ms = cfg.running.reme_light_memory_config.auto_memory_search_config
+            if not ms.enabled:
+                ms.enabled = True
+                ms.max_results = 3
+                save_agent_config(self.agent_id, cfg)
+                logger.info(f"Enabled auto_memory_search for agent '{self.agent_id}'")
+        except Exception as e:
+            logger.warning(f"Cannot enable auto_memory_search for agent '{self.agent_id}': {e}")
+
         logger.info("HumanThinkingMemoryManager v1.0.0 started successfully")
     
     async def _init_system_memory(self):
@@ -785,6 +800,10 @@ HumanThinking 是你的记忆管理系统，具有以下能力：
         except Exception as e:
             logger.warning(f"Failed to init agent config: {e}")
     
+    async def stop(self) -> bool:
+        """停止记忆管理器（QwenPaw 生命周期方法）"""
+        return await self.close()
+
     async def close(self) -> bool:
         """关闭记忆管理器"""
         logger.info("Closing HumanThinkingMemoryManager v1.0.0...")
@@ -1102,7 +1121,90 @@ After reading, please save key points to your memory database using `store_memor
             )
         
         return ToolResponse(content="\n---\n".join(result_parts))
-    
+
+    async def retrieve(
+        self,
+        messages: list[Msg] | Msg,
+        agent_name: str = "",
+        **_kwargs,
+    ) -> dict | None:
+        msgs: list[Msg] = (
+            [messages] if isinstance(messages, Msg) else list(messages)
+        )
+
+        query_parts: list[str] = []
+        total = 0
+        for msg in reversed(msgs):
+            remaining = 100 - total
+            if remaining <= 0:
+                break
+            text = (msg.get_text_content() or "").strip()
+            if not text:
+                continue
+            chunk = text[:remaining]
+            query_parts.insert(0, chunk)
+            total += len(chunk)
+
+        query = " ".join(query_parts).strip()
+        if not query:
+            return None
+
+        max_results = 3
+        min_score = 0.05
+
+        try:
+            result = await self.memory_search(
+                query=query,
+                max_results=max_results,
+                min_score=min_score,
+            )
+            text_content = result.content
+            if not text_content or text_content == "未找到相关记忆" or text_content == "Database not initialized":
+                return None
+
+            _id = uuid.uuid4().hex
+            tool_use_input = {
+                "query": query,
+                "max_results": max_results,
+                "min_score": min_score,
+            }
+
+            assistant_msg = Msg(
+                name=agent_name,
+                role="assistant",
+                content=[
+                    TextBlock(
+                        type="text",
+                        text="Searching memory for relevant context...",
+                    ),
+                    ToolUseBlock(
+                        type="tool_use",
+                        id=_id,
+                        name="memory_search",
+                        input=tool_use_input,
+                        raw_input=json.dumps(tool_use_input, ensure_ascii=False),
+                    ),
+                ],
+            )
+
+            tool_result_msg = Msg(
+                name=agent_name,
+                role="system",
+                content=[
+                    ToolResultBlock(
+                        type="tool_result",
+                        id=_id,
+                        name="memory_search",
+                        output=[TextBlock(type="text", text=text_content)],
+                    ),
+                ],
+            )
+
+            return {"msg": msgs + [assistant_msg, tool_result_msg]}
+        except Exception as e:
+            logger.warning(f"retrieve failed: {e}")
+            return None
+
     async def get_related_historical_memories(
         self,
         context: str,

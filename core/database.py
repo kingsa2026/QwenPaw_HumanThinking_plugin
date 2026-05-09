@@ -793,48 +793,101 @@ class HumanThinkingDB:
             return []
 
     def _search_fts(self, query: str, limit: int = 25) -> list:
+        fts_query = None
         try:
             fts_query = self._build_fts_query(query)
+            if not fts_query:
+                return []
             self.cursor.execute(
                 "SELECT memory_id FROM qwenpaw_memory_fts WHERE qwenpaw_memory_fts MATCH ? ORDER BY rank LIMIT ?",
                 (fts_query, limit),
             )
             return [row[0] for row in self.cursor.fetchall()]
-        except Exception:
+        except Exception as e:
+            logger.warning(f"FTS search failed for query '{query}' -> fts_query='{fts_query}': {e}")
             return []
+
+    @staticmethod
+    def _cjk_tokenize(text: str) -> str:
+        import re
+        result = []
+        for ch in text:
+            if re.match(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]', ch):
+                result.append(' ' + ch + ' ')
+            else:
+                result.append(ch)
+        tokenized = ''.join(result)
+        return re.sub(r'\s+', ' ', tokenized).strip()
 
     def _build_fts_query(self, query: str) -> str:
         import re
         terms = []
         for word in query.strip().split():
             word = re.sub(r'[^\w\u4e00-\u9fff]', '', word)
-            if len(word) >= 2:
-                terms.append(f'"{word}"*')
-            elif len(word) == 1:
-                terms.append(word)
+            if not word:
+                continue
+            has_cjk = bool(re.search(r'[\u4e00-\u9fff]', word))
+            if has_cjk:
+                for ch in word:
+                    if re.match(r'[\w\u4e00-\u9fff]', ch):
+                        terms.append(f'{ch}*')
+            else:
+                if len(word) >= 2:
+                    terms.append(f'"{word}"*')
+                elif len(word) == 1:
+                    terms.append(word)
         if not terms:
             return query.strip()
         return " OR ".join(terms)
 
     async def _ensure_fts5_ready(self) -> None:
         try:
+            self.cursor.execute("SELECT COUNT(*) FROM qwenpaw_memory WHERE deleted_at IS NULL")
+            main_count = self.cursor.fetchone()[0]
             self.cursor.execute("SELECT COUNT(*) FROM qwenpaw_memory_fts")
-            if self.cursor.fetchone()[0] == 0:
+            fts_count = self.cursor.fetchone()[0]
+
+            needs_rebuild = (fts_count == 0 or fts_count < main_count)
+
+            if not needs_rebuild and fts_count > 0:
+                self.cursor.execute(
+                    "SELECT content, indexed_content FROM qwenpaw_memory_fts LIMIT 1"
+                )
+                row = self.cursor.fetchone()
+                if row:
+                    raw_content = row[0] or ''
+                    indexed_content = row[1] or ''
+                    expected_cjk = self._cjk_tokenize(raw_content)
+                    if indexed_content != expected_cjk:
+                        logger.warning("FTS5 index uses old CJK format (no tokenization), rebuilding...")
+                        needs_rebuild = True
+
+            if needs_rebuild:
+                logger.warning(f"FTS5 index out of sync: main={main_count} fts={fts_count}, rebuilding...")
                 await self.rebuild_fts_index()
             else:
-                logger.debug("FTS5 index ready")
-        except Exception:
-            pass
+                logger.debug(f"FTS5 index ready: {fts_count} records")
+        except Exception as e:
+            logger.warning(f"FTS5 readiness check failed: {e}, attempting rebuild")
+            try:
+                await self.rebuild_fts_index()
+            except Exception as e2:
+                logger.warning(f"FTS5 rebuild failed: {e2}")
 
     async def rebuild_fts_index(self) -> int:
+        self.cursor.execute("SELECT id, content, agent_id, session_id FROM qwenpaw_memory WHERE deleted_at IS NULL")
+        rows = self.cursor.fetchall()
         self.cursor.execute("DELETE FROM qwenpaw_memory_fts")
-        self.cursor.execute(
-            "INSERT INTO qwenpaw_memory_fts(content, indexed_content, memory_id, agent_id, session_id) "
-            "SELECT content, COALESCE(indexed_content, content), id, agent_id, session_id "
-            "FROM qwenpaw_memory WHERE deleted_at IS NULL"
-        )
+        for row in rows:
+            raw_content = row[1] or ''
+            cjk_content = self._cjk_tokenize(raw_content)
+            self.cursor.execute(
+                "INSERT INTO qwenpaw_memory_fts(content, indexed_content, memory_id, agent_id, session_id) "
+                "VALUES(?,?,?,?,?)",
+                (raw_content, cjk_content, row[0], row[2], row[3])
+            )
         self.conn.commit()
-        count = self.cursor.rowcount
+        count = len(rows)
         logger.info(f"FTS5 index rebuilt: {count} records")
         return count
 
@@ -890,7 +943,7 @@ class HumanThinkingDB:
         
         self.cursor.execute(
             "INSERT INTO qwenpaw_memory_fts(content, indexed_content, memory_id, agent_id, session_id) VALUES(?,?,?,?,?)",
-            (content, content, memory_id, agent_id, session_id)
+            (content, self._cjk_tokenize(content), memory_id, agent_id, session_id)
         )
         self.conn.commit()
         

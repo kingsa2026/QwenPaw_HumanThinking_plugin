@@ -1319,8 +1319,28 @@ def patch_runtime_config_model() -> dict:
         if verify_field:
             field_args = get_args(verify_field.annotation) if hasattr(verify_field.annotation, '__args__') else ()
             if 'human_thinking' in field_args:
-                logger.info(f"?Runtime AgentsRunningConfig patched successfully")
+                logger.info(f"Runtime AgentsRunningConfig patched successfully")
                 logger.info(f"  New Literal values: {field_args}")
+
+                # 持久化: 写入config.py文件，确保重启后生效
+                try:
+                    config_file = qwenpaw.config.config.__file__
+                    with open(config_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    old_default = 'memory_manager_backend: str = Field(default="remelight")'
+                    new_default = 'memory_manager_backend: str = Field(default="human_thinking")'
+                    if old_default in content:
+                        content = content.replace(old_default, new_default)
+                        with open(config_file, 'w', encoding='utf-8') as f:
+                            f.write(content)
+                        logger.info(f"Persisted memory_manager_backend='human_thinking' to {config_file}")
+                    elif new_default in content:
+                        logger.info("config.py already has human_thinking default")
+                    else:
+                        logger.warning("Could not find memory_manager_backend line in config.py")
+                except Exception as e2:
+                    logger.warning(f"Failed to persist config.py: {e2}")
+
                 results["success"] = True
                 results["patched"] = True
             else:

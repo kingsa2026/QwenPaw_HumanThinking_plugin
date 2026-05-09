@@ -304,8 +304,14 @@ class SleepManager:
         current_time = time.time()
         
         if state.forced_state:
+            idle_time = max(0, current_time - state.last_active_time)
             result = state.to_dict()
-            result["idle_time"] = int(current_time - max(state.last_active_time, 0))
+            if state.actual_status == "active":
+                result["status"] = "active"
+                result["status_text"] = "活跃"
+                result["icon"] = "☀️"
+                result["color"] = "#52c41a"
+            result["idle_time"] = int(idle_time)
             if state.last_light_sleep_time:
                 result["light_sleep_elapsed"] = int(current_time - state.last_light_sleep_time)
             if state.last_rem_time:
@@ -313,7 +319,6 @@ class SleepManager:
             if state.last_deep_sleep_time:
                 result["deep_sleep_elapsed"] = int(current_time - state.last_deep_sleep_time)
             result["actual_status"] = state.actual_status
-            idle_time = max(0, current_time - state.last_active_time)
             if state.actual_status == "active":
                 result["next_sleep_in"] = max(0, config.light_sleep_seconds - idle_time)
             elif state.actual_status == "light_sleep":
@@ -628,7 +633,11 @@ class SleepManager:
         
         if not state.is_active:
             if state.forced_state:
-                return False
+                logger.info(f"Agent {agent_id} forced sleep cleared by new activity")
+                state.forced_state = None
+                state.last_active_time = current_time
+                self._reset_to_active(state)
+                return True
             if state.is_deep_sleep:
                 logger.info(f"Agent {agent_id} woke up from deep sleep by new message")
                 self._write_memory_md(agent_id, state)
@@ -643,121 +652,139 @@ class SleepManager:
         return False
     
     async def _execute_light_sleep(self, agent_id: str, state: AgentSleepState):
-        """阶段一：浅层睡眠
-        
-        扫描最近7天内的对话日志
-        去重、过滤废话、标记潜在重要信息
-        仅暂存，不写入长期记忆
-        """
+        """阶段一：浅层睡眠 - 扫描7天日志，去重过滤，标记潜在重要信息"""
         try:
             db = await self._get_or_create_db(agent_id)
-            
             config = self._get_agent_config(agent_id)
-            if config.enable_dream_log:
-                await db.add_dream_log(agent_id, "LIGHT_SLEEP", "阶段一：浅层睡眠 - 扫描7天日志，去重过滤")
-            
+
             memories = await db.get_recent_memories(agent_id, days=7)
-            
+
             if not memories:
+                if config.enable_dream_log:
+                    await db.add_dream_log(agent_id, "LIGHT_SLEEP",
+                        "浅层睡眠：近7天无新对话记录，跳过扫描",
+                        memories_scanned=0, memories_consolidated=0)
                 logger.info(f"No memories to process in light sleep for {agent_id}")
                 return
-            
-            # 去重和过滤
+
             filtered = self._filter_memories(memories)
-            
-            # 标记潜在重要信息
+
+            # 合并相似记忆（在重要性计算前执行，避免重复加工相似内容）
+            merged = 0
+            if config.enable_merge:
+                merged = await self._merge_similar_memories(db, agent_id, filtered)
+
             for mem in filtered:
                 importance = self._calculate_importance(mem)
                 mem["_calculated_importance"] = importance
                 mem["importance"] = importance
                 if importance >= 6:
                     state.pending_importance.append(mem)
-            
-            logger.info(f"Light sleep processed {len(memories)} memories, {len(state.pending_importance)} important")
-            
+
+            total = len(memories)
+            important = len(state.pending_importance)
+            kept = len(filtered)
+            after_merge = max(0, kept - merged)
+
+            dream_detail = (
+                f"扫描 {total} 条近期记忆，去重保留 {kept} 条"
+            )
+            if merged > 0:
+                dream_detail += f"，合并相似 {merged} 条，剩余 {after_merge} 条"
+            dream_detail += (
+                f"，标记 {important} 条高重要性记忆（评分>=6），进入REM深度加工"
+            )
+            if config.enable_dream_log:
+                await db.add_dream_log(agent_id, "LIGHT_SLEEP", dream_detail,
+                    memories_scanned=total, memories_consolidated=after_merge)
+
+            if merged > 0:
+                logger.info(f"Light sleep merged {merged} similar memories, kept {after_merge}")
+
+            logger.info(f"Light sleep processed {total} memories, {important} important")
+
         except Exception as e:
             logger.error(f"Error in light sleep: {e}", exc_info=True)
     
     async def _execute_rem(self, agent_id: str, state: AgentSleepState):
-        """阶段二：REM
-        
-        提取主题，发现跨对话模式
-        生成反思摘要，识别持久真理
-        """
+        """阶段二：REM - 提取主题，发现跨对话模式，生成反思摘要"""
         try:
             db = await self._get_or_create_db(agent_id)
-            
             config = self._get_agent_config(agent_id)
-            if config.enable_dream_log:
-                await db.add_dream_log(agent_id, "REM", "阶段二：REM - 提取主题，发现跨对话模式")
-            
-            # 提取主题
+
             themes = self._extract_themes(state.pending_importance)
-            
-            # 发现持久真理
             truths = self._discover_truths(state.pending_importance)
             state.lasting_truths = truths
-            
-            # 生成反思摘要
+
+            summary = self._generate_reflection_summary(themes, truths)
+            state.theme_summary = summary
+
+            theme_names = [t.get("name", "") for t in themes[:5] if t.get("name")]
+            dream_detail = (
+                f"分析 {len(state.pending_importance)} 条重要记忆，"
+                f"发现 {len(truths)} 条持久真理"
+            )
+            if theme_names:
+                dream_detail += f"，主题: {', '.join(theme_names)}"
+
+            if config.enable_dream_log:
+                await db.add_dream_log(agent_id, "REM", dream_detail,
+                    memories_scanned=len(state.pending_importance),
+                    memories_consolidated=len(truths))
+
             if config.enable_insight:
-                summary = self._generate_reflection_summary(themes, truths)
-                state.theme_summary = summary
-                
-                # 保存洞察到数据库
                 await db.add_insight(
-                    agent_id, 
-                    summary[:100], 
-                    summary, 
+                    agent_id,
+                    summary[:100],
+                    summary,
                     memory_count=len(state.pending_importance),
                     insight_type="reflection"
                 )
-            
+
             logger.info(f"REM processed {len(state.pending_importance)} important memories, found {len(truths)} truths")
-            
+
         except Exception as e:
             logger.error(f"Error in REM: {e}", exc_info=True)
     
     async def _execute_deep_sleep(self, agent_id: str, state: AgentSleepState):
-        """阶段三：深层睡眠
-        
-        六维加权评分
-        高分记忆写入MEMORY.md长期记忆
-        执行遗忘曲线算法
-        """
+        """阶段三：深层睡眠 - 六维评分，写入长期记忆，执行遗忘曲线"""
         try:
             db = await self._get_or_create_db(agent_id)
-            
             config = self._get_agent_config(agent_id)
-            if config.enable_dream_log:
-                await db.add_dream_log(agent_id, "DEEP_SLEEP", "阶段三：深层睡眠 - 六维评分，写入长期记忆")
-            
-            # 六维评分
+
             scored_memories = []
             for mem in state.lasting_truths:
                 score = self._six_dimensional_score(mem)
                 scored_memories.append({**mem, "score": score})
-            
-            # 按分数排序
+
             scored_memories.sort(key=lambda x: x["score"], reverse=True)
-            
-            # 写入长期记忆（前20%）
             top_memories = scored_memories[:max(1, len(scored_memories) // 5)]
-            
+
             for mem in top_memories:
                 mem_id = mem.get("id")
                 if mem_id:
                     await db.update_memory_score(mem_id, mem["score"])
                     await db.set_memory_tier(mem_id, "long_term")
-            
-            
+
             await self._apply_memory_temperature(db, agent_id, scored_memories)
-            
             await self._archive_and_freeze(db, agent_id)
-            
+
             if config.auto_consolidate:
                 await self._consolidate_memories(db, agent_id)
-            
-            logger.info(f"Deep sleep processed {len(scored_memories)} memories, wrote {len(top_memories)} to long-term")
+
+            ordered = len(scored_memories)
+            top = len(top_memories)
+            avg_score = sum(m["score"] for m in scored_memories) / ordered if ordered > 0 else 0
+            dream_detail = (
+                f"六维评分 {ordered} 条记忆，均分 {avg_score:.1f}，"
+                f"前20%（{top} 条）写入长期记忆"
+            )
+
+            if config.enable_dream_log:
+                await db.add_dream_log(agent_id, "DEEP_SLEEP", dream_detail,
+                    memories_scanned=ordered, memories_consolidated=top)
+
+            logger.info(f"Deep sleep processed {ordered} memories, wrote {top} to long-term")
             
             try:
                 self._write_memory_md(agent_id, state)
@@ -831,12 +858,22 @@ class SleepManager:
         """生成反思摘要"""
         if not truths:
             return "本期无重要发现"
-        
-        summary_parts = []
-        for truth in truths[:3]:
-            summary_parts.append(truth.get("content", ""))
-        
-        return "；".join(summary_parts)
+
+        parts = []
+        if themes:
+            unique_themes = list(dict.fromkeys(themes))[:5]
+            if unique_themes and any(t for t in unique_themes if t):
+                parts.append("发现主题:\n" + "\n".join(f"  - {t}" for t in unique_themes if t))
+
+        truth_contents = []
+        for truth in truths[:5]:
+            content = truth.get("content", truth.get("summary", str(truth))) if isinstance(truth, dict) else str(truth)
+            if content and content != "None":
+                truth_contents.append(content)
+        if truth_contents:
+            parts.append("持久真理:\n" + "\n".join(f"  - {c}" for c in truth_contents))
+
+        return "\n".join(parts) if parts else "本期无重要发现"
     
     def _six_dimensional_score(self, memory: Dict) -> float:
         """六维加权评分
@@ -1032,23 +1069,34 @@ class SleepManager:
     
     @staticmethod
     def _calculate_text_similarity(text1: str, text2: str) -> float:
-        """计算两个文本的简单相似度（基于字符重叠）"""
+        """计算文本相似度（基于字符重叠 + 长度比，CJK兼容）"""
         if not text1 or not text2:
             return 0.0
-        
+
+        import re
+
+        def bigrams(s):
+            return {s[i:i+2] for i in range(len(s) - 1)} if len(s) >= 2 else {s}
+
+        bg1 = bigrams(text1)
+        bg2 = bigrams(text2)
+        inter = len(bg1 & bg2)
+        union = len(bg1 | bg2)
+        bigram_sim = inter / union if union > 0 else 0.0
+
         set1 = set(text1)
         set2 = set(text2)
-        intersection = set1 & set2
-        union = set1 | set2
-        
-        if not union:
-            return 0.0
-        
-        jaccard = len(intersection) / len(union)
-        
+        char_inter = len(set1 & set2)
+        char_union = len(set1 | set2)
+        char_sim = char_inter / char_union if char_union > 0 else 0.0
+
         len_ratio = min(len(text1), len(text2)) / max(len(text1), len(text2))
-        
-        return jaccard * 0.4 + len_ratio * 0.6
+
+        has_cjk = bool(re.search(r'[\u4e00-\u9fff]', text1))
+        if has_cjk:
+            return bigram_sim * 0.6 + len_ratio * 0.4
+        else:
+            return char_sim * 0.5 + len_ratio * 0.5
 
     def _write_memory_md(self, agent_id: str, state: AgentSleepState):
         """写入MEMORY.md"""
@@ -1127,7 +1175,11 @@ def record_agent_activity(agent_id: str) -> bool:
     
     if not state.is_active:
         if state.forced_state:
-            return False
+            logger.info(f"Agent {agent_id} forced sleep cleared by new activity")
+            state.forced_state = None
+            state.last_active_time = current_time
+            _sleep_manager._reset_to_active(state)
+            return True
         if state.is_deep_sleep:
             logger.info(f"Agent {agent_id} woke up from deep sleep by new activity")
             _sleep_manager._write_memory_md(agent_id, state)
